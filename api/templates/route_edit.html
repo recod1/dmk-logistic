@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}Редактировать рейс {{ route.id }}{% endblock %}
+{% block content %}
+<h1>✏️ Редактировать рейс {{ route.id }}</h1>
+
+{% if message %}
+<div class="msg {% if success %}msg-success{% else %}msg-error{% endif %}">{{ message }}</div>
+{% endif %}
+
+<div class="card">
+    <form method="post" action="/admin/routes/{{ route.id }}/edit">
+        <div class="form-group">
+            <label>Номер ТС</label>
+            <input type="text" name="number_auto" value="{{ route.number_auto or '' }}" placeholder="А123ВС456">
+        </div>
+        <div class="form-group">
+            <label>Номер прицепа</label>
+            <input type="text" name="trailer_number" value="{{ route.trailer_number or '' }}" placeholder="А123ВС77">
+        </div>
+        <div class="form-group">
+            <label>Температура</label>
+            <input type="text" name="temperature" value="{{ route.temperature or '' }}" placeholder="+2…+6">
+        </div>
+        <div class="form-group">
+            <label>Контакты диспетчера</label>
+            <input type="text" name="dispatcher_contacts" value="{{ route.dispatcher_contacts or '' }}">
+        </div>
+        <div class="form-group">
+            <label>N регистрации</label>
+            <input type="text" name="registration_number" value="{{ route.registration_number or '' }}">
+        </div>
+
+        <h3>Точки</h3>
+        <p class="route-meta">Формат: тип|дата|место. Тип: loading или unloading. Дата: дд.мм.гггг</p>
+        <div class="form-group">
+            <label>Точки (каждая с новой строки)</label>
+            <textarea name="points_text" rows="8">{{ points_text }}</textarea>
+        </div>
+
+        <button type="submit" class="btn">Сохранить</button>
+    </form>
+</div>
+<p><a href="/admin/routes/{{ route.id }}">← К рейсу</a></p>
+{% endblock %}

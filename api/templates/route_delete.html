@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Удалить рейс {{ route.id }}{% endblock %}
+{% block content %}
+<h1>🗑️ Удалить рейс {{ route.id }}</h1>
+
+{% if message %}
+<div class="msg {% if success %}msg-success{% else %}msg-error{% endif %}">{{ message }}</div>
+{% endif %}
+
+{% if not deleted %}
+<div class="card">
+    <p>Вы уверены, что хотите удалить рейс <strong>{{ route.id }}</strong>?</p>
+    <p>Будут удалены все точки маршрута.</p>
+    <form method="post" action="/admin/routes/{{ route.id }}/delete" style="display: inline;">
+        <button type="submit" class="btn btn-danger">Да, удалить</button>
+    </form>
+    <a href="/admin/routes/{{ route.id }}" class="btn">Отмена</a>
+</div>
+{% else %}
+<p><a href="/admin/routes/search">← К поиску</a></p>
+{% endif %}
+{% endblock %}

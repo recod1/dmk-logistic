@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Админ — Рейсы{% endblock %}
+{% block content %}
+<h1>🚚 Административные функции рейсов</h1>
+
+<div class="card">
+    <h2>Действия</h2>
+    <ul class="route-list">
+        <li><a href="/admin/routes/search">🔍 Поиск</a> — по номеру рейса, водителю, ТС</li>
+        <li><a href="/admin/routes/filter">📋 Фильтр</a> — по статусу (new/process/success/cancelled)</li>
+        <li><a href="/admin/routes/completed">✅ Завершённые рейсы</a> — за день, месяц, период</li>
+    </ul>
+</div>
+
+<div class="card">
+    <h2>Операции с рейсом</h2>
+    <p>Для удаления, отмены, переназначения или редактирования — сначала найдите рейс через <a href="/admin/routes/search">Поиск</a>, затем на странице рейса будут доступны действия.</p>
+</div>
+{% endblock %}

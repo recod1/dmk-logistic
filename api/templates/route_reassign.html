@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}Переназначить рейс {{ route.id }}{% endblock %}
+{% block content %}
+<h1>👤 Переназначить рейс {{ route.id }}</h1>
+
+{% if message %}
+<div class="msg {% if success %}msg-success{% else %}msg-error{% endif %}">{{ message }}</div>
+{% endif %}
+
+<div class="card">
+    <form method="post" action="/admin/routes/{{ route.id }}/reassign">
+        <div class="form-group">
+            <label>Новый водитель *</label>
+            <select name="driver_tg_id" required>
+                <option value="">— Выберите водителя —</option>
+                {% for u in drivers %}
+                <option value="{{ u.tg_id }}" {% if u.tg_id == route.tg_id %}selected{% endif %}>{{ u.name }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Номер ТС</label>
+            <input type="text" name="number_auto" value="{{ route.number_auto or '' }}" placeholder="А123ВС456">
+        </div>
+        <div class="form-group">
+            <label>Номер прицепа</label>
+            <input type="text" name="trailer_number" value="{{ route.trailer_number or '' }}" placeholder="А123ВС77">
+        </div>
+        <button type="submit" class="btn">Переназначить</button>
+    </form>
+</div>
+<p><a href="/admin/routes/{{ route.id }}">← К рейсу</a></p>
+{% endblock %}

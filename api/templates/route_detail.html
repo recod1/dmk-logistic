@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Рейс {{ route.id }}{% endblock %}
+{% block content %}
+<h1>Рейс {{ route.id }}</h1>
+
+{% if message %}
+<div class="msg {% if success %}msg-success{% else %}msg-error{% endif %}">{{ message }}</div>
+{% endif %}
+
+<div class="card">
+    <table class="route-table">
+        <tr><th>N рейса</th><td><code>{{ route.id }}</code></td></tr>
+        <tr><th>Водитель</th><td>{{ detail.driver_name }}</td></tr>
+        <tr><th>ТС</th><td><code>{{ detail.number_auto or '—' }}</code></td></tr>
+        <tr><th>Прицеп</th><td>{{ detail.trailer_number or '—' }}</td></tr>
+        <tr><th>Статус</th><td>{{ detail.status_display }}</td></tr>
+        <tr><th>Температура</th><td>{{ detail.temperature or '—' }}</td></tr>
+        <tr><th>Контакты диспетчера</th><td>{{ detail.dispatcher_contacts or '—' }}</td></tr>
+        <tr><th>N регистрации</th><td>{{ detail.registration_number or '—' }}</td></tr>
+    </table>
+
+    <h3 style="margin-top: 1.5rem;">📍 Точки</h3>
+    {% if detail.points_data %}
+    {% for pt in detail.points_data %}
+    <div class="point-card">
+        <div class="point-header">
+            <span class="point-type">{{ pt.type_emoji }} {{ pt.type }}</span>
+            <span class="point-date">{{ pt.date }}</span>
+            <span class="point-status">{{ pt.status }}</span>
+        </div>
+        <div class="point-place">{{ pt.place }}</div>
+        <table class="point-status-table">
+            <thead>
+                <tr><th>Этап</th><th>Время</th><th>Одометр</th><th>Координаты</th></tr>
+            </thead>
+            <tbody>
+                {% for step in pt.status_steps %}
+                <tr class="{% if step.done %}step-done{% else %}step-pending{% endif %}">
+                    <td>{{ step.emoji }} {{ step.label }}</td>
+                    <td>{% if step.time %}<code>{{ step.time }}</code>{% else %}—{% endif %}</td>
+                    <td>{% if step.odometer %}<code>{{ step.odometer }}</code>{% else %}—{% endif %}</td>
+                    <td>{% if step.lat is not none and step.lng is not none %}{{ "%.6f"|format(step.lat) }}, {{ "%.6f"|format(step.lng) }}{% else %}—{% endif %}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% if (pt.point_lat is not none and pt.point_lng is not none) or pt.point_odometer_raw %}
+        {% set has_step_odometer = pt.status_steps|selectattr('odometer')|list %}
+        {% set has_step_coords = pt.status_steps|rejectattr('lat', 'none')|rejectattr('lng', 'none')|list %}
+        {% if not has_step_odometer and not has_step_coords %}
+        <div class="point-extra-data">
+            {% if pt.point_lat is not none and pt.point_lng is not none %}
+            <span><strong>Координаты:</strong> {{ "%.6f"|format(pt.point_lat) }}, {{ "%.6f"|format(pt.point_lng) }}</span>
+            {% endif %}
+            {% if pt.point_odometer_raw %}
+            <span><strong>Одометр:</strong> <code>{{ pt.point_odometer_raw }}</code></span>
+            {% endif %}
+        </div>
+        {% endif %}
+        {% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="route-meta">Точек нет</p>
+    {% endif %}
+
+    {% if route.status != "cancelled" and route.status != "success" %}
+    <hr style="margin: 1.5rem 0; border-color: var(--border);">
+    <h3>Действия</h3>
+    <p>
+        <a href="/admin/routes/{{ route.id }}/edit" class="btn">Редактировать</a>
+        <a href="/admin/routes/{{ route.id }}/reassign" class="btn">Переназначить</a>
+        <a href="/admin/routes/{{ route.id }}/cancel" class="btn btn-danger">Отменить</a>
+        <a href="/admin/routes/{{ route.id }}/delete" class="btn btn-danger">Удалить</a>
+    </p>
+    {% endif %}
+    {% if route.status == "cancelled" or route.status == "success" %}
+    <p><a href="/admin/routes/{{ route.id }}/delete" class="btn btn-danger">Удалить</a></p>
+    {% endif %}
+</div>
+
+<p><a href="/admin/routes/search">Назад к поиску</a></p>
+{% endblock %}

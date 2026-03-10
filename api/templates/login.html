@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход | DMK</title>
+    <style>
+        body { font-family: system-ui; background: #0f1419; color: #e6edf3; padding: 2rem; margin: 0; }
+        .card { max-width: 400px; margin: 2rem auto; background: #1a2332; border: 1px solid #30363d; border-radius: 8px; padding: 2rem; }
+        input { width: 100%; padding: 0.5rem; margin: 0.5rem 0; background: #0f1419; border: 1px solid #30363d; color: #e6edf3; border-radius: 6px; }
+        .btn { display: block; width: 100%; padding: 0.75rem; background: #58a6ff; color: #fff; border: none; border-radius: 6px; cursor: pointer; font-size: 1rem; }
+        .btn:hover { background: #79b8ff; }
+        .msg-error { background: rgba(248,81,73,0.2); padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>Вход в админ-панель</h1>
+        {% if error %}
+        <div class="msg-error">{{ error }}</div>
+        {% endif %}
+        <form method="post" action="/admin/login">
+            <div>
+                <label>Пароль</label>
+                <input type="password" name="password" required autofocus>
+            </div>
+            <button type="submit" class="btn">Войти</button>
+        </form>
+    </div>
+</body>
+</html>

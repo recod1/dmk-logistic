@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Фильтр рейсов{% endblock %}
+{% block content %}
+<h1>Фильтр рейсов</h1>
+
+<div class="card">
+    <h2>Выберите статус</h2>
+    <p>
+        <a href="/admin/routes/filter?status=new" class="btn">Не приняты</a>
+        <a href="/admin/routes/filter?status=process" class="btn">В процессе</a>
+        <a href="/admin/routes/filter?status=success" class="btn">Завершены</a>
+        <a href="/admin/routes/filter?status=cancelled" class="btn">Отменён</a>
+    </p>
+</div>
+
+{% if status and routes is defined %}
+<div class="card">
+    <h2>Рейсы ({{ status_text }}) — {{ routes|length }}</h2>
+    <form method="get" action="/admin/routes/filter" style="margin-bottom: 1rem;">
+        <input type="hidden" name="status" value="{{ status }}">
+        <div class="form-group" style="display: flex; gap: 0.5rem; align-items: flex-end;">
+            <div style="flex: 1;">
+                <label>По водителю (часть ФИО)</label>
+                <input type="text" name="driver" placeholder="Иванов" value="{{ req_ctx.driver or '' }}">
+            </div>
+            <div style="flex: 1;">
+                <label>По номеру рейса</label>
+                <input type="text" name="route_id" placeholder="00ДМ-000524" value="{{ req_ctx.route_id or '' }}">
+            </div>
+            <div style="flex: 1;">
+                <label>По ТС</label>
+                <input type="text" name="number_auto" placeholder="А123ВС456" value="{{ req_ctx.number_auto or '' }}">
+            </div>
+            <div>
+                <button type="submit" class="btn">Применить</button>
+            </div>
+        </div>
+    </form>
+    {% if routes %}
+    <div class="route-cards">
+        <div class="route-cards-header">
+            <span>N рейса</span><span>Водитель</span><span>ТС</span><span>Статус</span>
+        </div>
+        {% for r in routes %}
+        <a href="/admin/routes/{{ r.id }}" class="route-card">
+            <span class="route-id">{{ r.id }}</span>
+            <span>{{ driver_names.get(r.tg_id, 'Неизвестно') }}</span>
+            <span><code>{{ r.number_auto or '—' }}</code></span>
+            <span class="route-meta">{{ status_texts.get(r.status, r.status) }}</span>
+        </a>
+        {% endfor %}
+    </div>
+    {% else %}
+    <p>Рейсы не найдены.</p>
+    {% endif %}
+</div>
+{% endif %}
+{% endblock %}

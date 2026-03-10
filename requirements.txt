@@ -1,0 +1,10 @@
+aiogram==3.20.0
+python-dotenv==1.0.0
+fastapi
+uvicorn
+pydantic
+requests
+timezonefinder
+pytz
+jinja2
+python-multipart

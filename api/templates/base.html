@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Админ — Рейсы{% endblock %} | DMK</title>
+    <style>
+        :root {
+            --bg: #0f1419;
+            --bg-card: #1a2332;
+            --text: #e6edf3;
+            --text-muted: #8b949e;
+            --accent: #58a6ff;
+            --accent-hover: #79b8ff;
+            --danger: #f85149;
+            --success: #3fb950;
+            --border: #30363d;
+        }
+        * { box-sizing: border-box; }
+        body {
+            font-family: 'Segoe UI', system-ui, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            margin: 0;
+            padding: 1rem;
+            line-height: 1.5;
+        }
+        a { color: var(--accent); text-decoration: none; }
+        a:hover { color: var(--accent-hover); text-decoration: underline; }
+        .container { max-width: 900px; margin: 0 auto; }
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.25rem;
+            margin-bottom: 1rem;
+        }
+        h1, h2 { margin-top: 0; }
+        .nav { margin-bottom: 1.5rem; }
+        .nav a { margin-right: 1rem; }
+        .btn {
+            display: inline-block;
+            padding: 0.5rem 1rem;
+            background: var(--accent);
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.95rem;
+        }
+        .btn:hover { background: var(--accent-hover); text-decoration: none; }
+        .btn-danger { background: var(--danger); }
+        .btn-danger:hover { background: #ff6b6b; }
+        .form-group { margin-bottom: 1rem; }
+        .form-group label { display: block; margin-bottom: 0.25rem; color: var(--text-muted); }
+        input, select, textarea {
+            width: 100%;
+            padding: 0.5rem;
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text);
+            font-size: 1rem;
+        }
+        .msg { padding: 0.75rem; border-radius: 6px; margin-bottom: 1rem; }
+        .msg-success { background: rgba(63, 185, 80, 0.2); }
+        .msg-error { background: rgba(248, 81, 73, 0.2); }
+        .route-list { list-style: none; padding: 0; margin: 0; }
+        .route-list li {
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .route-list li:last-child { border-bottom: none; }
+        .route-list a { display: block; }
+        .route-meta { font-size: 0.9rem; color: var(--text-muted); }
+        pre { white-space: pre-wrap; overflow-x: auto; }
+        .route-table { width: 100%; border-collapse: collapse; }
+        .route-table th, .route-table td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+        .route-table th { width: 180px; color: var(--text-muted); font-weight: 500; }
+        .route-table code { background: rgba(0,0,0,0.2); padding: 0.15rem 0.4rem; border-radius: 4px; }
+        .route-cards { display: flex; flex-direction: column; gap: 0.5rem; }
+        .route-cards-header {
+            display: grid;
+            grid-template-columns: 120px 1fr 120px 100px;
+            gap: 1rem;
+            padding: 0.5rem 0.75rem;
+            color: var(--text-muted);
+            font-size: 0.85rem;
+            border-bottom: 1px solid var(--border);
+        }
+        .route-card {
+            display: grid;
+            grid-template-columns: 120px 1fr 120px 100px;
+            gap: 1rem;
+            align-items: center;
+            padding: 0.75rem;
+            background: rgba(0,0,0,0.15);
+            border-radius: 6px;
+            border: 1px solid var(--border);
+            text-decoration: none;
+            color: inherit;
+        }
+        .route-card:hover { border-color: var(--accent); background: rgba(88,166,255,0.08); }
+        .route-card .route-id { font-weight: 600; }
+        @media (max-width: 600px) {
+            .route-cards-header, .route-card {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+        .point-card {
+            padding: 0.75rem;
+            margin-bottom: 0.5rem;
+            background: rgba(0,0,0,0.15);
+            border-radius: 6px;
+            border-left: 3px solid var(--accent);
+        }
+        .point-header { display: flex; gap: 1rem; margin-bottom: 0.25rem; }
+        .point-type { font-weight: 500; }
+        .point-date { color: var(--text-muted); }
+        .point-status { color: var(--accent); }
+        .point-place { margin-bottom: 0.5rem; }
+        .point-status-table { width: 100%; font-size: 0.9rem; margin-top: 0.5rem; }
+        .point-status-table th, .point-status-table td { padding: 0.35rem 0.5rem; text-align: left; border-bottom: 1px solid var(--border); }
+        .point-status-table th { color: var(--text-muted); font-weight: 500; width: 180px; }
+        .point-status-table .step-done { color: var(--text); }
+        .point-status-table .step-pending { color: var(--text-muted); opacity: 0.8; }
+        .point-extra-data { margin-top: 0.5rem; padding: 0.5rem; background: rgba(0,0,0,0.2); border-radius: 4px; font-size: 0.9rem; }
+        .point-extra-data span { margin-right: 1rem; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <nav class="nav">
+            <a href="/admin/routes">🚚 Рейсы</a>
+            <a href="/admin/routes/search">🔍 Поиск</a>
+            <a href="/admin/routes/filter">📋 Фильтр</a>
+            <a href="/admin/routes/completed">✅ Завершённые</a>
+        </nav>
+        {% block content %}{% endblock %}
+    </div>
+</body>
+</html>
