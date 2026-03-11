@@ -8,9 +8,9 @@
    - `latest` (для default branch),
    - `sha-<short_commit_sha>`,
    - `<release-tag>` при push тега (например `4.1` или `v4.1` → `4.1`).
-3. Деплоит на тест:
-   - **предпочтительно** через Portainer API (stack update),
-   - **fallback** через SSH и `docker compose -p dmkbot -f ... up -d`.
+3. Деплоит на тест **только через Portainer API**:
+   - через скрипт `deploy/portainer-deploy.sh`,
+   - с обновлением stack env и compose из `deploy/docker-compose.test.yml`.
 
 ## Compose для деплоя
 
@@ -23,7 +23,7 @@
 
 Добавляются в Settings → Secrets and variables → Actions → **Secrets**.
 
-### Основные (Docker Hub + Portainer)
+### Основные (Docker Hub + Portainer + runtime secrets)
 
 | Имя | Назначение | Пример-заглушка |
 |---|---|---|
@@ -31,15 +31,9 @@
 | `DOCKERHUB_TOKEN` | Docker Hub Access Token | `dckr_pat_xxxxxxxxxxxxxxxxx` |
 | `PORTAINER_URL` | URL Portainer (без `/api` на конце) | `https://portainer.example.com` |
 | `PORTAINER_API_TOKEN` | API Token Portainer для stack update | `ptr_xxxxxxxxxxxxxxxxx` |
-
-### Опционально для SSH fallback
-
-| Имя | Назначение | Пример-заглушка |
-|---|---|---|
-| `TEST_SERVER_HOST` | SSH хост тестового сервера | `203.0.113.10` |
-| `TEST_SERVER_PORT` | SSH порт | `22` |
-| `TEST_SERVER_USER` | SSH пользователь | `deploy` |
-| `TEST_SERVER_SSH_KEY` | Приватный SSH-ключ | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
+| `TG_TOKEN` | Токен Telegram-бота | `123456:AA...` |
+| `API_KEY` | Ключ API приложения | `xxxxxxxxxxxxxxxx` |
+| `WIALON_TOKEN` | Токен Wialon | `xxxxxxxxxxxxxxxx` |
 
 ## GitHub Variables
 
@@ -49,21 +43,19 @@
 |---|---|---|
 | `IMAGE_NAME` | Имя Docker image | `recod0/dmkbot` |
 | `TAG` | Дефолтный deploy tag (не для релизных tag push) | `latest` |
-| `DEPLOY_PATH` | Путь на сервере для fallback compose-деплоя | `/opt/dmkbot` |
 | `PORTAINER_STACK_ID` | ID stack в Portainer | `17` |
 | `PORTAINER_ENDPOINT_ID` | Endpoint ID в Portainer (если не определяется автоматически) | `1` |
+| `WIALON_BASE_URL` | Базовый URL Wialon (опционально) | `http://w1.wialon.justgps.ru` |
+| `DB_PATH` | Путь до sqlite внутри контейнера (опционально) | `/olymp/db/olymp.db` |
+| `API_PORT` | Внешний порт API (опционально) | `8000` |
 
 ## Runtime-переменные приложения
 
-Для Portainer-деплоя переменные окружения должны быть заданы в самом stack (Portainer env):
-- `TG_TOKEN`
-- `API_KEY`
-- `WIALON_TOKEN`
-- `WIALON_BASE_URL` (опционально)
-- `DB_PATH` (опционально, default `/olymp/db/olymp.db`)
-- `API_PORT` (опционально, default `8000`)
-
-Для SSH fallback эти переменные обычно лежат в `/opt/dmkbot/.env` (или в `DEPLOY_PATH/.env`).
+Workflow прокидывает переменные в шаг деплоя через `env`, а скрипт
+`deploy/portainer-deploy.sh`:
+- валидирует обязательные значения в bash (без `if` на GitHub expressions),
+- делает upsert env в Portainer stack: `IMAGE_NAME`, `TAG`, `TG_TOKEN`, `API_KEY`, `WIALON_TOKEN`,
+- опционально обновляет `WIALON_BASE_URL`, `DB_PATH`, `API_PORT`.
 
 ## Важно по безопасности
 
