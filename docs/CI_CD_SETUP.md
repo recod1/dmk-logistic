@@ -1,71 +1,77 @@
-# CI/CD setup (GitHub Actions + Docker Hub + Portainer)
+# CI/CD setup (GitHub Actions + Docker Hub + Portainer script)
 
-## Что делает workflow
+## Что реализовано
 
-Файл `.github/workflows/ci-cd-test.yml`:
-1. Собирает Docker image из `Dockerfile`.
-2. Пушит image в Docker Hub `recod0/dmkbot` с тегами:
+- Workflow: `.github/workflows/ci-cd-test.yml`
+- Скрипт деплоя: `deploy/portainer-deploy.sh`
+- Compose stack: `deploy/docker-compose.test.yml`
+
+Pipeline:
+1. Собирает и пушит image в Docker Hub (`recod0/dmkbot`).
+2. Теги image:
    - `latest` (для default branch),
    - `sha-<short_commit_sha>`,
-   - `<release-tag>` при push тега (например `4.1` или `v4.1` → `4.1`).
-3. Деплоит на тест:
-   - **предпочтительно** через Portainer API (stack update),
-   - **fallback** через SSH и `docker compose -p dmkbot -f ... up -d`.
+   - `<release-tag>` при push git-тега (например `v4.1` -> `4.1`).
+3. Вызывает `deploy/portainer-deploy.sh`, который обновляет Portainer stack (по умолчанию `stack id = 17`).
 
-## Compose для деплоя
+## Compose для stack
 
-Используется `deploy/docker-compose.test.yml`:
-- image: `${IMAGE_NAME:-recod0/dmkbot}:${TAG:-4.1}`,
-- volume для sqlite: `/var/opt/dmkbot/db:/olymp/db` (сохранение базы),
-- переменные приложения через `${TG_TOKEN}`, `${API_KEY}`, `${WIALON_TOKEN}` и т.д.
+`deploy/docker-compose.test.yml` хранит только шаблонные переменные:
+- `image: ${IMAGE_NAME:-recod0/dmkbot}:${TAG:-4.1}`
+- `TG_TOKEN`, `API_KEY`, `WIALON_TOKEN` (и опциональные `WIALON_BASE_URL`, `DB_PATH`, `API_PORT`)
+- volume для sqlite: `/var/opt/dmkbot/db:/olymp/db`
 
-## GitHub Secrets
+Никакие реальные значения в репозиторий не коммитятся.
 
-Добавляются в Settings → Secrets and variables → Actions → **Secrets**.
+## GitHub Secrets (обязательно)
 
-### Основные (Docker Hub + Portainer)
+Settings → Secrets and variables → Actions → **Secrets**
 
 | Имя | Назначение | Пример-заглушка |
 |---|---|---|
 | `DOCKERHUB_USERNAME` | Логин Docker Hub | `recod0` |
-| `DOCKERHUB_TOKEN` | Docker Hub Access Token | `dckr_pat_xxxxxxxxxxxxxxxxx` |
-| `PORTAINER_URL` | URL Portainer (без `/api` на конце) | `https://portainer.example.com` |
-| `PORTAINER_API_TOKEN` | API Token Portainer для stack update | `ptr_xxxxxxxxxxxxxxxxx` |
+| `DOCKERHUB_TOKEN` | Docker Hub access token | `dckr_pat_xxxxxxxxxxxxxxxxx` |
+| `PORTAINER_URL` | URL Portainer (без `/api` в конце) | `https://portainer.example.com` |
+| `PORTAINER_API_TOKEN` | API token Portainer | `ptr_xxxxxxxxxxxxxxxxx` |
+| `TG_TOKEN` | Telegram bot token (для stack env) | `123456:AA...` |
+| `API_KEY` | API key приложения (для stack env) | `xxxxxxxxxxxxxxxx` |
+| `WIALON_TOKEN` | Wialon token (для stack env) | `xxxxxxxxxxxxxxxx` |
 
-### Опционально для SSH fallback
+### Дополнительно (по необходимости, тоже в Secrets)
 
 | Имя | Назначение | Пример-заглушка |
 |---|---|---|
-| `TEST_SERVER_HOST` | SSH хост тестового сервера | `203.0.113.10` |
-| `TEST_SERVER_PORT` | SSH порт | `22` |
-| `TEST_SERVER_USER` | SSH пользователь | `deploy` |
-| `TEST_SERVER_SSH_KEY` | Приватный SSH-ключ | `-----BEGIN OPENSSH PRIVATE KEY-----...` |
+| `WIALON_BASE_URL` | Базовый URL Wialon | `http://w1.wialon.justgps.ru` |
+| `DB_PATH` | Путь к sqlite в контейнере | `/olymp/db/olymp.db` |
+| `API_PORT` | Порт API внутри stack env | `8000` |
 
 ## GitHub Variables
 
-Добавляются в Settings → Secrets and variables → Actions → **Variables**.
+Settings → Secrets and variables → Actions → **Variables**
 
 | Имя | Назначение | Пример-заглушка |
 |---|---|---|
 | `IMAGE_NAME` | Имя Docker image | `recod0/dmkbot` |
-| `TAG` | Дефолтный deploy tag (не для релизных tag push) | `latest` |
-| `DEPLOY_PATH` | Путь на сервере для fallback compose-деплоя | `/opt/dmkbot` |
+| `TAG` | Дефолтный тег деплоя (для non-tag запусков) | `latest` |
 | `PORTAINER_STACK_ID` | ID stack в Portainer | `17` |
-| `PORTAINER_ENDPOINT_ID` | Endpoint ID в Portainer (если не определяется автоматически) | `1` |
+| `PORTAINER_ENDPOINT_ID` | Endpoint ID (если не автоопределится) | `1` |
+| `DEPLOY_PATH` | Опциональная переменная для stack env | `/opt/dmkbot` |
 
-## Runtime-переменные приложения
+## Как работает `deploy/portainer-deploy.sh`
 
-Для Portainer-деплоя переменные окружения должны быть заданы в самом stack (Portainer env):
-- `TG_TOKEN`
-- `API_KEY`
-- `WIALON_TOKEN`
-- `WIALON_BASE_URL` (опционально)
-- `DB_PATH` (опционально, default `/olymp/db/olymp.db`)
-- `API_PORT` (опционально, default `8000`)
+Скрипт:
+1. Читает env:  
+   `PORTAINER_URL`, `PORTAINER_API_TOKEN`, `PORTAINER_STACK_ID`, `PORTAINER_ENDPOINT_ID(optional)`, `IMAGE_NAME`, `TAG`, `DEPLOY_PATH(optional)`, `TG_TOKEN`, `API_KEY`, `WIALON_TOKEN`.
+2. Запрашивает текущий stack (`/api/stacks/{id}`), определяет endpoint.
+3. Берёт compose из `deploy/docker-compose.test.yml`.
+4. Обновляет stack через `PUT /api/stacks/{id}?endpointId=...` с `stackFileContent` и `env`.
+5. Для совместимости с версиями Portainer пробует оба варианта ключей в JSON payload:
+   - `stackFileContent/env/prune/pullImage`
+   - `StackFileContent/Env/Prune/PullImage`
 
-Для SSH fallback эти переменные обычно лежат в `/opt/dmkbot/.env` (или в `DEPLOY_PATH/.env`).
+Если ваша версия Portainer ожидает другой формат (например multipart), нужно адаптировать скрипт под конкретный API release.
 
 ## Важно по безопасности
 
-Не храните реальные токены в репозитории, workflow-файлах и документации. Используйте только GitHub Secrets / Portainer env.  
-Если секреты когда-либо публиковались в чате или логах, их нужно немедленно ротировать (пересоздать).
+Не храните реальные токены в репозитории и документации. Используйте только GitHub Secrets.  
+Если токены когда-либо были опубликованы в чатах, логах или скриншотах — их нужно немедленно ротировать.
