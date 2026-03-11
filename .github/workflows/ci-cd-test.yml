@@ -36,7 +36,7 @@ jobs:
         run: |
           set -euo pipefail
           IMAGE_NAME="${{ vars.IMAGE_NAME }}"
-          if [ -z "$IMAGE_NAME" ]; then
+          if [ -z "${IMAGE_NAME// }" ]; then
             IMAGE_NAME="${{ env.DEFAULT_IMAGE_NAME }}"
           fi
 
@@ -45,9 +45,14 @@ jobs:
             DEPLOY_TAG="${DEPLOY_TAG#v}"
           else
             DEPLOY_TAG="${{ vars.TAG }}"
-            if [ -z "$DEPLOY_TAG" ]; then
+            if [ -z "${DEPLOY_TAG// }" ]; then
               DEPLOY_TAG="${{ env.DEFAULT_DEPLOY_TAG }}"
             fi
+          fi
+
+          if [ -z "${IMAGE_NAME// }" ] || [ -z "${DEPLOY_TAG// }" ]; then
+            echo "Resolved IMAGE_NAME or DEPLOY_TAG is empty" >&2
+            exit 1
           fi
 
           echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
@@ -102,11 +107,8 @@ jobs:
           WIALON_TOKEN: ${{ secrets.WIALON_TOKEN }}
           PORTAINER_STACK_ID: ${{ vars.PORTAINER_STACK_ID }}
           PORTAINER_ENDPOINT_ID: ${{ vars.PORTAINER_ENDPOINT_ID }}
-          IMAGE_NAME: ${{ needs.build_and_push.outputs.image_name }}
-          TAG: ${{ needs.build_and_push.outputs.deploy_tag }}
-          WIALON_BASE_URL: ${{ vars.WIALON_BASE_URL }}
-          DB_PATH: ${{ vars.DB_PATH }}
-          API_PORT: ${{ vars.API_PORT }}
+          IMAGE_NAME: ${{ needs.build_and_push.outputs.image_name || env.DEFAULT_IMAGE_NAME }}
+          TAG: ${{ needs.build_and_push.outputs.deploy_tag || env.DEFAULT_DEPLOY_TAG }}
           COMPOSE_FILE_PATH: deploy/docker-compose.test.yml
         run: |
           set -euo pipefail
