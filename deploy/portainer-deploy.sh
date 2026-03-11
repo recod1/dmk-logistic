@@ -23,11 +23,15 @@ require_command jq
 require_env PORTAINER_URL
 require_env PORTAINER_API_TOKEN
 require_env PORTAINER_STACK_ID
-require_env IMAGE_NAME
-require_env TAG
 require_env TG_TOKEN
 require_env API_KEY
 require_env WIALON_TOKEN
+
+IMAGE_NAME="${IMAGE_NAME:-recod0/dmkbot}"
+TAG="${TAG:-latest}"
+
+require_env IMAGE_NAME
+require_env TAG
 
 PORTAINER_URL="${PORTAINER_URL%/}"
 TOKEN="$PORTAINER_API_TOKEN"
@@ -65,10 +69,7 @@ UPDATED_ENV="$(echo "$CURRENT_ENV" | jq \
   --arg tag "$TAG" \
   --arg tg_token "$TG_TOKEN" \
   --arg api_key "$API_KEY" \
-  --arg wialon_token "$WIALON_TOKEN" \
-  --arg wialon_base_url "${WIALON_BASE_URL:-}" \
-  --arg db_path "${DB_PATH:-}" \
-  --arg api_port "${API_PORT:-}" '
+  --arg wialon_token "$WIALON_TOKEN" '
   def upsert($k; $v):
     if ($v | length) == 0 then
       .
@@ -83,9 +84,6 @@ UPDATED_ENV="$(echo "$CURRENT_ENV" | jq \
   | upsert("TG_TOKEN"; $tg_token)
   | upsert("API_KEY"; $api_key)
   | upsert("WIALON_TOKEN"; $wialon_token)
-  | upsert("WIALON_BASE_URL"; $wialon_base_url)
-  | upsert("DB_PATH"; $db_path)
-  | upsert("API_PORT"; $api_port)
 ')"
 
 PAYLOAD="$(jq -n \

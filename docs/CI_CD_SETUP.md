@@ -15,9 +15,10 @@
 ## Compose для деплоя
 
 Используется `deploy/docker-compose.test.yml`:
-- image: `${IMAGE_NAME:-recod0/dmkbot}:${TAG:-4.1}`,
+- image: `${IMAGE_NAME:-recod0/dmkbot}:${TAG:-latest}`,
+- фиксированный порт: `8010:8000`,
 - volume для sqlite: `/var/opt/dmkbot/db:/olymp/db` (сохранение базы),
-- переменные приложения через `${TG_TOKEN}`, `${API_KEY}`, `${WIALON_TOKEN}` и т.д.
+- переменные приложения: `${TG_TOKEN}`, `${API_KEY}`, `${WIALON_TOKEN}`.
 
 ## GitHub Secrets
 
@@ -45,17 +46,25 @@
 | `TAG` | Дефолтный deploy tag (не для релизных tag push) | `latest` |
 | `PORTAINER_STACK_ID` | ID stack в Portainer | `17` |
 | `PORTAINER_ENDPOINT_ID` | Endpoint ID в Portainer (если не определяется автоматически) | `1` |
-| `WIALON_BASE_URL` | Базовый URL Wialon (опционально) | `http://w1.wialon.justgps.ru` |
-| `DB_PATH` | Путь до sqlite внутри контейнера (опционально) | `/olymp/db/olymp.db` |
-| `API_PORT` | Внешний порт API (опционально) | `8000` |
 
 ## Runtime-переменные приложения
 
 Workflow прокидывает переменные в шаг деплоя через `env`, а скрипт
 `deploy/portainer-deploy.sh`:
 - валидирует обязательные значения в bash (без `if` на GitHub expressions),
-- делает upsert env в Portainer stack: `IMAGE_NAME`, `TAG`, `TG_TOKEN`, `API_KEY`, `WIALON_TOKEN`,
-- опционально обновляет `WIALON_BASE_URL`, `DB_PATH`, `API_PORT`.
+- делает upsert env в Portainer stack: `IMAGE_NAME`, `TAG`, `TG_TOKEN`, `API_KEY`, `WIALON_TOKEN`.
+
+## Защита от пустого IMAGE_NAME/TAG
+
+Workflow использует двойной fallback:
+1. В build job шаг `Resolve image and deploy tag`:
+   - `vars.IMAGE_NAME` → `DEFAULT_IMAGE_NAME=recod0/dmkbot`,
+   - `vars.TAG` → `DEFAULT_DEPLOY_TAG=latest` (для non-tag push).
+2. В deploy job:
+   - `needs.build_and_push.outputs.image_name || env.DEFAULT_IMAGE_NAME`,
+   - `needs.build_and_push.outputs.deploy_tag || env.DEFAULT_DEPLOY_TAG`.
+
+Таким образом, деплой не падает даже если GitHub Variables не заполнены.
 
 ## Важно по безопасности
 
