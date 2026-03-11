@@ -1,4 +1,4 @@
-name: Build and deploy dmkbot (test)
+name: Build and deploy dmkbot (Portainer)
 
 on:
   push:
@@ -84,7 +84,7 @@ jobs:
           cache-to: type=gha,mode=max
 
   deploy_test:
-    name: Deploy to test (Portainer preferred)
+    name: Deploy to test via Portainer
     runs-on: ubuntu-latest
     needs: build_and_push
     environment: test
@@ -114,120 +114,21 @@ jobs:
           echo "stack_id=$STACK_ID" >> "$GITHUB_OUTPUT"
           echo "endpoint_id=$ENDPOINT_ID" >> "$GITHUB_OUTPUT"
 
-      - name: Deploy stack via Portainer API
-        if: ${{ secrets.PORTAINER_URL != '' && secrets.PORTAINER_API_TOKEN != '' }}
+      - name: Run Portainer deploy script
         shell: bash
+        env:
+          PORTAINER_URL: ${{ secrets.PORTAINER_URL }}
+          PORTAINER_API_TOKEN: ${{ secrets.PORTAINER_API_TOKEN }}
+          PORTAINER_STACK_ID: ${{ steps.deploy_vars.outputs.stack_id }}
+          PORTAINER_ENDPOINT_ID: ${{ steps.deploy_vars.outputs.endpoint_id }}
+          IMAGE_NAME: ${{ needs.build_and_push.outputs.image_name }}
+          TAG: ${{ needs.build_and_push.outputs.deploy_tag }}
+          DEPLOY_PATH: ${{ steps.deploy_vars.outputs.deploy_path }}
+          TG_TOKEN: ${{ secrets.TG_TOKEN }}
+          API_KEY: ${{ secrets.API_KEY }}
+          WIALON_TOKEN: ${{ secrets.WIALON_TOKEN }}
+          WIALON_BASE_URL: ${{ secrets.WIALON_BASE_URL }}
+          DB_PATH: ${{ secrets.DB_PATH }}
+          API_PORT: ${{ secrets.API_PORT }}
         run: |
-          set -euo pipefail
-          PORTAINER_URL="${{ secrets.PORTAINER_URL }}"
-          PORTAINER_URL="${PORTAINER_URL%/}"
-          TOKEN="${{ secrets.PORTAINER_API_TOKEN }}"
-          STACK_ID="${{ steps.deploy_vars.outputs.stack_id }}"
-          ENDPOINT_ID="${{ steps.deploy_vars.outputs.endpoint_id }}"
-          IMAGE_NAME="${{ needs.build_and_push.outputs.image_name }}"
-          DEPLOY_TAG="${{ needs.build_and_push.outputs.deploy_tag }}"
-
-          STACK_JSON=$(curl -fsS -H "X-API-Key: ${TOKEN}" "${PORTAINER_URL}/api/stacks/${STACK_ID}")
-          STACK_NAME=$(echo "$STACK_JSON" | jq -r '.Name')
-
-          if [ -z "$ENDPOINT_ID" ]; then
-            ENDPOINT_ID=$(echo "$STACK_JSON" | jq -r '.EndpointId // empty')
-          fi
-
-          if [ -z "$ENDPOINT_ID" ]; then
-            echo "PORTAINER_ENDPOINT_ID is empty and EndpointId was not found in stack details."
-            exit 1
-          fi
-
-          CURRENT_ENV=$(echo "$STACK_JSON" | jq '.Env // []')
-          UPDATED_ENV=$(echo "$CURRENT_ENV" | jq --arg image "$IMAGE_NAME" --arg tag "$DEPLOY_TAG" '
-            def upsert($k; $v):
-              if any(.[]?; .name == $k) then
-                map(if .name == $k then .value = $v else . end)
-              else
-                . + [{"name": $k, "value": $v}]
-              end;
-            (. // [])
-            | upsert("IMAGE_NAME"; $image)
-            | upsert("TAG"; $tag)
-          ')
-
-          PAYLOAD=$(jq -n \
-            --arg name "$STACK_NAME" \
-            --argjson env "$UPDATED_ENV" \
-            --rawfile compose deploy/docker-compose.test.yml \
-            '{Name: $name, StackFileContent: $compose, Env: $env, Prune: true, PullImage: true}')
-
-          curl -fsS -X PUT "${PORTAINER_URL}/api/stacks/${STACK_ID}?endpointId=${ENDPOINT_ID}" \
-            -H "X-API-Key: ${TOKEN}" \
-            -H "Content-Type: application/json" \
-            --data "$PAYLOAD"
-
-          echo "Portainer stack ${STACK_ID} updated with ${IMAGE_NAME}:${DEPLOY_TAG}"
-
-      - name: Ensure deploy directory exists (SSH fallback)
-        if: ${{ !(secrets.PORTAINER_URL != '' && secrets.PORTAINER_API_TOKEN != '') }}
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.TEST_SERVER_HOST }}
-          username: ${{ secrets.TEST_SERVER_USER }}
-          key: ${{ secrets.TEST_SERVER_SSH_KEY }}
-          port: ${{ secrets.TEST_SERVER_PORT }}
-          script_stop: true
-          script: |
-            set -e
-            DEPLOY_PATH="${{ steps.deploy_vars.outputs.deploy_path }}"
-            if [ -z "$DEPLOY_PATH" ]; then
-              echo "GitHub Variable DEPLOY_PATH is not set"
-              exit 1
-            fi
-            mkdir -p "$DEPLOY_PATH"
-
-      - name: Upload docker-compose file (SSH fallback)
-        if: ${{ !(secrets.PORTAINER_URL != '' && secrets.PORTAINER_API_TOKEN != '') }}
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.TEST_SERVER_HOST }}
-          username: ${{ secrets.TEST_SERVER_USER }}
-          key: ${{ secrets.TEST_SERVER_SSH_KEY }}
-          port: ${{ secrets.TEST_SERVER_PORT }}
-          source: deploy/docker-compose.test.yml
-          target: ${{ steps.deploy_vars.outputs.deploy_path }}
-          strip_components: 1
-
-      - name: Pull and restart container (SSH fallback)
-        if: ${{ !(secrets.PORTAINER_URL != '' && secrets.PORTAINER_API_TOKEN != '') }}
-        uses: appleboy/ssh-action@v1.2.0
-        with:
-          host: ${{ secrets.TEST_SERVER_HOST }}
-          username: ${{ secrets.TEST_SERVER_USER }}
-          key: ${{ secrets.TEST_SERVER_SSH_KEY }}
-          port: ${{ secrets.TEST_SERVER_PORT }}
-          script_stop: true
-          script: |
-            set -e
-            DEPLOY_PATH="${{ steps.deploy_vars.outputs.deploy_path }}"
-            IMAGE_NAME="${{ needs.build_and_push.outputs.image_name }}"
-            DEPLOY_TAG="${{ needs.build_and_push.outputs.deploy_tag }}"
-
-            if [ -z "$DEPLOY_PATH" ]; then
-              echo "GitHub Variable DEPLOY_PATH is not set"
-              exit 1
-            fi
-
-            cd "$DEPLOY_PATH"
-            mv -f docker-compose.test.yml docker-compose.yml
-
-            if [ ! -f .env ]; then
-              echo ".env file not found in $DEPLOY_PATH"
-              echo "Create .env with TG_TOKEN/API_KEY/WIALON_* values before deploy"
-              exit 1
-            fi
-
-            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
-            export IMAGE_NAME="$IMAGE_NAME"
-            export TAG="$DEPLOY_TAG"
-
-            docker compose -p dmkbot -f "$DEPLOY_PATH/docker-compose.yml" pull
-            docker compose -p dmkbot -f "$DEPLOY_PATH/docker-compose.yml" up -d --remove-orphans
-            docker image prune -f
+          bash deploy/portainer-deploy.sh
