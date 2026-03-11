@@ -1,0 +1,233 @@
+name: Build and deploy dmkbot (test)
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+      - "*.*"
+      - "*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DEFAULT_IMAGE_NAME: recod0/dmkbot
+  DEFAULT_DEPLOY_TAG: latest
+  DEFAULT_PORTAINER_STACK_ID: "17"
+  DEFAULT_DEPLOY_PATH: /opt/dmkbot
+
+jobs:
+  build_and_push:
+    name: Build and push Docker image
+    runs-on: ubuntu-latest
+    outputs:
+      image_name: ${{ steps.vars.outputs.image_name }}
+      deploy_tag: ${{ steps.vars.outputs.deploy_tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve image and deploy tag
+        id: vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE_NAME="${{ vars.IMAGE_NAME }}"
+          if [ -z "$IMAGE_NAME" ]; then
+            IMAGE_NAME="${{ env.DEFAULT_IMAGE_NAME }}"
+          fi
+
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            DEPLOY_TAG="${GITHUB_REF#refs/tags/}"
+            DEPLOY_TAG="${DEPLOY_TAG#v}"
+          else
+            DEPLOY_TAG="${{ vars.TAG }}"
+            if [ -z "$DEPLOY_TAG" ]; then
+              DEPLOY_TAG="${{ env.DEFAULT_DEPLOY_TAG }}"
+            fi
+          fi
+
+          echo "image_name=$IMAGE_NAME" >> "$GITHUB_OUTPUT"
+          echo "deploy_tag=$DEPLOY_TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Extract Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.vars.outputs.image_name }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=short,prefix=sha-
+            type=raw,value=${{ steps.vars.outputs.deploy_tag }},enable=${{ startsWith(github.ref, 'refs/tags/') }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy_test:
+    name: Deploy to test (Portainer preferred)
+    runs-on: ubuntu-latest
+    needs: build_and_push
+    environment: test
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve deploy settings
+        id: deploy_vars
+        shell: bash
+        run: |
+          set -euo pipefail
+          DEPLOY_PATH="${{ vars.DEPLOY_PATH }}"
+          if [ -z "$DEPLOY_PATH" ]; then
+            DEPLOY_PATH="${{ env.DEFAULT_DEPLOY_PATH }}"
+          fi
+
+          STACK_ID="${{ vars.PORTAINER_STACK_ID }}"
+          if [ -z "$STACK_ID" ]; then
+            STACK_ID="${{ env.DEFAULT_PORTAINER_STACK_ID }}"
+          fi
+
+          ENDPOINT_ID="${{ vars.PORTAINER_ENDPOINT_ID }}"
+
+          echo "deploy_path=$DEPLOY_PATH" >> "$GITHUB_OUTPUT"
+          echo "stack_id=$STACK_ID" >> "$GITHUB_OUTPUT"
+          echo "endpoint_id=$ENDPOINT_ID" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy stack via Portainer API
+        if: ${{ secrets.PORTAINER_URL != '' && secrets.PORTAINER_API_TOKEN != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          PORTAINER_URL="${{ secrets.PORTAINER_URL }}"
+          PORTAINER_URL="${PORTAINER_URL%/}"
+          TOKEN="${{ secrets.PORTAINER_API_TOKEN }}"
+          STACK_ID="${{ steps.deploy_vars.outputs.stack_id }}"
+          ENDPOINT_ID="${{ steps.deploy_vars.outputs.endpoint_id }}"
+          IMAGE_NAME="${{ needs.build_and_push.outputs.image_name }}"
+          DEPLOY_TAG="${{ needs.build_and_push.outputs.deploy_tag }}"
+
+          STACK_JSON=$(curl -fsS -H "X-API-Key: ${TOKEN}" "${PORTAINER_URL}/api/stacks/${STACK_ID}")
+          STACK_NAME=$(echo "$STACK_JSON" | jq -r '.Name')
+
+          if [ -z "$ENDPOINT_ID" ]; then
+            ENDPOINT_ID=$(echo "$STACK_JSON" | jq -r '.EndpointId // empty')
+          fi
+
+          if [ -z "$ENDPOINT_ID" ]; then
+            echo "PORTAINER_ENDPOINT_ID is empty and EndpointId was not found in stack details."
+            exit 1
+          fi
+
+          CURRENT_ENV=$(echo "$STACK_JSON" | jq '.Env // []')
+          UPDATED_ENV=$(echo "$CURRENT_ENV" | jq --arg image "$IMAGE_NAME" --arg tag "$DEPLOY_TAG" '
+            def upsert($k; $v):
+              if any(.[]?; .name == $k) then
+                map(if .name == $k then .value = $v else . end)
+              else
+                . + [{"name": $k, "value": $v}]
+              end;
+            (. // [])
+            | upsert("IMAGE_NAME"; $image)
+            | upsert("TAG"; $tag)
+          ')
+
+          PAYLOAD=$(jq -n \
+            --arg name "$STACK_NAME" \
+            --argjson env "$UPDATED_ENV" \
+            --rawfile compose deploy/docker-compose.test.yml \
+            '{Name: $name, StackFileContent: $compose, Env: $env, Prune: true, PullImage: true}')
+
+          curl -fsS -X PUT "${PORTAINER_URL}/api/stacks/${STACK_ID}?endpointId=${ENDPOINT_ID}" \
+            -H "X-API-Key: ${TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data "$PAYLOAD"
+
+          echo "Portainer stack ${STACK_ID} updated with ${IMAGE_NAME}:${DEPLOY_TAG}"
+
+      - name: Ensure deploy directory exists (SSH fallback)
+        if: ${{ !(secrets.PORTAINER_URL != '' && secrets.PORTAINER_API_TOKEN != '') }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.TEST_SERVER_HOST }}
+          username: ${{ secrets.TEST_SERVER_USER }}
+          key: ${{ secrets.TEST_SERVER_SSH_KEY }}
+          port: ${{ secrets.TEST_SERVER_PORT }}
+          script_stop: true
+          script: |
+            set -e
+            DEPLOY_PATH="${{ steps.deploy_vars.outputs.deploy_path }}"
+            if [ -z "$DEPLOY_PATH" ]; then
+              echo "GitHub Variable DEPLOY_PATH is not set"
+              exit 1
+            fi
+            mkdir -p "$DEPLOY_PATH"
+
+      - name: Upload docker-compose file (SSH fallback)
+        if: ${{ !(secrets.PORTAINER_URL != '' && secrets.PORTAINER_API_TOKEN != '') }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.TEST_SERVER_HOST }}
+          username: ${{ secrets.TEST_SERVER_USER }}
+          key: ${{ secrets.TEST_SERVER_SSH_KEY }}
+          port: ${{ secrets.TEST_SERVER_PORT }}
+          source: deploy/docker-compose.test.yml
+          target: ${{ steps.deploy_vars.outputs.deploy_path }}
+          strip_components: 1
+
+      - name: Pull and restart container (SSH fallback)
+        if: ${{ !(secrets.PORTAINER_URL != '' && secrets.PORTAINER_API_TOKEN != '') }}
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.TEST_SERVER_HOST }}
+          username: ${{ secrets.TEST_SERVER_USER }}
+          key: ${{ secrets.TEST_SERVER_SSH_KEY }}
+          port: ${{ secrets.TEST_SERVER_PORT }}
+          script_stop: true
+          script: |
+            set -e
+            DEPLOY_PATH="${{ steps.deploy_vars.outputs.deploy_path }}"
+            IMAGE_NAME="${{ needs.build_and_push.outputs.image_name }}"
+            DEPLOY_TAG="${{ needs.build_and_push.outputs.deploy_tag }}"
+
+            if [ -z "$DEPLOY_PATH" ]; then
+              echo "GitHub Variable DEPLOY_PATH is not set"
+              exit 1
+            fi
+
+            cd "$DEPLOY_PATH"
+            mv -f docker-compose.test.yml docker-compose.yml
+
+            if [ ! -f .env ]; then
+              echo ".env file not found in $DEPLOY_PATH"
+              echo "Create .env with TG_TOKEN/API_KEY/WIALON_* values before deploy"
+              exit 1
+            fi
+
+            echo "${{ secrets.DOCKERHUB_TOKEN }}" | docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" --password-stdin
+            export IMAGE_NAME="$IMAGE_NAME"
+            export TAG="$DEPLOY_TAG"
+
+            docker compose -p dmkbot -f "$DEPLOY_PATH/docker-compose.yml" pull
+            docker compose -p dmkbot -f "$DEPLOY_PATH/docker-compose.yml" up -d --remove-orphans
+            docker image prune -f

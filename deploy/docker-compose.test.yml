@@ -1,0 +1,15 @@
+services:
+  dmkbot:
+    image: ${IMAGE_NAME:-recod0/dmkbot}:${TAG:-4.1}
+    container_name: dmkbot
+    restart: unless-stopped
+    environment:
+      TG_TOKEN: ${TG_TOKEN}
+      API_KEY: ${API_KEY}
+      WIALON_TOKEN: ${WIALON_TOKEN}
+      WIALON_BASE_URL: ${WIALON_BASE_URL:-http://w1.wialon.justgps.ru}
+      DB_PATH: ${DB_PATH:-/olymp/db/olymp.db}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - /var/opt/dmkbot/db:/olymp/db
