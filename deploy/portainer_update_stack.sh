@@ -115,7 +115,7 @@ PAYLOAD="$(
     '{Name: $name, StackFileContent: $compose, Env: $env, Prune: true, PullImage: true}'
 )"
 
-curl -fsS -X PUT "${PORTAINER_URL}/api/stacks/${PORTAINER_STACK_ID}?endpointId=${ENDPOINT_ID}" \
+curl --insecure -fsS -X PUT "${PORTAINER_URL}/api/stacks/${PORTAINER_STACK_ID}?endpointId=${ENDPOINT_ID}" \
   -H "X-API-Key: ${PORTAINER_API_KEY}" \
   -H "Content-Type: application/json" \
   --data "$PAYLOAD" >/dev/null
