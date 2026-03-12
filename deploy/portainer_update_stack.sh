@@ -41,6 +41,12 @@ fi
 PORTAINER_URL="${PORTAINER_URL%/}"
 PORTAINER_STACK_ID="${PORTAINER_STACK_ID:-17}"
 ENDPOINT_ID="${ENDPOINT_ID:-${PORTAINER_ENDPOINT_ID:-}}"
+VERIFY_SSL="${VERIFY_SSL:-0}"
+
+CURL_SSL_ARGS=()
+if [ "$VERIFY_SSL" != "1" ]; then
+  CURL_SSL_ARGS=(--insecure)
+fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 STACK_TEMPLATE_PATH="${STACK_TEMPLATE_PATH:-$SCRIPT_DIR/stack-compose.tpl.yml}"
@@ -50,7 +56,7 @@ if [ ! -f "$STACK_TEMPLATE_PATH" ]; then
   exit 1
 fi
 
-STACK_JSON="$(curl -fsS -H "X-API-Key: ${PORTAINER_API_KEY}" "${PORTAINER_URL}/api/stacks/${PORTAINER_STACK_ID}")"
+STACK_JSON="$(curl "${CURL_SSL_ARGS[@]}" -fsS -H "X-API-Key: ${PORTAINER_API_KEY}" "${PORTAINER_URL}/api/stacks/${PORTAINER_STACK_ID}")"
 STACK_NAME="$(echo "$STACK_JSON" | jq -r '.Name // empty')"
 
 if [ -z "$STACK_NAME" ]; then
@@ -115,7 +121,7 @@ PAYLOAD="$(
     '{Name: $name, StackFileContent: $compose, Env: $env, Prune: true, PullImage: true}'
 )"
 
-curl --insecure -fsS -X PUT "${PORTAINER_URL}/api/stacks/${PORTAINER_STACK_ID}?endpointId=${ENDPOINT_ID}" \
+curl "${CURL_SSL_ARGS[@]}" -fsS -X PUT "${PORTAINER_URL}/api/stacks/${PORTAINER_STACK_ID}?endpointId=${ENDPOINT_ID}" \
   -H "X-API-Key: ${PORTAINER_API_KEY}" \
   -H "Content-Type: application/json" \
   --data "$PAYLOAD" >/dev/null
