@@ -165,3 +165,21 @@ python scripts/create_mobile_user.py \
   - создание пользователя;
   - редактирование login/role/password;
   - блокировка/разблокировка (`is_active`).
+
+## Установка (Install PWA)
+
+1. Откройте приложение в Chrome/Edge: `http://localhost:8080`.
+2. Убедитесь, что браузер предлагает установку (`Install app`).
+3. Установите приложение на устройство.
+
+Проверка installability в DevTools:
+
+- `Application -> Manifest`:
+  - `display: standalone`
+  - `start_url: /`
+  - `scope: /`
+  - есть иконки `pwa-192.png` и `pwa-512.png` с `sizes` и `purpose (any/maskable)`
+- `Application -> Service Workers`:
+  - `sw.js` активен и доступен из корня.
+- `Lighthouse -> PWA`:
+  - нет ошибки про unsuitable icon.
