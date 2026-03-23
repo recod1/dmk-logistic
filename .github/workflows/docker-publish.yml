@@ -48,7 +48,23 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push ${{ matrix.service }}
+      - name: Build and push api (no cache)
+        if: matrix.service == 'api'
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ${{ matrix.image }}:latest
+            ${{ matrix.image }}:sha-${{ steps.meta.outputs.short_sha }}
+          no-cache: true
+          build-args: |
+            CACHE_BUST=${{ github.sha }}
+            REQUIREMENTS_HASH=${{ hashFiles('requirements.txt') }}
+
+      - name: Build and push web (with cache)
+        if: matrix.service == 'web'
         uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
