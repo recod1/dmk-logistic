@@ -8,9 +8,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
-from mobile_api.auth import create_access_token, get_current_user, verify_password
+from mobile_api.auth import create_access_token, get_current_driver, verify_password
 from mobile_api.db import get_db
 from mobile_api.models import Point, Route, RouteEvent, RoutePoint, User
+from mobile_api.roles import role_label_ru
 
 
 POINT_STATUS_FLOW = {
@@ -125,8 +126,11 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict:
         "user": {
             "id": user.id,
             "login": user.login,
-            "role": user.role,
+            "role": user.role_code,
+            "role_code": user.role_code,
+            "role_label": role_label_ru(user.role_code),
             "full_name": user.full_name,
+            "phone": user.phone,
         },
     }
 
@@ -134,7 +138,7 @@ def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict:
 @router.get("/v1/mobile/routes/active")
 def get_active_route(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_driver),
 ) -> dict:
     route = _active_route_for_user(db, current_user.id)
     if route is None:
@@ -146,7 +150,7 @@ def get_active_route(
 def accept_route(
     route_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_driver),
 ) -> dict:
     route = db.get(Route, route_id)
     if route is None:
@@ -193,7 +197,7 @@ def _refresh_route_status_if_completed(db: Session, route: Route) -> None:
 def batch_events(
     payload: BatchEventsRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_current_driver),
 ) -> dict:
     results: list[dict] = []
 

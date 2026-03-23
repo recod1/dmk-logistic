@@ -2,16 +2,22 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
 import re
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import create_engine, delete, func, select
 from sqlalchemy.orm import Session
 
+# Ensure repository root is importable regardless of cwd.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
+
 from mobile_api.auth import hash_password
 from mobile_api.models import Point, Repair, Route, RouteEvent, RoutePoint, Salary, User
+from mobile_api.roles import RoleCode, normalize_role_code
 
 
 def parse_args() -> argparse.Namespace:
@@ -124,11 +130,18 @@ def migrate(sqlite_path: str, pg_dsn: str, default_password: str, truncate: bool
             login_seq += 1
             existing_logins.add(login)
 
+            raw_role = (row["role"] or RoleCode.DRIVER.value) if "role" in row.keys() else RoleCode.DRIVER.value
+            try:
+                role_code = normalize_role_code(raw_role).value
+            except ValueError:
+                role_code = RoleCode.DRIVER.value
+
             user = User(
                 login=login,
                 password_hash=password_hash,
-                role=(row["role"] or "driver") if "role" in row.keys() else "driver",
+                role_code=role_code,
                 full_name=full_name,
+                phone=(row["phone"] if "phone" in row.keys() and row["phone"] else None),
                 legacy_tg_id=tg_id or None,
                 is_active=(row["status"] != "blocked") if "status" in row.keys() else True,
             )

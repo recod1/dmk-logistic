@@ -10,10 +10,11 @@ from sqlalchemy.orm import Session
 
 from mobile_api.db import get_db
 from mobile_api.models import User
+from mobile_api.roles import ADMIN_ACCESS_ROLES, ROUTE_MANAGER_ROLES, RoleCode, normalize_role_code
 from mobile_api.settings import mobile_settings
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt_sha256", "bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -30,7 +31,7 @@ def create_access_token(user: User) -> tuple[str, datetime]:
     payload = {
         "sub": str(user.id),
         "login": user.login,
-        "role": user.role,
+        "role_code": user.role_code,
         "exp": int(expires_at.timestamp()),
     }
     token = jwt.encode(payload, mobile_settings.jwt_secret, algorithm=mobile_settings.jwt_algorithm)
@@ -64,7 +65,31 @@ def get_current_user(
 
 
 def get_current_admin(current_user: User = Depends(get_current_user)) -> User:
-    if (current_user.role or "").lower() != "admin":
+    try:
+        role_code = normalize_role_code(current_user.role_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required") from exc
+    if role_code not in ADMIN_ACCESS_ROLES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin role required")
+    return current_user
+
+
+def get_current_route_manager(current_user: User = Depends(get_current_user)) -> User:
+    try:
+        role_code = normalize_role_code(current_user.role_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Route manager role required") from exc
+    if role_code not in ROUTE_MANAGER_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Route manager role required")
+    return current_user
+
+
+def get_current_driver(current_user: User = Depends(get_current_user)) -> User:
+    try:
+        role_code = normalize_role_code(current_user.role_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Driver role required") from exc
+    if role_code != RoleCode.DRIVER:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Driver role required")
     return current_user
 

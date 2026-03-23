@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.auth import hash_password
 from mobile_api.models import User
+from mobile_api.roles import normalize_role_code
 from mobile_api.settings import mobile_settings
 
 
@@ -19,7 +20,7 @@ def ensure_demo_user(db: Session) -> None:
     demo = User(
         login=mobile_settings.demo_login,
         password_hash=hash_password(mobile_settings.demo_password),
-        role=mobile_settings.demo_role,
+        role_code=normalize_role_code(mobile_settings.demo_role).value,
         full_name="Demo User",
         is_active=True,
     )
