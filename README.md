@@ -129,7 +129,7 @@ alembic upgrade head
 Коротко:
 
 ```bash
-python scripts/migrate_sqlite_to_postgres.py \
+python -m scripts.migrate_sqlite_to_postgres \
   --sqlite-path ./db/olymp.db \
   --pg-dsn "$POSTGRES_DSN" \
   --default-password "ChangeMe123!" \
@@ -139,7 +139,17 @@ python scripts/migrate_sqlite_to_postgres.py \
 ## Ручное создание пользователя для mobile API
 
 ```bash
-python scripts/create_mobile_user.py \
+python -m scripts.create_mobile_user \
+  --pg-dsn "$POSTGRES_DSN" \
+  --login driver1 \
+  --password StrongPass123! \
+  --role driver
+```
+
+### Portainer Exec (короткий пример)
+
+```bash
+PYTHONPATH=/app python3 scripts/create_mobile_user.py \
   --pg-dsn "$POSTGRES_DSN" \
   --login driver1 \
   --password StrongPass123! \

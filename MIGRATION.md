@@ -60,7 +60,7 @@ alembic upgrade head
 ## 4) Перенести данные (python script)
 
 ```bash
-python scripts/migrate_sqlite_to_postgres.py \
+python -m scripts.migrate_sqlite_to_postgres \
   --sqlite-path "./db/olymp.db" \
   --pg-dsn "$POSTGRES_DSN" \
   --default-password "ChangeMe123!" \
@@ -86,7 +86,7 @@ LATERAL unnest(string_to_array(r.points_csv, ',')) WITH ORDINALITY AS t(value, o
 WHERE trim(value) <> '' AND trim(value) <> '0';
 ```
 
-Но в этом репозитории базовый и поддерживаемый путь — `scripts/migrate_sqlite_to_postgres.py`.
+Но в этом репозитории базовый и поддерживаемый путь — `python -m scripts.migrate_sqlite_to_postgres ...`.
 
 ## 5) Валидация
 
@@ -136,11 +136,21 @@ BOOTSTRAP_DEMO_USER=0
 ## 7) Создание/обновление логина вручную
 
 ```bash
-python scripts/create_mobile_user.py \
+python -m scripts.create_mobile_user \
   --pg-dsn "$POSTGRES_DSN" \
   --login "driver1" \
   --password "StrongPass123!" \
   --role "driver" \
   --full-name "Иванов Иван"
+```
+
+Portainer Exec (если запускаете скрипт как файл):
+
+```bash
+PYTHONPATH=/app python3 scripts/create_mobile_user.py \
+  --pg-dsn "$POSTGRES_DSN" \
+  --login "driver1" \
+  --password "StrongPass123!" \
+  --role "driver"
 ```
 

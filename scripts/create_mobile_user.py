@@ -2,9 +2,14 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
+import sys
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+
+# Ensure repository root is importable regardless of working directory.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from mobile_api.auth import hash_password
 from mobile_api.models import User

@@ -2,13 +2,18 @@
 from __future__ import annotations
 
 import argparse
+import pathlib
 import re
 import sqlite3
+import sys
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import create_engine, delete, func, select
 from sqlalchemy.orm import Session
+
+# Ensure repository root is importable regardless of working directory.
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1]))
 
 from mobile_api.auth import hash_password
 from mobile_api.models import Point, Repair, Route, RouteEvent, RoutePoint, Salary, User
