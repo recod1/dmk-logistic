@@ -57,6 +57,12 @@ alembic upgrade head
 - `salary`
 - `repair`
 
+Дополнительно после ревизии `20260323_0002`:
+
+- `users.role` переименован в `users.role_code`
+- добавлено поле `users.phone`
+- добавлена связь `routes.created_by_user_id -> users.id`
+
 ## 4) Перенести данные (python script)
 
 ```bash
@@ -70,9 +76,11 @@ python scripts/migrate_sqlite_to_postgres.py \
 Что делает скрипт:
 
 1. Переносит `Users`, `Route`, `Point`, `Salary`, `Repair`.
-2. Создаёт логины для новой таблицы `users` и хеширует пароль bcrypt.
-3. Преобразует CSV `Route.points` в `route_points(route_id, point_id, order_index)`.
-4. Печатает count по ключевым таблицам.
+2. Создаёт логины для новой таблицы `users` и хеширует пароль.
+3. Нормализует роль в `role_code` (`driver/logistic/accountant/admin/superadmin`).
+4. Переносит `full_name` и (если есть) `phone`.
+5. Преобразует CSV `Route.points` в `route_points(route_id, point_id, order_index)`.
+6. Печатает count по ключевым таблицам.
 
 ## 4b) Альтернатива через pgloader (опционально)
 
