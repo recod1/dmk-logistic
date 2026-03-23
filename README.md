@@ -13,7 +13,7 @@
 
 ```bash
 cp .env.example .env
-docker compose up --build
+docker compose up -d
 ```
 
 Сервисы:
@@ -28,6 +28,38 @@ Nginx проксирует backend как `/api/*`:
 - `/api/v1/mobile/routes/active`
 - `/api/v1/mobile/routes/{id}/accept`
 - `/api/v1/mobile/events:batch`
+
+## Публикация образов в Docker Hub
+
+`docker-compose.yml` использует готовые образы из переменных:
+
+- `API_IMAGE` (по умолчанию `recod0/dmk-logistic-api:latest`)
+- `WEB_IMAGE` (по умолчанию `recod0/dmk-logistic-web:latest`)
+
+### 1) Собрать и запушить API образ
+
+```bash
+docker build -f docker/api.Dockerfile -t recod0/dmk-logistic-api:latest .
+docker push recod0/dmk-logistic-api:latest
+```
+
+### 2) Собрать и запушить WEB образ
+
+```bash
+docker build -f docker/web.Dockerfile -t recod0/dmk-logistic-web:latest .
+docker push recod0/dmk-logistic-web:latest
+```
+
+### 3) Запустить стек из опубликованных образов
+
+```bash
+cp .env.example .env
+# при необходимости поменяйте теги:
+# API_IMAGE=recod0/dmk-logistic-api:<tag>
+# WEB_IMAGE=recod0/dmk-logistic-web:<tag>
+docker compose pull
+docker compose up -d
+```
 
 ## Логин в PWA
 
