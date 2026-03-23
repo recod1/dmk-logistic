@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
 
+import { ROLE_OPTIONS } from "../roles";
 import type { AdminUser } from "../types";
 
 const props = defineProps<{
@@ -11,8 +12,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   refresh: [];
-  create: [payload: { login: string; password: string; role: string }];
-  update: [userId: number, payload: { login?: string; password?: string; role?: string; is_active?: boolean }];
+  create: [payload: { login: string; password: string; role_code: string; full_name?: string | null; phone?: string | null }];
+  update: [
+    userId: number,
+    payload: { login?: string; password?: string; role_code?: string; full_name?: string | null; phone?: string | null; is_active?: boolean }
+  ];
 }>();
 
 const creating = ref(false);
@@ -21,13 +25,17 @@ const editingUserId = ref<number | null>(null);
 const createForm = reactive({
   login: "",
   password: "",
-  role: "driver"
+  role_code: "driver",
+  full_name: "",
+  phone: ""
 });
 
 const editForm = reactive({
   login: "",
   password: "",
-  role: "",
+  role_code: "",
+  full_name: "",
+  phone: "",
   is_active: true
 });
 
@@ -36,7 +44,9 @@ const editableUser = computed(() => props.users.find((user) => user.id === editi
 function openCreate(): void {
   createForm.login = "";
   createForm.password = "";
-  createForm.role = "driver";
+  createForm.role_code = "driver";
+  createForm.full_name = "";
+  createForm.phone = "";
   creating.value = true;
 }
 
@@ -44,7 +54,9 @@ function submitCreate(): void {
   emit("create", {
     login: createForm.login.trim(),
     password: createForm.password,
-    role: createForm.role.trim()
+    role_code: createForm.role_code,
+    full_name: createForm.full_name.trim() || null,
+    phone: createForm.phone.trim() || null
   });
   creating.value = false;
 }
@@ -53,7 +65,9 @@ function openEdit(user: AdminUser): void {
   editingUserId.value = user.id;
   editForm.login = user.login;
   editForm.password = "";
-  editForm.role = user.role;
+  editForm.role_code = user.role_code;
+  editForm.full_name = user.full_name ?? "";
+  editForm.phone = user.phone ?? "";
   editForm.is_active = user.is_active;
 }
 
@@ -61,17 +75,31 @@ function submitEdit(): void {
   if (!editableUser.value) {
     return;
   }
-  const payload: { login?: string; password?: string; role?: string; is_active?: boolean } = {};
+  const payload: {
+    login?: string;
+    password?: string;
+    role_code?: string;
+    full_name?: string | null;
+    phone?: string | null;
+    is_active?: boolean;
+  } = {};
   const login = editForm.login.trim();
-  const role = editForm.role.trim();
+  const fullName = editForm.full_name.trim();
+  const phone = editForm.phone.trim();
   if (login && login !== editableUser.value.login) {
     payload.login = login;
   }
   if (editForm.password.trim()) {
     payload.password = editForm.password;
   }
-  if (role && role !== editableUser.value.role) {
-    payload.role = role;
+  if (editForm.role_code && editForm.role_code !== editableUser.value.role_code) {
+    payload.role_code = editForm.role_code;
+  }
+  if (fullName !== (editableUser.value.full_name ?? "")) {
+    payload.full_name = fullName || null;
+  }
+  if (phone !== (editableUser.value.phone ?? "")) {
+    payload.phone = phone || null;
   }
   if (editForm.is_active !== editableUser.value.is_active) {
     payload.is_active = editForm.is_active;
@@ -103,6 +131,8 @@ function toggleActive(user: AdminUser): void {
           <tr>
             <th>ID</th>
             <th>Login</th>
+            <th>ФИО</th>
+            <th>Телефон</th>
             <th>Role</th>
             <th>Active</th>
             <th>Created</th>
@@ -113,7 +143,9 @@ function toggleActive(user: AdminUser): void {
           <tr v-for="user in users" :key="user.id">
             <td>{{ user.id }}</td>
             <td>{{ user.login }}</td>
-            <td>{{ user.role }}</td>
+            <td>{{ user.full_name || "—" }}</td>
+            <td>{{ user.phone || "—" }}</td>
+            <td>{{ user.role_label }}</td>
             <td>{{ user.is_active ? "yes" : "no" }}</td>
             <td>{{ user.created_at ? new Date(user.created_at).toLocaleString() : "—" }}</td>
             <td class="row-actions">
@@ -124,7 +156,7 @@ function toggleActive(user: AdminUser): void {
             </td>
           </tr>
           <tr v-if="!users.length">
-            <td colspan="6" class="empty">Пользователи не найдены</td>
+            <td colspan="8" class="empty">Пользователи не найдены</td>
           </tr>
         </tbody>
       </table>
@@ -141,8 +173,20 @@ function toggleActive(user: AdminUser): void {
         <input v-model="createForm.password" type="password" />
       </label>
       <label>
-        Role
-        <input v-model="createForm.role" />
+        ФИО
+        <input v-model="createForm.full_name" />
+      </label>
+      <label>
+        Телефон
+        <input v-model="createForm.phone" />
+      </label>
+      <label>
+        Роль
+        <select v-model="createForm.role_code">
+          <option v-for="role in ROLE_OPTIONS" :key="role.role_code" :value="role.role_code">
+            {{ role.role_label }}
+          </option>
+        </select>
       </label>
       <div class="actions">
         <button @click="submitCreate">Сохранить</button>
@@ -161,8 +205,20 @@ function toggleActive(user: AdminUser): void {
         <input v-model="editForm.password" type="password" />
       </label>
       <label>
-        Role
-        <input v-model="editForm.role" />
+        ФИО
+        <input v-model="editForm.full_name" />
+      </label>
+      <label>
+        Телефон
+        <input v-model="editForm.phone" />
+      </label>
+      <label>
+        Роль
+        <select v-model="editForm.role_code">
+          <option v-for="role in ROLE_OPTIONS" :key="role.role_code" :value="role.role_code">
+            {{ role.role_label }}
+          </option>
+        </select>
       </label>
       <label class="checkbox">
         <input v-model="editForm.is_active" type="checkbox" />
@@ -226,7 +282,8 @@ label {
   display: grid;
   gap: 0.3rem;
 }
-input {
+input,
+select {
   border-radius: 8px;
   border: 1px solid #374151;
   background: #0b1220;
