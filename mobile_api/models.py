@@ -26,8 +26,9 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     login: Mapped[str] = mapped_column(String(64), nullable=False, unique=True, index=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
-    role: Mapped[str] = mapped_column(String(32), nullable=False, default="driver", index=True)
+    role_code: Mapped[str] = mapped_column(String(32), nullable=False, default="driver", index=True)
     full_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     legacy_tg_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
     created_at: Mapped[datetime] = mapped_column(
@@ -37,7 +38,14 @@ class User(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    routes: Mapped[list[Route]] = relationship(back_populates="assignee")
+    routes: Mapped[list[Route]] = relationship(
+        back_populates="assignee",
+        foreign_keys="Route.assigned_user_id",
+    )
+    created_routes: Mapped[list[Route]] = relationship(
+        back_populates="created_by",
+        foreign_keys="Route.created_by_user_id",
+    )
 
 
 class Route(Base):
@@ -46,6 +54,7 @@ class Route(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     legacy_driver_tg_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
     assigned_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True, index=True)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="new", server_default="new")
     number_auto: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
     temperature: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
@@ -60,7 +69,14 @@ class Route(Base):
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
-    assignee: Mapped[User | None] = relationship(back_populates="routes")
+    assignee: Mapped[User | None] = relationship(
+        back_populates="routes",
+        foreign_keys=[assigned_user_id],
+    )
+    created_by: Mapped[User | None] = relationship(
+        back_populates="created_routes",
+        foreign_keys=[created_by_user_id],
+    )
     points: Mapped[list[Point]] = relationship(back_populates="route")
     ordered_points: Mapped[list[RoutePoint]] = relationship(
         back_populates="route",
