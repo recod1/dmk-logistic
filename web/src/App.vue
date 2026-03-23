@@ -2,11 +2,20 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import ActiveRouteView from "./components/ActiveRouteView.vue";
+import AdminUsersView from "./components/AdminUsersView.vue";
 import LoginView from "./components/LoginView.vue";
-import { acceptRoute, getActiveRoute, login as loginRequest, sendEventsBatch } from "./api";
+import {
+  acceptRoute,
+  createAdminUser,
+  getActiveRoute,
+  listAdminUsers,
+  login as loginRequest,
+  sendEventsBatch,
+  updateAdminUser
+} from "./api";
 import { addOutboxEvent, getOutboxEvents, loadActiveRoute, removeOutboxByClientEventIds, saveActiveRoute } from "./db";
 import { nextStatus } from "./status";
-import type { AuthUser, EventPayload, RouteDto } from "./types";
+import type { AdminUser, AuthUser, EventPayload, RouteDto } from "./types";
 
 const TOKEN_STORAGE_KEY = "dmk_mobile_token";
 const USER_STORAGE_KEY = "dmk_mobile_user";
@@ -20,9 +29,14 @@ const authError = ref("");
 const syncing = ref(false);
 const syncMessage = ref("Ожидание");
 const isOnline = ref(navigator.onLine);
+const currentSection = ref<"route" | "users">("route");
+const adminUsers = ref<AdminUser[]>([]);
+const usersLoading = ref(false);
+const usersError = ref("");
 
 const isAuthed = computed(() => Boolean(authToken.value));
 const onlineLabel = computed(() => (isOnline.value ? "online" : "offline"));
+const isAdmin = computed(() => (authUser.value?.role || "").toLowerCase() === "admin");
 
 function getDeviceId(): string {
   const existing = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
@@ -42,6 +56,8 @@ function persistAuth(token: string, user: AuthUser): void {
 function clearAuth(): void {
   authToken.value = "";
   authUser.value = null;
+  adminUsers.value = [];
+  currentSection.value = "route";
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
 }
@@ -104,12 +120,69 @@ async function doLogin(loginValue: string, password: string): Promise<void> {
     authToken.value = result.access_token;
     authUser.value = result.user;
     persistAuth(result.access_token, result.user);
+    if ((result.user.role || "").toLowerCase() === "admin") {
+      currentSection.value = "users";
+      await refreshAdminUsers();
+    } else {
+      currentSection.value = "route";
+    }
     await refreshRoute();
     await syncOutbox();
   } catch (error) {
     authError.value = (error as Error).message;
   } finally {
     authLoading.value = false;
+  }
+}
+
+async function refreshAdminUsers(): Promise<void> {
+  if (!authToken.value || !isAdmin.value) {
+    return;
+  }
+  usersLoading.value = true;
+  usersError.value = "";
+  try {
+    adminUsers.value = await listAdminUsers(authToken.value);
+  } catch (error) {
+    usersError.value = `Ошибка загрузки пользователей: ${(error as Error).message}`;
+  } finally {
+    usersLoading.value = false;
+  }
+}
+
+async function doCreateAdminUser(payload: { login: string; password: string; role: string }): Promise<void> {
+  if (!authToken.value || !isAdmin.value) {
+    return;
+  }
+  usersLoading.value = true;
+  usersError.value = "";
+  try {
+    await createAdminUser(authToken.value, payload);
+    await refreshAdminUsers();
+  } catch (error) {
+    usersError.value = `Ошибка создания: ${(error as Error).message}`;
+    usersLoading.value = false;
+  }
+}
+
+async function doUpdateAdminUser(
+  userId: number,
+  payload: { login?: string; password?: string; role?: string; is_active?: boolean }
+): Promise<void> {
+  if (!authToken.value || !isAdmin.value) {
+    return;
+  }
+  if (!Object.keys(payload).length) {
+    return;
+  }
+  usersLoading.value = true;
+  usersError.value = "";
+  try {
+    await updateAdminUser(authToken.value, userId, payload);
+    await refreshAdminUsers();
+  } catch (error) {
+    usersError.value = `Ошибка обновления: ${(error as Error).message}`;
+    usersLoading.value = false;
   }
 }
 
@@ -179,6 +252,10 @@ onMounted(async () => {
   authUser.value = rawUser ? (JSON.parse(rawUser) as AuthUser) : null;
   route.value = await loadActiveRoute();
   if (token) {
+    if ((authUser.value?.role || "").toLowerCase() === "admin") {
+      currentSection.value = "users";
+      await refreshAdminUsers();
+    }
     await refreshRoute();
     await syncOutbox();
   }
@@ -201,11 +278,36 @@ onUnmounted(() => {
       </div>
       <div class="actions">
         <span v-if="authUser">{{ authUser.login }}</span>
+        <button
+          v-if="isAuthed && isAdmin"
+          :class="{ activeTab: currentSection === 'users' }"
+          @click="currentSection = 'users'"
+        >
+          Пользователи
+        </button>
+        <button
+          v-if="isAuthed"
+          :class="{ activeTab: currentSection === 'route' }"
+          @click="currentSection = 'route'"
+        >
+          Рейс
+        </button>
         <button v-if="isAuthed" @click="logout">Выход</button>
       </div>
     </header>
 
     <LoginView v-if="!isAuthed" :loading="authLoading" :error="authError" @submit="doLogin" />
+
+    <section v-else-if="isAdmin && currentSection === 'users'">
+      <AdminUsersView
+        :users="adminUsers"
+        :loading="usersLoading"
+        :error="usersError"
+        @refresh="refreshAdminUsers"
+        @create="doCreateAdminUser"
+        @update="doUpdateAdminUser"
+      />
+    </section>
 
     <section v-else-if="route">
       <ActiveRouteView
@@ -249,6 +351,9 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+}
+.activeTab {
+  background: #1d4ed8;
 }
 button {
   border: none;

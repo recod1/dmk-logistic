@@ -16,6 +16,7 @@ from database.repositories.route_repository import RouteRepository
 from config.settings import UserRole
 from services.notification_service import NotificationService
 from mobile_api.router import router as mobile_router
+from mobile_api.admin_router import router as admin_users_router
 from mobile_api.bootstrap import ensure_demo_user
 from mobile_api.db import SessionLocal
 
@@ -242,6 +243,7 @@ async def create_salary(salary_data: SalaryCreate):
 from api.admin_routes_web import router as admin_routes_router
 app.include_router(admin_routes_router)
 app.include_router(mobile_router)
+app.include_router(admin_users_router)
 
 if __name__ == "__main__":
     import uvicorn
