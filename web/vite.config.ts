@@ -7,7 +7,7 @@ export default defineConfig({
     vue(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: [],
+      includeAssets: ["logo.jpg", "icons/icon-192.png", "icons/icon-512.png"],
       manifest: {
         name: "DMK Mobile",
         short_name: "DMK",
@@ -17,10 +17,29 @@ export default defineConfig({
         display: "standalone",
         scope: "/",
         start_url: "/",
-        icons: []
+        icons: [
+          {
+            src: "/icons/icon-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "any maskable"
+          },
+          {
+            src: "/icons/icon-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "any maskable"
+          },
+          {
+            src: "/logo.jpg",
+            sizes: "1024x1024",
+            type: "image/jpeg",
+            purpose: "any"
+          }
+        ]
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,json}"]
+        globPatterns: ["**/*.{js,css,html,ico,png,jpg,jpeg,svg,json,webmanifest}"]
       }
     })
   ],

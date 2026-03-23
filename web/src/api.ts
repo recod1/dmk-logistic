@@ -1,10 +1,15 @@
 import type {
   ActiveRouteResponse,
+  AdminRoute,
+  AdminRouteCreatePayload,
+  AdminRoutesListResponse,
   AdminUser,
   AdminUserCreatePayload,
   AdminUserUpdatePayload,
   AdminUsersListResponse,
   BatchResponse,
+  DriversResponse,
+  DriverOption,
   EventPayload,
   LoginResponse,
   RouteDto
@@ -101,6 +106,63 @@ export async function updateAdminUser(
       Authorization: `Bearer ${token}`
     },
     body: JSON.stringify(payload)
+  });
+}
+
+export async function listRouteDrivers(token: string): Promise<DriverOption[]> {
+  const data = await requestJson<DriversResponse>(`${API_BASE}/v1/admin/routes/drivers`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.items;
+}
+
+export async function listAdminRoutes(
+  token: string,
+  params?: { status?: string; driver_user_id?: number }
+): Promise<AdminRoute[]> {
+  const qs = new URLSearchParams();
+  if (params?.status) {
+    qs.set("status", params.status);
+  }
+  if (typeof params?.driver_user_id === "number") {
+    qs.set("driver_user_id", String(params.driver_user_id));
+  }
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const data = await requestJson<AdminRoutesListResponse>(`${API_BASE}/v1/admin/routes${suffix}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.items;
+}
+
+export async function getAdminRoute(token: string, routeId: string): Promise<AdminRoute> {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${routeId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}
+
+export async function createAdminRoute(token: string, payload: AdminRouteCreatePayload): Promise<AdminRoute> {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function assignAdminRouteDriver(token: string, routeId: string, driverUserId: number): Promise<AdminRoute> {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${routeId}/assign`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ driver_user_id: driverUserId })
   });
 }
 
