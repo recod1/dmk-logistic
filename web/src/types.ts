@@ -3,8 +3,10 @@ export type PointStatus = "new" | "process" | "registration" | "load" | "docs" |
 export interface AuthUser {
   id: number;
   login: string;
-  role: string;
+  role_code: string;
+  role_label: string;
   full_name: string | null;
+  phone: string | null;
 }
 
 export interface LoginResponse {
@@ -72,7 +74,10 @@ export interface BatchResponse {
 export interface AdminUser {
   id: number;
   login: string;
-  role: string;
+  role_code: string;
+  role_label: string;
+  full_name: string | null;
+  phone: string | null;
   is_active: boolean;
   created_at: string | null;
 }
@@ -84,13 +89,83 @@ export interface AdminUsersListResponse {
 export interface AdminUserCreatePayload {
   login: string;
   password: string;
-  role: string;
+  role_code: string;
+  full_name?: string | null;
+  phone?: string | null;
 }
 
 export interface AdminUserUpdatePayload {
   login?: string;
   password?: string;
-  role?: string;
+  role_code?: string;
+  full_name?: string | null;
+  phone?: string | null;
   is_active?: boolean;
+}
+
+export interface DriverOption {
+  id: number;
+  login: string;
+  full_name: string | null;
+  phone: string | null;
+  role_code: string;
+  role_label: string;
+  is_active: boolean;
+}
+
+export interface AdminRoutePointPayload {
+  type_point: string;
+  place_point: string;
+  date_point: string;
+  order_index?: number;
+}
+
+export interface AdminRouteCreatePayload {
+  route_id: string;
+  driver_user_id: number;
+  number_auto?: string;
+  temperature?: string;
+  dispatcher_contacts?: string;
+  registration_number?: string;
+  trailer_number?: string;
+  points?: AdminRoutePointPayload[];
+}
+
+export interface AdminRoute {
+  id: string;
+  status: string;
+  number_auto: string;
+  temperature: string;
+  dispatcher_contacts: string;
+  registration_number: string;
+  trailer_number: string;
+  accepted_at: string | null;
+  created_at: string | null;
+  driver: DriverOption | null;
+  created_by: DriverOption | null;
+  points_count: number;
+  points: Array<
+    {
+      id: number;
+      order_index: number;
+      type_point: string;
+      place_point: string;
+      date_point: string;
+      status: string;
+      time_accepted: string | null;
+      time_registration: string | null;
+      time_put_on_gate: string | null;
+      time_docs: string | null;
+      time_departure: string | null;
+    }
+  > | null;
+}
+
+export interface AdminRoutesListResponse {
+  items: AdminRoute[];
+}
+
+export interface DriversResponse {
+  items: DriverOption[];
 }
 

@@ -19,25 +19,25 @@ export default defineConfig({
         start_url: "/",
         icons: [
           {
-            src: "pwa-192.png",
+            src: "/pwa-192.png",
             sizes: "192x192",
             type: "image/png",
             purpose: "any"
           },
           {
-            src: "pwa-192.png",
+            src: "/pwa-192.png",
             sizes: "192x192",
             type: "image/png",
             purpose: "maskable"
           },
           {
-            src: "pwa-512.png",
+            src: "/pwa-512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "any"
           },
           {
-            src: "pwa-512.png",
+            src: "/pwa-512.png",
             sizes: "512x512",
             type: "image/png",
             purpose: "maskable"
@@ -45,7 +45,7 @@ export default defineConfig({
         ],
         screenshots: [
           {
-            src: "screenshots/pwa-home-1280x720.png",
+            src: "/screenshots/pwa-home-1280x720.png",
             sizes: "1280x720",
             type: "image/png",
             form_factor: "wide",
@@ -63,4 +63,3 @@ export default defineConfig({
     port: 5173
   }
 });
-
