@@ -39,14 +39,14 @@ Nginx проксирует backend как `/api/*`:
 ### 1) Собрать и запушить API образ
 
 ```bash
-docker build -f docker/api.Dockerfile -t recod0/dmk-logistic-api:latest .
+docker build -f docker/api/Dockerfile -t recod0/dmk-logistic-api:latest .
 docker push recod0/dmk-logistic-api:latest
 ```
 
 ### 2) Собрать и запушить WEB образ
 
 ```bash
-docker build -f docker/web.Dockerfile -t recod0/dmk-logistic-web:latest .
+docker build -f docker/web/Dockerfile -t recod0/dmk-logistic-web:latest .
 docker push recod0/dmk-logistic-web:latest
 ```
 
@@ -59,6 +59,18 @@ cp .env.example .env
 # WEB_IMAGE=recod0/dmk-logistic-web:<tag>
 docker compose pull
 docker compose up -d
+```
+
+### Alembic через API image (при необходимости вручную)
+
+В стандартном запуске миграции применяются автоматически в `api` контейнере.
+Для ручного прогона можно выполнить:
+
+```bash
+docker run --rm --network host \
+  -e POSTGRES_DSN="postgresql+psycopg://postgres:postgres@localhost:5432/dmk_logistic" \
+  recod0/dmk-logistic-api:latest \
+  bash -lc "alembic upgrade head"
 ```
 
 ## Логин в PWA
