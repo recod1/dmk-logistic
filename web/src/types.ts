@@ -69,3 +69,28 @@ export interface BatchResponse {
   server_received_at: string;
 }
 
+export interface AdminUser {
+  id: number;
+  login: string;
+  role: string;
+  is_active: boolean;
+  created_at: string | null;
+}
+
+export interface AdminUsersListResponse {
+  items: AdminUser[];
+}
+
+export interface AdminUserCreatePayload {
+  login: string;
+  password: string;
+  role: string;
+}
+
+export interface AdminUserUpdatePayload {
+  login?: string;
+  password?: string;
+  role?: string;
+  is_active?: boolean;
+}
+

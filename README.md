@@ -146,3 +146,22 @@ python scripts/create_mobile_user.py \
   --role driver
 ```
 
+Создание администратора:
+
+```bash
+python scripts/create_mobile_user.py \
+  --pg-dsn "$POSTGRES_DSN" \
+  --login admin1 \
+  --password StrongAdminPass123! \
+  --role admin
+```
+
+## Экран управления пользователями (PWA)
+
+- Вход под пользователем с ролью `admin`.
+- В верхней панели появится раздел **«Пользователи»**.
+- На экране доступны:
+  - список пользователей;
+  - создание пользователя;
+  - редактирование login/role/password;
+  - блокировка/разблокировка (`is_active`).
