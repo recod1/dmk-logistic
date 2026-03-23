@@ -7,7 +7,7 @@ export default defineConfig({
     vue(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: ["logo.jpg", "icons/icon-192.png", "icons/icon-512.png"],
+      includeAssets: ["logo.jpg", "pwa-192.png", "pwa-512.png", "apple-touch-icon.png", "screenshots/pwa-home-1280x720.png"],
       manifest: {
         name: "DMK Mobile",
         short_name: "DMK",
@@ -19,22 +19,37 @@ export default defineConfig({
         start_url: "/",
         icons: [
           {
-            src: "/icons/icon-192.png",
+            src: "/pwa-192.png",
             sizes: "192x192",
             type: "image/png",
-            purpose: "any maskable"
+            purpose: "any"
           },
           {
-            src: "/icons/icon-512.png",
+            src: "/pwa-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "maskable"
+          },
+          {
+            src: "/pwa-512.png",
             sizes: "512x512",
             type: "image/png",
-            purpose: "any maskable"
+            purpose: "any"
           },
           {
-            src: "/logo.jpg",
-            sizes: "1024x1024",
-            type: "image/jpeg",
-            purpose: "any"
+            src: "/pwa-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable"
+          }
+        ],
+        screenshots: [
+          {
+            src: "/screenshots/pwa-home-1280x720.png",
+            sizes: "1280x720",
+            type: "image/png",
+            form_factor: "wide",
+            label: "Главный экран приложения DMK Mobile"
           }
         ]
       },
