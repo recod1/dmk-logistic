@@ -1,4 +1,14 @@
-import type { ActiveRouteResponse, BatchResponse, EventPayload, LoginResponse, RouteDto } from "./types";
+import type {
+  ActiveRouteResponse,
+  AdminUser,
+  AdminUserCreatePayload,
+  AdminUserUpdatePayload,
+  AdminUsersListResponse,
+  BatchResponse,
+  EventPayload,
+  LoginResponse,
+  RouteDto
+} from "./types";
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -58,6 +68,39 @@ export async function sendEventsBatch(
       device_id: deviceId,
       events
     })
+  });
+}
+
+export async function listAdminUsers(token: string): Promise<AdminUser[]> {
+  const data = await requestJson<AdminUsersListResponse>(`${API_BASE}/v1/admin/users`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.items;
+}
+
+export async function createAdminUser(token: string, payload: AdminUserCreatePayload): Promise<AdminUser> {
+  return requestJson<AdminUser>(`${API_BASE}/v1/admin/users`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateAdminUser(
+  token: string,
+  userId: number,
+  payload: AdminUserUpdatePayload
+): Promise<AdminUser> {
+  return requestJson<AdminUser>(`${API_BASE}/v1/admin/users/${userId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
   });
 }
 
