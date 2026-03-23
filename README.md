@@ -149,6 +149,16 @@ python -m scripts.create_mobile_user \
   --role driver
 ```
 
+Создание администратора:
+
+```bash
+python -m scripts.create_mobile_user \
+  --pg-dsn "$POSTGRES_DSN" \
+  --login admin1 \
+  --password StrongAdminPass123! \
+  --role admin
+```
+
 ### Portainer Exec (короткий пример)
 
 ```bash
@@ -158,6 +168,16 @@ PYTHONPATH=/app python3 scripts/create_mobile_user.py \
   --password StrongPass123! \
   --role driver
 ```
+
+## Экран управления пользователями (PWA)
+
+- Вход под пользователем с ролью `admin`.
+- В верхней панели появится раздел **«Пользователи»**.
+- На экране доступны:
+  - список пользователей;
+  - создание пользователя;
+  - редактирование login/role/password;
+  - блокировка/разблокировка (`is_active`).
 
 ## Схема хеширования паролей
 
