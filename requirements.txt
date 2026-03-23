@@ -8,3 +8,8 @@ timezonefinder
 pytz
 jinja2
 python-multipart
+sqlalchemy
+alembic
+psycopg[binary]
+python-jose[cryptography]
+passlib[bcrypt]

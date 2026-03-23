@@ -2,6 +2,7 @@
 
 import sys
 import os
+import logging
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
@@ -14,14 +15,29 @@ from database.repositories.salary_repository import SalaryRepository
 from database.repositories.route_repository import RouteRepository
 from config.settings import UserRole
 from services.notification_service import NotificationService
+from mobile_api.router import router as mobile_router
+from mobile_api.bootstrap import ensure_demo_user
+from mobile_api.db import SessionLocal
 
 app = FastAPI(
     title="DMK API Server",
     description="API для интеграции с базой данных бота DMK",
     version="1.0.0"
 )
+logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("API_KEY")
+
+
+@app.on_event("startup")
+def bootstrap_mobile_user():
+    """Опционально создаёт демо-пользователя для нового mobile-стека."""
+    try:
+        with SessionLocal() as db:
+            ensure_demo_user(db)
+    except Exception as exc:
+        # Не прерываем запуск текущего бота/старого API при проблемах с Postgres.
+        logger.warning("Mobile bootstrap skipped: %s", exc)
 
 
 @app.get("/")
@@ -225,6 +241,7 @@ async def create_salary(salary_data: SalaryCreate):
 # Админ-панель рейсов (веб-интерфейс)
 from api.admin_routes_web import router as admin_routes_router
 app.include_router(admin_routes_router)
+app.include_router(mobile_router)
 
 if __name__ == "__main__":
     import uvicorn
