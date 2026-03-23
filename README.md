@@ -66,6 +66,9 @@ docker build -f docker/web/Dockerfile -t recod0/dmk-logistic-web:latest .
 docker push recod0/dmk-logistic-web:latest
 ```
 
+Если менялись Python-зависимости (например, `requirements.txt`, auth/passlib/bcrypt),
+обязательно пересоберите и заново запушьте **API image**.
+
 ### Portainer stack (без curl API деплоя)
 
 Используйте stack из Git-репозитория:
@@ -155,4 +158,11 @@ PYTHONPATH=/app python3 scripts/create_mobile_user.py \
   --password StrongPass123! \
   --role driver
 ```
+
+## Схема хеширования паролей
+
+Mobile API использует `passlib` с основной схемой `bcrypt_sha256` (bcrypt-backed),
+что снимает ограничение bcrypt на 72 байта пароля. Проверка legacy-хешей `bcrypt`
+сохранена для обратной совместимости.
+В зависимостях зафиксированы совместимые версии: `passlib==1.7.4` и `bcrypt==3.2.2`.
 

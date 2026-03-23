@@ -70,7 +70,7 @@ python -m scripts.migrate_sqlite_to_postgres \
 Что делает скрипт:
 
 1. Переносит `Users`, `Route`, `Point`, `Salary`, `Repair`.
-2. Создаёт логины для новой таблицы `users` и хеширует пароль bcrypt.
+2. Создаёт логины для новой таблицы `users` и хеширует пароль `bcrypt_sha256` (bcrypt-backed).
 3. Преобразует CSV `Route.points` в `route_points(route_id, point_id, order_index)`.
 4. Печатает count по ключевым таблицам.
 
@@ -152,5 +152,15 @@ PYTHONPATH=/app python3 scripts/create_mobile_user.py \
   --login "driver1" \
   --password "StrongPass123!" \
   --role "driver"
+```
+
+## 8) После изменения зависимостей API
+
+Если менялись зависимости в `requirements.txt` (например, `passlib`/`bcrypt`),
+нужно пересобрать и заново запушить API-образ:
+
+```bash
+docker build -f docker/api/Dockerfile -t recod0/dmk-logistic-api:latest .
+docker push recod0/dmk-logistic-api:latest
 ```
 

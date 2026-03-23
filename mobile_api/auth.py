@@ -13,7 +13,9 @@ from mobile_api.models import User
 from mobile_api.settings import mobile_settings
 
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# bcrypt_sha256 avoids bcrypt's 72-byte password limit while remaining bcrypt-backed.
+# Keep "bcrypt" in list to verify legacy hashes if they already exist.
+pwd_context = CryptContext(schemes=["bcrypt_sha256", "bcrypt"], deprecated="auto")
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
