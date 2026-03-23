@@ -179,3 +179,20 @@ python scripts/create_mobile_user.py \
   - раздел **Рейсы** (создание/просмотр/назначение водителя).
 - `driver`:
   - экран **Мой рейс** + офлайн-статусы точек через outbox.
+
+## Установка (Install PWA)
+
+1. Откройте приложение в Chrome/Edge: `http://localhost:8080`.
+2. Дождитесь появления кнопки установки в адресной строке (или через меню браузера `Install app`).
+3. Установите приложение на устройство.
+
+Проверка в DevTools:
+
+- `Application -> Manifest`:
+  - есть `display: standalone`, `start_url: /`, `scope: /`;
+  - иконки `pwa-192.png` и `pwa-512.png` с `purpose: any/maskable`;
+  - есть `screenshots`.
+- `Application -> Service Workers`:
+  - активен `sw.js` из корня сайта.
+- `Lighthouse -> PWA`:
+  - раздел installability проходит без ошибки по icon.
