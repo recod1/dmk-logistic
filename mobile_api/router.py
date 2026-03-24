@@ -187,6 +187,9 @@ def _try_apply_point_status(point: Point, to_status: str, occurred_at_client: da
 
 
 def _refresh_route_status_if_completed(db: Session, route: Route) -> None:
+    if route.status == "cancelled":
+        return
+
     point_statuses = db.scalars(select(Point.status).where(Point.route_id == route.id)).all()
     if point_statuses and all(status == "success" for status in point_statuses):
         route.status = "success"
