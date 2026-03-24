@@ -131,9 +131,11 @@ export interface AdminRouteCreatePayload {
   points?: AdminRoutePointPayload[];
 }
 
+export type RouteWorkflowStatus = "new" | "process" | "success" | "cancelled";
+
 export interface AdminRoute {
   id: string;
-  status: string;
+  status: RouteWorkflowStatus;
   number_auto: string;
   temperature: string;
   dispatcher_contacts: string;
@@ -167,5 +169,13 @@ export interface AdminRoutesListResponse {
 
 export interface DriversResponse {
   items: DriverOption[];
+}
+
+export interface AdminRouteActionPayload {
+  reason?: string;
+}
+
+export interface RouteStatusUpdatePayload {
+  status: RouteWorkflowStatus;
 }
 

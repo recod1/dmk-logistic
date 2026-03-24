@@ -15,6 +15,14 @@ from mobile_api.roles import RoleCode, role_label_ru
 
 router = APIRouter(prefix="/v1/admin/routes", tags=["admin-routes"])
 
+ROUTE_STATUS_TRANSITIONS: dict[str, set[str]] = {
+    "new": {"process", "cancelled"},
+    "process": {"success", "cancelled"},
+    "success": set(),
+    "cancelled": set(),
+}
+ROUTE_LIST_STATUSES: tuple[str, ...] = ("new", "process", "success", "cancelled")
+
 
 class AdminRoutePointCreate(BaseModel):
     type_point: str = Field(min_length=1, max_length=32)
@@ -36,6 +44,10 @@ class AdminRouteCreatePayload(BaseModel):
 
 class AssignDriverPayload(BaseModel):
     driver_user_id: int
+
+
+class UpdateRouteStatusPayload(BaseModel):
+    status: str = Field(min_length=1, max_length=32)
 
 
 def _route_points(db: Session, route_id: str) -> list[Point]:
@@ -101,6 +113,27 @@ def _route_out(db: Session, route: Route, include_points: bool = False) -> dict:
         "points_count": points_count,
         "points": [_point_out(point, idx) for idx, point in enumerate(points)] if include_points else None,
     }
+
+
+def _normalize_route_status(status_value: str) -> str:
+    status_norm = (status_value or "").strip().lower()
+    return status_norm
+
+
+def _assert_route_status_transition(current_status: str, next_status: str) -> None:
+    allowed = ROUTE_STATUS_TRANSITIONS.get(current_status, set())
+    if next_status not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid route status transition: {current_status} -> {next_status}",
+        )
+
+
+def _can_mark_success(db: Session, route_id: str) -> bool:
+    statuses = db.scalars(select(Point.status).where(Point.route_id == route_id)).all()
+    if not statuses:
+        return False
+    return all(point_status == "success" for point_status in statuses)
 
 
 def _ensure_driver(db: Session, driver_user_id: int) -> User:
@@ -226,6 +259,80 @@ def assign_route_driver(
     driver = _ensure_driver(db, payload.driver_user_id)
     route.assigned_user_id = driver.id
     route.legacy_driver_tg_id = int(driver.legacy_tg_id) if (driver.legacy_tg_id or "").isdigit() else None
+    db.add(route)
+    db.commit()
+    db.refresh(route)
+    return _route_out(db, route, include_points=True)
+
+
+@router.post("/{route_id}/cancel")
+def cancel_route(
+    route_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_route_manager),
+) -> dict:
+    route = db.get(Route, route_id)
+    if route is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
+
+    _assert_route_status_transition(route.status, "cancelled")
+    route.status = "cancelled"
+    db.add(route)
+    db.commit()
+    db.refresh(route)
+    return _route_out(db, route, include_points=True)
+
+
+@router.post("/{route_id}/complete")
+def complete_route(
+    route_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_route_manager),
+) -> dict:
+    route = db.get(Route, route_id)
+    if route is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
+
+    _assert_route_status_transition(route.status, "success")
+    if not _can_mark_success(db, route.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot complete route: not all points are in success status",
+        )
+
+    route.status = "success"
+    db.add(route)
+    db.commit()
+    db.refresh(route)
+    return _route_out(db, route, include_points=True)
+
+
+@router.patch("/{route_id}/status")
+def update_route_status(
+    route_id: str,
+    payload: UpdateRouteStatusPayload,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_route_manager),
+) -> dict:
+    route = db.get(Route, route_id)
+    if route is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
+
+    next_status = _normalize_route_status(payload.status)
+    if next_status not in ROUTE_STATUS_TRANSITIONS:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unsupported route status")
+
+    if route.status == next_status:
+        return _route_out(db, route, include_points=True)
+
+    _assert_route_status_transition(route.status, next_status)
+    if next_status == "success" and not _can_mark_success(db, route.id):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot complete route: not all points are in success status",
+        )
+
+    route.status = next_status
     db.add(route)
     db.commit()
     db.refresh(route)

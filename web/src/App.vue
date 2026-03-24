@@ -8,6 +8,8 @@ import LoginView from "./components/LoginView.vue";
 import {
   acceptRoute,
   assignAdminRouteDriver,
+  cancelAdminRoute,
+  completeAdminRoute,
   createAdminRoute,
   createAdminUser,
   getActiveRoute,
@@ -49,7 +51,7 @@ const routesLoading = ref(false);
 const routesError = ref("");
 
 const isAuthed = computed(() => Boolean(authToken.value));
-const onlineLabel = computed(() => (isOnline.value ? "online" : "offline"));
+const onlineLabel = computed(() => (isOnline.value ? "Онлайн" : "Офлайн"));
 const isAdmin = computed(() => isAdminRole(authUser.value?.role_code || ""));
 const isRouteManager = computed(() => isRouteManagerRole(authUser.value?.role_code || ""));
 const isDriver = computed(() => authUser.value?.role_code === "driver");
@@ -270,6 +272,38 @@ async function doAssignAdminRoute(routeId: string, driverUserId: number): Promis
   }
 }
 
+async function doCancelAdminRoute(routeId: string): Promise<void> {
+  if (!authToken.value || !isRouteManager.value) {
+    return;
+  }
+  routesLoading.value = true;
+  routesError.value = "";
+  try {
+    selectedAdminRoute.value = await cancelAdminRoute(authToken.value, routeId);
+    await refreshAdminRoutes();
+  } catch (error) {
+    routesError.value = `Ошибка отмены рейса: ${(error as Error).message}`;
+  } finally {
+    routesLoading.value = false;
+  }
+}
+
+async function doCompleteAdminRoute(routeId: string): Promise<void> {
+  if (!authToken.value || !isRouteManager.value) {
+    return;
+  }
+  routesLoading.value = true;
+  routesError.value = "";
+  try {
+    selectedAdminRoute.value = await completeAdminRoute(authToken.value, routeId);
+    await refreshAdminRoutes();
+  } catch (error) {
+    routesError.value = `Ошибка завершения рейса: ${(error as Error).message}`;
+  } finally {
+    routesLoading.value = false;
+  }
+}
+
 async function doLogin(loginValue: string, password: string): Promise<void> {
   authError.value = "";
   authLoading.value = true;
@@ -393,7 +427,7 @@ onUnmounted(() => {
   <main class="container">
     <header class="topbar">
       <div>
-        <strong>DMK Mobile</strong>
+        <strong>ДМК Логистика</strong>
         <small>{{ onlineLabel }}</small>
       </div>
       <div class="actions">
@@ -447,6 +481,8 @@ onUnmounted(() => {
         @create="doCreateAdminRoute"
         @select-route="doSelectAdminRoute"
         @assign-driver="doAssignAdminRoute"
+        @cancel-route="doCancelAdminRoute"
+        @complete-route="doCompleteAdminRoute"
       />
     </section>
 

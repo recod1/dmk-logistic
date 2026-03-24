@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref } from "vue";
 
-import type { AdminRoute, DriverOption } from "../types";
+import type { AdminRoute, DriverOption, RouteWorkflowStatus } from "../types";
 
 const props = defineProps<{
   routes: AdminRoute[];
@@ -27,6 +27,8 @@ const emit = defineEmits<{
   ];
   selectRoute: [routeId: string];
   assignDriver: [routeId: string, driverUserId: number];
+  cancelRoute: [routeId: string];
+  completeRoute: [routeId: string];
 }>();
 
 const showCreate = ref(false);
@@ -94,6 +96,28 @@ function submitCreate(): void {
 function selectedAssignDriver(routeId: string): number {
   return assignSelections[routeId] ?? 0;
 }
+
+function statusLabel(status: RouteWorkflowStatus): string {
+  const labels: Record<RouteWorkflowStatus, string> = {
+    new: "Новый",
+    process: "В процессе",
+    success: "Завершен",
+    cancelled: "Отменен"
+  };
+  return labels[status] ?? status;
+}
+
+function canCancel(status: RouteWorkflowStatus): boolean {
+  return status === "new" || status === "process";
+}
+
+function canComplete(route: AdminRoute): boolean {
+  if (route.status !== "process") {
+    return false;
+  }
+  const points = route.points ?? [];
+  return points.length > 0 && points.every((point) => point.status === "success");
+}
 </script>
 
 <template>
@@ -123,7 +147,7 @@ function selectedAssignDriver(routeId: string): number {
         <tbody>
           <tr v-for="route in routes" :key="route.id">
             <td>{{ route.id }}</td>
-            <td>{{ route.status }}</td>
+            <td>{{ statusLabel(route.status) }}</td>
             <td>{{ route.driver?.full_name || route.driver?.login || "—" }}</td>
             <td>{{ route.number_auto || "—" }}</td>
             <td>{{ route.points_count }}</td>
@@ -140,6 +164,18 @@ function selectedAssignDriver(routeId: string): number {
                 @click="emit('assignDriver', route.id, selectedAssignDriver(route.id))"
               >
                 Назначить
+              </button>
+              <button
+                :disabled="loading || !canCancel(route.status)"
+                @click="emit('cancelRoute', route.id)"
+              >
+                Отменить
+              </button>
+              <button
+                :disabled="loading || !canComplete(route)"
+                @click="emit('completeRoute', route.id)"
+              >
+                Завершить
               </button>
             </td>
           </tr>
@@ -196,7 +232,7 @@ function selectedAssignDriver(routeId: string): number {
 
     <section v-if="selectedRoute" class="card detail-card">
       <h2>Рейс #{{ selectedRoute.id }}</h2>
-      <p><strong>Статус:</strong> {{ selectedRoute.status }}</p>
+      <p><strong>Статус:</strong> {{ statusLabel(selectedRoute.status) }}</p>
       <p><strong>Водитель:</strong> {{ selectedRoute.driver?.full_name || selectedRoute.driver?.login || "—" }}</p>
       <p><strong>ТС:</strong> {{ selectedRoute.number_auto || "—" }}</p>
       <h3>Точки</h3>
