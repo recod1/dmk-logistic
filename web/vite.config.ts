@@ -7,7 +7,7 @@ export default defineConfig({
     vue(),
     VitePWA({
       registerType: "autoUpdate",
-      includeAssets: [],
+      includeAssets: ["logo.jpg", "pwa-192.png", "pwa-512.png", "apple-touch-icon.png", "screenshots/pwa-home-1280x720.png"],
       manifest: {
         name: "DMK Mobile",
         short_name: "DMK",
@@ -17,10 +17,44 @@ export default defineConfig({
         display: "standalone",
         scope: "/",
         start_url: "/",
-        icons: []
+        icons: [
+          {
+            src: "/pwa-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "any"
+          },
+          {
+            src: "/pwa-192.png",
+            sizes: "192x192",
+            type: "image/png",
+            purpose: "maskable"
+          },
+          {
+            src: "/pwa-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "any"
+          },
+          {
+            src: "/pwa-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable"
+          }
+        ],
+        screenshots: [
+          {
+            src: "/screenshots/pwa-home-1280x720.png",
+            sizes: "1280x720",
+            type: "image/png",
+            form_factor: "wide",
+            label: "Главный экран приложения DMK Mobile"
+          }
+        ]
       },
       workbox: {
-        globPatterns: ["**/*.{js,css,html,ico,png,svg,json}"]
+        globPatterns: ["**/*.{js,css,html,ico,png,jpg,jpeg,svg,json,webmanifest}"]
       }
     })
   ],
@@ -29,4 +63,3 @@ export default defineConfig({
     port: 5173
   }
 });
-

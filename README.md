@@ -9,6 +9,12 @@
    - Mobile API (`/v1/mobile/*`)
    - PWA (Vue 3 + Vite + TS + Dexie offline outbox)
 
+## Документация
+
+- [PWA возможности и роли](./docs/PWA.md)
+- [Структура БД и связи](./docs/DATABASE.md)
+- [Перенос SQLite -> Postgres](./MIGRATION.md)
+
 ## Быстрый запуск нового стека (docker-compose)
 
 ```bash
@@ -28,6 +34,8 @@ Nginx проксирует backend как `/api/*`:
 - `/api/v1/mobile/routes/active`
 - `/api/v1/mobile/routes/{id}/accept`
 - `/api/v1/mobile/events:batch`
+- `/api/v1/admin/users`
+- `/api/v1/admin/routes`
 
 ## Deploy/CI (Docker Hub + Portainer)
 
@@ -143,7 +151,9 @@ python scripts/create_mobile_user.py \
   --pg-dsn "$POSTGRES_DSN" \
   --login driver1 \
   --password StrongPass123! \
-  --role driver
+  --role driver \
+  --full-name "Иванов Иван" \
+  --phone "+79990000000"
 ```
 
 Создание администратора:
@@ -153,15 +163,36 @@ python scripts/create_mobile_user.py \
   --pg-dsn "$POSTGRES_DSN" \
   --login admin1 \
   --password StrongAdminPass123! \
-  --role admin
+  --role admin \
+  --full-name "Петров Петр"
 ```
 
-## Экран управления пользователями (PWA)
+Допустимые роли (`--role`): `driver`, `logistic`, `accountant`, `admin`, `superadmin`
+или русские значения: `Водитель`, `Логист`, `Бухгалтер`, `Администратор`, `Супер-админ`.
 
-- Вход под пользователем с ролью `admin`.
-- В верхней панели появится раздел **«Пользователи»**.
-- На экране доступны:
-  - список пользователей;
-  - создание пользователя;
-  - редактирование login/role/password;
-  - блокировка/разблокировка (`is_active`).
+## Экраны PWA по ролям
+
+- `admin` / `superadmin`:
+  - раздел **Пользователи** (CRUD + блок/разблок);
+  - раздел **Рейсы** (создание/просмотр/назначение водителя).
+- `logistic` / `accountant`:
+  - раздел **Рейсы** (создание/просмотр/назначение водителя).
+- `driver`:
+  - экран **Мой рейс** + офлайн-статусы точек через outbox.
+
+## Установка (Install PWA)
+
+1. Откройте приложение в Chrome/Edge: `http://localhost:8080`.
+2. Дождитесь появления кнопки установки в адресной строке (или через меню браузера `Install app`).
+3. Установите приложение на устройство.
+
+Проверка в DevTools:
+
+- `Application -> Manifest`:
+  - есть `display: standalone`, `start_url: /`, `scope: /`;
+  - иконки `pwa-192.png` и `pwa-512.png` с `purpose: any/maskable`;
+  - есть `screenshots`.
+- `Application -> Service Workers`:
+  - активен `sw.js` из корня сайта.
+- `Lighthouse -> PWA`:
+  - раздел installability проходит без ошибки по icon.
