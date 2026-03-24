@@ -166,3 +166,20 @@ export async function assignAdminRouteDriver(token: string, routeId: string, dri
   });
 }
 
+export async function cancelAdminRoute(token: string, routeId: string): Promise<AdminRoute> {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${routeId}/cancel`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}
+
+export async function completeAdminRoute(token: string, routeId: string): Promise<AdminRoute> {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${routeId}/complete`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}

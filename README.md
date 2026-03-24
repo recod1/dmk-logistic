@@ -36,6 +36,9 @@ Nginx проксирует backend как `/api/*`:
 - `/api/v1/mobile/events:batch`
 - `/api/v1/admin/users`
 - `/api/v1/admin/routes`
+- `/api/v1/admin/routes/{id}/assign`
+- `/api/v1/admin/routes/{id}/cancel`
+- `/api/v1/admin/routes/{id}/complete`
 
 ## Deploy/CI (Docker Hub + Portainer)
 
@@ -174,11 +177,22 @@ python scripts/create_mobile_user.py \
 
 - `admin` / `superadmin`:
   - раздел **Пользователи** (CRUD + блок/разблок);
-  - раздел **Рейсы** (создание/просмотр/назначение водителя).
+  - раздел **Рейсы** (создание/просмотр/назначение водителя/завершение/отмена).
 - `logistic` / `accountant`:
-  - раздел **Рейсы** (создание/просмотр/назначение водителя).
+  - раздел **Рейсы** (создание/просмотр/назначение водителя/завершение/отмена).
 - `driver`:
   - экран **Мой рейс** + офлайн-статусы точек через outbox.
+
+## Исправление автоскачивания файла в браузере
+
+Если при открытии приложения браузер скачивал файл без имени, причина была в некорректной раздаче статики.
+Исправлено:
+
+- явный `<link rel="manifest" href="/manifest.webmanifest">` в `web/index.html`;
+- в `nginx.conf` добавлены отдельные `location` для `/manifest.webmanifest` и `/sw.js`, чтобы они не попадали в SPA fallback;
+- раздача `manifest.webmanifest` с `Content-Type: application/manifest+json`;
+- для `sw.js` установлен корректный JS mime-type и no-cache;
+- явный заголовок `Content-Disposition: inline` для `manifest.webmanifest` и `sw.js`.
 
 ## Установка (Install PWA)
 

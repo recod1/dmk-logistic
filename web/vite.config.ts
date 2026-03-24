@@ -9,8 +9,8 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["logo.jpg", "pwa-192.png", "pwa-512.png", "apple-touch-icon.png", "screenshots/pwa-home-1280x720.png"],
       manifest: {
-        name: "DMK Mobile",
-        short_name: "DMK",
+        name: "ДМК",
+        short_name: "ДМК",
         description: "Offline-first mobile route tracker",
         theme_color: "#0f172a",
         background_color: "#0f172a",
@@ -49,7 +49,7 @@ export default defineConfig({
             sizes: "1280x720",
             type: "image/png",
             form_factor: "wide",
-            label: "Главный экран приложения DMK Mobile"
+            label: "Главный экран приложения ДМК Логистика"
           }
         ]
       },
