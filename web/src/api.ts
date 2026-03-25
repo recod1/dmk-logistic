@@ -12,6 +12,8 @@ import type {
   DriverOption,
   EventPayload,
   LoginResponse,
+  NotificationDto,
+  PointDto,
   RouteDto
 } from "./types";
 
@@ -120,7 +122,13 @@ export async function listRouteDrivers(token: string): Promise<DriverOption[]> {
 
 export async function listAdminRoutes(
   token: string,
-  params?: { status?: string; driver_user_id?: number }
+  params?: {
+    status?: string;
+    driver_user_id?: number;
+    route_id?: string;
+    number_auto?: string;
+    driver_query?: string;
+  }
 ): Promise<AdminRoute[]> {
   const qs = new URLSearchParams();
   if (params?.status) {
@@ -128,6 +136,15 @@ export async function listAdminRoutes(
   }
   if (typeof params?.driver_user_id === "number") {
     qs.set("driver_user_id", String(params.driver_user_id));
+  }
+  if (params?.route_id) {
+    qs.set("route_id", params.route_id);
+  }
+  if (params?.number_auto) {
+    qs.set("number_auto", params.number_auto);
+  }
+  if (params?.driver_query) {
+    qs.set("driver_query", params.driver_query);
   }
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
   const data = await requestJson<AdminRoutesListResponse>(`${API_BASE}/v1/admin/routes${suffix}`, {
@@ -182,4 +199,71 @@ export async function completeAdminRoute(token: string, routeId: string): Promis
       Authorization: `Bearer ${token}`
     }
   });
+}
+
+export async function updateAdminRoute(
+  token: string,
+  routeId: string,
+  payload: {
+    number_auto?: string;
+    temperature?: string;
+    dispatcher_contacts?: string;
+    registration_number?: string;
+    trailer_number?: string;
+    points?: AdminRouteCreatePayload["points"];
+  }
+): Promise<AdminRoute> {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${routeId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateAdminRoutePoint(
+  token: string,
+  pointId: number,
+  payload: Partial<{
+    type_point: string;
+    place_point: string;
+    date_point: string;
+    point_name: string;
+    point_contacts: string;
+    point_time: string;
+    point_note: string;
+  }>
+): Promise<PointDto> {
+  return requestJson<PointDto>(`${API_BASE}/v1/admin/routes/points/${pointId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function deleteAdminRoutePoint(token: string, pointId: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/v1/admin/routes/points/${pointId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `HTTP ${response.status}`);
+  }
+}
+
+export async function listNotifications(token: string, limit = 50): Promise<NotificationDto[]> {
+  const qs = new URLSearchParams();
+  qs.set("limit", String(limit));
+  const data = await requestJson<{ items: NotificationDto[] }>(`${API_BASE}/v1/notifications?${qs.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.items;
 }

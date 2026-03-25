@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import { nextStatus, statusLabel } from "../status";
+import { nextStatus, nextStatusLabel, statusLabel } from "../status";
 import type { PointDto } from "../types";
 
 const props = defineProps<{
@@ -18,6 +18,11 @@ const sortedPoints = computed(() => props.points.slice());
 function canAdvance(point: PointDto): boolean {
   return nextStatus(point.status) !== null;
 }
+
+function nextLabel(point: PointDto): string {
+  const label = nextStatusLabel(point.status);
+  return label ? `Следующий статус: ${label}` : "Завершено";
+}
 </script>
 
 <template>
@@ -30,8 +35,14 @@ function canAdvance(point: PointDto): boolean {
       </div>
       <p>{{ point.place_point }}</p>
       <small>{{ point.date_point }}</small>
+      <small v-if="point.point_name || point.point_contacts || point.point_time || point.point_note" class="point-meta">
+        {{ point.point_name || "Без названия" }}
+        <span v-if="point.point_contacts"> · {{ point.point_contacts }}</span>
+        <span v-if="point.point_time"> · {{ point.point_time }}</span>
+      </small>
+      <small v-if="point.point_note" class="point-note">{{ point.point_note }}</small>
       <button :disabled="!canAdvance(point) || syncing" @click="emit('advanceStatus', point.id)">
-        {{ canAdvance(point) ? "Следующий статус" : "Завершено" }}
+        {{ nextLabel(point) }}
       </button>
     </article>
   </section>
@@ -53,17 +64,24 @@ function canAdvance(point: PointDto): boolean {
 .title-row {
   display: flex;
   justify-content: space-between;
+  flex-wrap: wrap;
   gap: 0.6rem;
 }
 .status {
   color: #93c5fd;
+}
+.point-meta {
+  color: #9ca3af;
+}
+.point-note {
+  color: #d1d5db;
 }
 p,
 small {
   margin: 0;
 }
 button {
-  width: fit-content;
+  width: 100%;
   background: #10b981;
   color: #052e1f;
   border: none;

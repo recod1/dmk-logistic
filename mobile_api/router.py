@@ -11,6 +11,12 @@ from sqlalchemy.orm import Session
 from mobile_api.auth import create_access_token, get_current_driver, verify_password
 from mobile_api.db import get_db
 from mobile_api.models import Point, Route, RouteEvent, RoutePoint, User
+from mobile_api.route_notification_logic import (
+    build_point_status_changed_notifications,
+    build_route_assigned_notifications,
+    build_route_completed_notifications,
+    persist_notifications,
+)
 from mobile_api.roles import role_label_ru
 
 
@@ -64,6 +70,10 @@ def _point_to_dict(point: Point) -> dict:
         "type_point": point.type_point,
         "place_point": point.place_point,
         "date_point": point.date_point,
+        "point_name": point.point_name,
+        "point_contacts": point.point_contacts,
+        "point_time": point.point_time,
+        "point_note": point.point_note,
         "status": point.status,
         "time_accepted": point.time_accepted.isoformat() if point.time_accepted else None,
         "time_registration": point.time_registration.isoformat() if point.time_registration else None,
@@ -95,6 +105,7 @@ def _route_snapshot(db: Session, route: Route) -> dict:
         "dispatcher_contacts": route.dispatcher_contacts,
         "registration_number": route.registration_number,
         "trailer_number": route.trailer_number,
+        "created_at": route.created_at.isoformat() if route.created_at else None,
         "accepted_at": route.accepted_at.isoformat() if route.accepted_at else None,
         "points": [_point_to_dict(p) for p in points],
     }
@@ -163,6 +174,14 @@ def accept_route(
         route.status = "process"
         route.accepted_at = datetime.now(timezone.utc)
         db.add(route)
+        persist_notifications(
+            db,
+            build_route_assigned_notifications(
+                route=route,
+                assigned_user=current_user,
+                actor_user=current_user,
+            ),
+        )
         db.commit()
         db.refresh(route)
 
@@ -304,6 +323,21 @@ def batch_events(
         if applied:
             db.add(point)
             _refresh_route_status_if_completed(db, route)
+            persist_notifications(
+                db,
+                build_point_status_changed_notifications(
+                    route=route,
+                    point=point,
+                    actor_user=current_user,
+                    new_status=event.to_status,
+                ),
+            )
+            db.flush()
+            if route.status == "success":
+                persist_notifications(
+                    db,
+                    build_route_completed_notifications(route=route, actor_user=current_user),
+                )
 
         delta_ms = int((server_received_at - _as_utc(event.occurred_at_client)).total_seconds() * 1000)
         results.append(

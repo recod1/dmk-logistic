@@ -10,5 +10,11 @@
 body {
   margin: 0;
   background: #030712;
+  overflow-x: hidden;
+}
+
+#app {
+  width: 100%;
+  overflow-x: hidden;
 }
 

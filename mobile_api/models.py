@@ -46,6 +46,7 @@ class User(Base):
         back_populates="created_by",
         foreign_keys="Route.created_by_user_id",
     )
+    notifications: Mapped[list[Notification]] = relationship(back_populates="user")
 
 
 class Route(Base):
@@ -83,6 +84,7 @@ class Route(Base):
         order_by="RoutePoint.order_index",
         cascade="all, delete-orphan",
     )
+    notifications: Mapped[list[Notification]] = relationship(back_populates="route")
 
 
 class Point(Base):
@@ -93,6 +95,10 @@ class Point(Base):
     type_point: Mapped[str] = mapped_column(String(32), nullable=False)
     place_point: Mapped[str] = mapped_column(Text, nullable=False)
     date_point: Mapped[str] = mapped_column(String(64), nullable=False)
+    point_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    point_contacts: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    point_time: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
+    point_note: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
 
     time_accepted: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     time_departure: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -115,6 +121,7 @@ class Point(Base):
     route: Mapped[Route] = relationship(back_populates="points")
     route_links: Mapped[list[RoutePoint]] = relationship(back_populates="point")
     events: Mapped[list[RouteEvent]] = relationship(back_populates="point")
+    notifications: Mapped[list[Notification]] = relationship(back_populates="point")
 
 
 class RoutePoint(Base):
@@ -159,6 +166,31 @@ class RouteEvent(Base):
     )
 
     point: Mapped[Point] = relationship(back_populates="events")
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    route_id: Mapped[str | None] = mapped_column(
+        ForeignKey("routes.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    point_id: Mapped[int | None] = mapped_column(
+        ForeignKey("points.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    event_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    payload_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    is_read: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+    user: Mapped[User] = relationship(back_populates="notifications")
+    route: Mapped[Route | None] = relationship(back_populates="notifications")
+    point: Mapped[Point | None] = relationship(back_populates="notifications")
 
 
 class Salary(Base):

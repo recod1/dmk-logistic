@@ -23,3 +23,11 @@ export function statusLabel(status: PointStatus): string {
   return STATUS_LABELS[status] ?? status;
 }
 
+export function nextStatusLabel(current: PointStatus): string | null {
+  const next = nextStatus(current);
+  if (!next) {
+    return null;
+  }
+  return statusLabel(next);
+}
+
