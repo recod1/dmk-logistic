@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.auth import create_access_token, get_current_driver, verify_password
 from mobile_api.db import get_db
+from mobile_api.driver_trip_rules import DriverRouteState, can_accept_route, pick_active_route
 from mobile_api.models import Point, Route, RouteEvent, RoutePoint, User
 from mobile_api.route_notification_logic import (
     build_point_status_changed_notifications,
@@ -47,6 +48,8 @@ class BatchEventPayload(BaseModel):
     occurred_at_client: datetime
     point_id: int
     to_status: Literal["process", "registration", "load", "docs", "success"]
+    odometer: str | None = Field(default=None, max_length=128)
+    coordinates: dict | None = None
 
 
 class BatchEventsRequest(BaseModel):
@@ -80,6 +83,8 @@ def _point_to_dict(point: Point) -> dict:
         "time_put_on_gate": point.time_put_on_gate.isoformat() if point.time_put_on_gate else None,
         "time_docs": point.time_docs.isoformat() if point.time_docs else None,
         "time_departure": point.time_departure.isoformat() if point.time_departure else None,
+        "odometer": point.odometer,
+        "coordinates": {"lat": point.lat, "lng": point.lng},
     }
 
 
@@ -112,15 +117,52 @@ def _route_snapshot(db: Session, route: Route) -> dict:
 
 
 def _active_route_for_user(db: Session, user_id: int) -> Route | None:
-    return db.scalar(
+    rows = db.scalars(
         select(Route)
         .where(Route.assigned_user_id == user_id, Route.status.in_(["new", "process"]))
-        .order_by(
-            case((Route.status == "process", 0), else_=1),
-            Route.created_at.desc(),
-        )
-        .limit(1)
+        .order_by(Route.created_at.asc(), Route.id.asc())
+    ).all()
+    if not rows:
+        return None
+    active = pick_active_route(
+        [
+            DriverRouteState(id=item.id, status=item.status, created_at=item.created_at)
+            for item in rows
+        ]
     )
+    if active is None:
+        return None
+    return next((route for route in rows if route.id == active.id), None)
+
+
+def _driver_routes_for_user(db: Session, user_id: int) -> list[Route]:
+    return db.scalars(
+        select(Route)
+        .where(Route.assigned_user_id == user_id)
+        .order_by(
+            case((Route.status == "process", 0), (Route.status == "new", 1), else_=2),
+            Route.created_at.asc(),
+        )
+    ).all()
+
+
+def _route_summary(db: Session, route: Route) -> dict:
+    points = _get_ordered_points(db, route.id)
+    active_point = next((point for point in points if point.status != "success"), points[-1] if points else None)
+    return {
+        "id": route.id,
+        "status": route.status,
+        "number_auto": route.number_auto,
+        "temperature": route.temperature,
+        "dispatcher_contacts": route.dispatcher_contacts,
+        "registration_number": route.registration_number,
+        "trailer_number": route.trailer_number,
+        "created_at": route.created_at.isoformat() if route.created_at else None,
+        "accepted_at": route.accepted_at.isoformat() if route.accepted_at else None,
+        "points_count": len(points),
+        "active_point_id": active_point.id if active_point else None,
+        "active_point_status": active_point.status if active_point else None,
+    }
 
 
 @router.post("/auth/login")
@@ -157,8 +199,31 @@ def get_active_route(
     return {"route": _route_snapshot(db, route)}
 
 
-@router.post("/v1/mobile/routes/{route_id}/accept")
-def accept_route(
+@router.get("/v1/mobile/routes")
+def list_driver_routes(
+    scope: Literal["assigned", "history", "all"] = "assigned",
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_driver),
+) -> dict:
+    all_routes = _driver_routes_for_user(db, current_user.id)
+    if scope == "assigned":
+        routes = [route for route in all_routes if route.status in {"new", "process"}]
+    elif scope == "history":
+        routes = [route for route in all_routes if route.status in {"success", "cancelled"}]
+    else:
+        routes = all_routes
+
+    active = pick_active_route(
+        [DriverRouteState(id=item.id, status=item.status, created_at=item.created_at) for item in all_routes]
+    )
+    return {
+        "items": [_route_summary(db, route) for route in routes],
+        "active_route_id": active.id if active else None,
+    }
+
+
+@router.get("/v1/mobile/routes/{route_id}")
+def get_driver_route(
     route_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_driver),
@@ -168,8 +233,27 @@ def accept_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
     if route.assigned_user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Route is assigned to another user")
-    if route.status not in {"new", "process"}:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Route already {route.status}")
+    return {"route": _route_snapshot(db, route)}
+
+
+@router.post("/v1/mobile/routes/{route_id}/accept")
+def accept_route(
+    route_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_driver),
+) -> dict:
+    all_routes = _driver_routes_for_user(db, current_user.id)
+    route = next((item for item in all_routes if item.id == route_id), None)
+    if route is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
+
+    allowed, reason = can_accept_route(
+        route_id,
+        [DriverRouteState(id=item.id, status=item.status, created_at=item.created_at) for item in all_routes],
+    )
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=reason or "Route cannot be accepted")
+
     if route.status == "new":
         route.status = "process"
         route.accepted_at = datetime.now(timezone.utc)
@@ -203,6 +287,22 @@ def _try_apply_point_status(point: Point, to_status: str, occurred_at_client: da
     if time_column:
         setattr(point, time_column, occurred_at_client)
     return True, None
+
+
+def _apply_point_telemetry(point: Point, odometer: str | None, coordinates: dict | None) -> None:
+    if odometer is not None:
+        point.odometer = odometer.strip() if isinstance(odometer, str) else str(odometer)
+    if coordinates and isinstance(coordinates, dict):
+        lat_value = coordinates.get("lat")
+        lng_value = coordinates.get("lng")
+        if isinstance(lat_value, (int, float)):
+            point.lat = float(lat_value)
+        if isinstance(lng_value, (int, float)):
+            point.lng = float(lng_value)
+
+
+def _manager_notification_recipient_ids(db: Session) -> list[int]:
+    return [int(item) for item in db.scalars(select(User.id).where(User.role_code.in_(["admin", "superadmin", "logistic"]))).all()]
 
 
 def _refresh_route_status_if_completed(db: Session, route: Route) -> None:
@@ -321,22 +421,32 @@ def batch_events(
         )
         db.add(stored_event)
         if applied:
+            _apply_point_telemetry(point, event.odometer, event.coordinates)
             db.add(point)
             _refresh_route_status_if_completed(db, route)
+            manager_ids = _manager_notification_recipient_ids(db)
+            point_notifications = build_point_status_changed_notifications(
+                route=route,
+                point=point,
+                actor_user=current_user,
+                new_status=event.to_status,
+            )
+            for item in point_notifications:
+                base_recipients = [user_id for user_id in item.get("user_ids", []) if user_id]
+                item["user_ids"] = sorted(set(base_recipients + manager_ids))
             persist_notifications(
                 db,
-                build_point_status_changed_notifications(
-                    route=route,
-                    point=point,
-                    actor_user=current_user,
-                    new_status=event.to_status,
-                ),
+                point_notifications,
             )
             db.flush()
             if route.status == "success":
+                completed_notifications = build_route_completed_notifications(route=route, actor_user=current_user)
+                for item in completed_notifications:
+                    base_recipients = [user_id for user_id in item.get("user_ids", []) if user_id]
+                    item["user_ids"] = sorted(set(base_recipients + manager_ids))
                 persist_notifications(
                     db,
-                    build_route_completed_notifications(route=route, actor_user=current_user),
+                    completed_notifications,
                 )
 
         delta_ms = int((server_received_at - _as_utc(event.occurred_at_client)).total_seconds() * 1000)

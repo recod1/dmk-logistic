@@ -32,6 +32,11 @@ export interface PointDto {
   time_put_on_gate: string | null;
   time_docs: string | null;
   time_departure: string | null;
+  odometer?: string | null;
+  coordinates?: {
+    lat: number | null;
+    lng: number | null;
+  } | null;
 }
 
 export interface RouteDto {
@@ -56,6 +61,11 @@ export interface EventPayload {
   occurred_at_client: string;
   point_id: number;
   to_status: Exclude<PointStatus, "new">;
+  odometer?: string | null;
+  coordinates?: {
+    lat?: number | null;
+    lng?: number | null;
+  } | null;
 }
 
 export interface BatchResultItem {
@@ -172,6 +182,11 @@ export interface AdminRoute {
       time_put_on_gate: string | null;
       time_docs: string | null;
       time_departure: string | null;
+      odometer?: string | null;
+      coordinates?: {
+        lat: number | null;
+        lng: number | null;
+      } | null;
     }
   > | null;
 }
@@ -201,5 +216,20 @@ export interface NotificationDto {
   point_id: number | null;
   is_read: boolean;
   created_at: string;
+}
+
+export interface DriverRouteListItem {
+  id: string;
+  status: string;
+  number_auto: string;
+  temperature: string;
+  dispatcher_contacts: string;
+  registration_number: string;
+  trailer_number: string;
+  created_at: string | null;
+  accepted_at: string | null;
+  points_count: number;
+  active_point_id: number | null;
+  active_point_status: PointStatus | null;
 }
 

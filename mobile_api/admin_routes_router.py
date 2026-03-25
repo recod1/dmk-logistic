@@ -117,6 +117,8 @@ def _point_out(point: Point, order_index: int) -> dict:
         "time_put_on_gate": point.time_put_on_gate.isoformat() if point.time_put_on_gate else None,
         "time_docs": point.time_docs.isoformat() if point.time_docs else None,
         "time_departure": point.time_departure.isoformat() if point.time_departure else None,
+        "odometer": point.odometer,
+        "coordinates": {"lat": point.lat, "lng": point.lng},
     }
 
 
