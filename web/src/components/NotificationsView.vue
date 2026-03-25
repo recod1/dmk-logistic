@@ -5,10 +5,13 @@ defineProps<{
   items: NotificationDto[];
   loading: boolean;
   error: string;
+  unreadCount?: number;
 }>();
 
 const emit = defineEmits<{
   refresh: [];
+  markRead: [notificationId: number];
+  markAllRead: [];
 }>();
 
 function eventTypeLabel(eventType: string): string {
@@ -33,8 +36,11 @@ function formatDate(value: string): string {
 <template>
   <section class="notifications-wrap">
     <div class="head-row">
-      <h1>Уведомления</h1>
-      <button :disabled="loading" @click="emit('refresh')">Обновить</button>
+      <h1>Уведомления <span v-if="typeof unreadCount === 'number'" class="counter">({{ unreadCount }})</span></h1>
+      <div class="head-actions">
+        <button :disabled="loading" @click="emit('refresh')">Обновить</button>
+        <button :disabled="loading || !items.some((item) => !item.is_read)" @click="emit('markAllRead')">Прочитать всё</button>
+      </div>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
@@ -44,7 +50,7 @@ function formatDate(value: string): string {
     </article>
 
     <section class="list">
-      <article v-for="item in items" :key="item.id" class="card item-card">
+      <article v-for="item in items" :key="item.id" class="card item-card" :class="{ unread: !item.is_read }">
         <div class="row-top">
           <strong>{{ item.title }}</strong>
           <span class="type">{{ eventTypeLabel(item.event_type) }}</span>
@@ -54,6 +60,7 @@ function formatDate(value: string): string {
           <span v-if="item.route_id">Рейс: {{ item.route_id }}</span>
           <span v-if="item.point_id">Точка: {{ item.point_id }}</span>
           <span>{{ formatDate(item.created_at) }}</span>
+          <button v-if="!item.is_read" class="link-btn" @click="emit('markRead', item.id)">Отметить прочитанным</button>
         </div>
       </article>
     </section>
@@ -72,6 +79,11 @@ function formatDate(value: string): string {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+.head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
 .list {
   display: grid;
   gap: 0.55rem;
@@ -79,6 +91,9 @@ function formatDate(value: string): string {
 .item-card {
   display: grid;
   gap: 0.45rem;
+}
+.item-card.unread {
+  border-color: #ef4444;
 }
 .row-top {
   display: flex;
@@ -102,11 +117,24 @@ p {
   gap: 0.6rem;
   color: #94a3b8;
   font-size: 0.82rem;
+  align-items: center;
+}
+.counter {
+  color: #fca5a5;
 }
 .error {
   color: #fca5a5;
 }
 .empty-card {
   color: #94a3b8;
+}
+.link-btn {
+  width: auto;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  background: transparent;
+  color: #bfdbfe;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.78rem;
 }
 </style>

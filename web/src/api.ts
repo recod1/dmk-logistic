@@ -9,6 +9,7 @@ import type {
   AdminUsersListResponse,
   BatchResponse,
   DriversResponse,
+  DriverRouteListItem,
   DriverOption,
   EventPayload,
   LoginResponse,
@@ -17,7 +18,7 @@ import type {
   RouteDto
 } from "./types";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
+export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
@@ -44,6 +45,31 @@ export async function login(loginValue: string, password: string): Promise<Login
 
 export async function getActiveRoute(token: string): Promise<RouteDto | null> {
   const data = await requestJson<ActiveRouteResponse>(`${API_BASE}/v1/mobile/routes/active`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.route;
+}
+
+export async function listDriverRoutes(
+  token: string,
+  scope: "assigned" | "history" | "all" = "assigned"
+): Promise<{ items: DriverRouteListItem[]; active_route_id: string | null }> {
+  const qs = new URLSearchParams();
+  qs.set("scope", scope);
+  return requestJson<{ items: DriverRouteListItem[]; active_route_id: string | null }>(
+    `${API_BASE}/v1/mobile/routes?${qs.toString()}`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+}
+
+export async function getDriverRoute(token: string, routeId: string): Promise<RouteDto> {
+  const data = await requestJson<{ route: RouteDto }>(`${API_BASE}/v1/mobile/routes/${routeId}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }
@@ -266,4 +292,45 @@ export async function listNotifications(token: string, limit = 50): Promise<Noti
     }
   });
   return data.items;
+}
+
+export async function getUnreadNotificationsCount(token: string): Promise<number> {
+  const data = await requestJson<{ unread_count: number }>(`${API_BASE}/v1/notifications/unread-count`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.unread_count ?? 0;
+}
+
+export async function markNotificationRead(token: string, notificationId: number): Promise<NotificationDto> {
+  const data = await requestJson<{ item: NotificationDto }>(`${API_BASE}/v1/notifications/${notificationId}/read`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.item;
+}
+
+export async function markAllNotificationsRead(token: string): Promise<number> {
+  const data = await requestJson<{ updated: number }>(`${API_BASE}/v1/notifications/read-all`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.updated ?? 0;
+}
+
+export function notificationsWebSocketUrl(token: string): string {
+  const base = new URL(API_BASE, window.location.origin);
+  const wsProtocol = base.protocol === "https:" ? "wss:" : "ws:";
+  const normalizedApiPath = base.pathname.replace(/\/$/, "");
+  const wsPath = normalizedApiPath.endsWith("/v1")
+    ? `${normalizedApiPath}/notifications/ws`
+    : `${normalizedApiPath}/v1/notifications/ws`;
+  const wsUrl = new URL(`${wsProtocol}//${base.host}${wsPath}`);
+  wsUrl.searchParams.set("token", token);
+  return wsUrl.toString();
 }

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import json
+import threading
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any
@@ -9,6 +11,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from mobile_api.models import Notification, Point, Route, User
+from mobile_api.notifications_realtime import notifications_realtime_hub
 
 POINT_STATUS_LABELS_RU: dict[str, str] = {
     "new": "Новая",
@@ -37,20 +40,59 @@ def create_notification_for_users(
 
     payload_json = json.dumps(payload, ensure_ascii=False) if payload else None
     created_at = datetime.now(timezone.utc)
+    created_items: list[dict[str, Any]] = []
     for user_id in unique_ids:
-        db.add(
-            Notification(
-                user_id=user_id,
-                route_id=route_id,
-                point_id=point_id,
-                event_type=event_type,
-                title=title,
-                message=message,
-                payload_json=payload_json,
-                is_read=False,
-                created_at=created_at,
+        item = Notification(
+            user_id=user_id,
+            route_id=route_id,
+            point_id=point_id,
+            event_type=event_type,
+            title=title,
+            message=message,
+            payload_json=payload_json,
+            is_read=False,
+            created_at=created_at,
+        )
+        db.add(item)
+        created_items.append({"user_id": user_id, "row": item})
+
+    db.flush()
+    realtime_payloads: list[tuple[int, dict[str, Any]]] = []
+    for created in created_items:
+        row: Notification = created["row"]
+        realtime_payloads.append(
+            (
+                created["user_id"],
+                {
+                    "type": "notification_created",
+                    "item": {
+                        "id": row.id,
+                        "event_type": row.event_type,
+                        "title": row.title,
+                        "message": row.message,
+                        "route_id": row.route_id,
+                        "point_id": row.point_id,
+                        "is_read": row.is_read,
+                        "created_at": row.created_at.isoformat() if row.created_at else None,
+                    },
+                },
             )
         )
+
+    if realtime_payloads:
+        _publish_realtime_notifications(realtime_payloads)
+
+
+def _publish_realtime_notifications(payloads: list[tuple[int, dict[str, Any]]]) -> None:
+    def _run() -> None:
+        for user_id, payload in payloads:
+            try:
+                asyncio.run(notifications_realtime_hub.publish_to_user(user_id, payload))
+            except Exception:
+                continue
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
 
 
 def _route_recipients(db: Session, route: Route) -> list[int]:

@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 
-import ActiveRouteView from "./components/ActiveRouteView.vue";
 import AdminRoutesView from "./components/AdminRoutesView.vue";
 import AdminUsersView from "./components/AdminUsersView.vue";
+import DriverHomeView from "./components/DriverHomeView.vue";
+import DriverRouteDetailsView from "./components/DriverRouteDetailsView.vue";
+import DriverRoutesView from "./components/DriverRoutesView.vue";
 import LoginView from "./components/LoginView.vue";
 import NotificationsView from "./components/NotificationsView.vue";
 import {
@@ -15,11 +17,17 @@ import {
   createAdminUser,
   getActiveRoute,
   getAdminRoute,
+  getDriverRoute,
+  getUnreadNotificationsCount,
   listAdminRoutes,
   listAdminUsers,
+  listDriverRoutes,
   listNotifications,
   listRouteDrivers,
   login as loginRequest,
+  markAllNotificationsRead,
+  markNotificationRead,
+  notificationsWebSocketUrl,
   sendEventsBatch,
   updateAdminRoute,
   updateAdminUser
@@ -36,13 +44,23 @@ import {
 } from "./db";
 import { isAdminRole, isRouteManagerRole } from "./roles";
 import { nextStatus } from "./status";
-import type { AdminRoute, AdminRouteCreatePayload, AdminUser, AuthUser, DriverOption, EventPayload, NotificationDto, RouteDto } from "./types";
+import type {
+  AdminRoute,
+  AdminRouteCreatePayload,
+  AdminUser,
+  AuthUser,
+  DriverOption,
+  DriverRouteListItem,
+  EventPayload,
+  NotificationDto,
+  RouteDto
+} from "./types";
 
 const TOKEN_STORAGE_KEY = "dmk_mobile_token";
 const USER_STORAGE_KEY = "dmk_mobile_user";
 const DEVICE_ID_STORAGE_KEY = "dmk_mobile_device_id";
 
-type AppSection = "driver_route" | "notifications" | "admin_users" | "admin_routes";
+type AppSection = "driver_home" | "driver_routes" | "driver_route_details" | "notifications" | "admin_users" | "admin_routes";
 type RouteFilters = { status?: string; route_id?: string; number_auto?: string; driver_query?: string };
 
 const authToken = ref<string>("");
@@ -53,7 +71,14 @@ const authError = ref("");
 const syncing = ref(false);
 const syncMessage = ref("Готово");
 const isOnline = ref(navigator.onLine);
-const currentSection = ref<AppSection>("driver_route");
+const currentSection = ref<AppSection>("driver_home");
+const driverMenuOpen = ref(false);
+const selectedDriverRoute = ref<RouteDto | null>(null);
+const selectedDriverRouteId = ref<string | null>(null);
+const driverAssignedRoutes = ref<DriverRouteListItem[]>([]);
+const driverHistoryRoutes = ref<DriverRouteListItem[]>([]);
+const driverRoutesLoading = ref(false);
+const unreadNotificationsCount = ref(0);
 
 const adminUsers = ref<AdminUser[]>([]);
 const usersLoading = ref(false);
@@ -64,19 +89,30 @@ const selectedAdminRoute = ref<AdminRoute | null>(null);
 const routeDrivers = ref<DriverOption[]>([]);
 const routesLoading = ref(false);
 const routesError = ref("");
-const routeFilters = ref<RouteFilters>({});
+const routeFilters = ref<RouteFilters>({ status: "process" });
 
 const notifications = ref<NotificationDto[]>([]);
 const notificationsLoading = ref(false);
 const notificationsError = ref("");
 
 let syncIntervalId: number | null = null;
+let notificationsWs: WebSocket | null = null;
+let notificationsWsReconnectTimer: number | null = null;
+let notificationsPingInterval: number | null = null;
 
 const isAuthed = computed(() => Boolean(authToken.value));
 const onlineLabel = computed(() => (isOnline.value ? "Онлайн" : "Офлайн"));
 const isAdmin = computed(() => isAdminRole(authUser.value?.role_code || ""));
 const isRouteManager = computed(() => isRouteManagerRole(authUser.value?.role_code || ""));
 const isDriver = computed(() => authUser.value?.role_code === "driver");
+const activeRouteSummary = computed(() => {
+  if (!route.value) {
+    return null;
+  }
+  return driverAssignedRoutes.value.find((item) => item.id === route.value?.id) ?? null;
+});
+const hasAssignedRoutes = computed(() => driverAssignedRoutes.value.some((item) => item.status === "new"));
+const hasUnreadNotifications = computed(() => unreadNotificationsCount.value > 0);
 
 function getDeviceId(): string {
   const existing = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
@@ -110,17 +146,129 @@ function startBackgroundSyncLoop(): void {
   }, 15000);
 }
 
+function closeNotificationsSocket(): void {
+  if (notificationsPingInterval !== null) {
+    window.clearInterval(notificationsPingInterval);
+    notificationsPingInterval = null;
+  }
+  if (notificationsWsReconnectTimer !== null) {
+    window.clearTimeout(notificationsWsReconnectTimer);
+    notificationsWsReconnectTimer = null;
+  }
+  if (notificationsWs) {
+    notificationsWs.close();
+    notificationsWs = null;
+  }
+}
+
+function clearNotificationsSocketTimers(): void {
+  if (notificationsPingInterval !== null) {
+    window.clearInterval(notificationsPingInterval);
+    notificationsPingInterval = null;
+  }
+  if (notificationsWsReconnectTimer !== null) {
+    window.clearTimeout(notificationsWsReconnectTimer);
+    notificationsWsReconnectTimer = null;
+  }
+}
+
+function showBrowserPushNotification(item: NotificationDto): void {
+  if (typeof window === "undefined" || !("Notification" in window)) {
+    return;
+  }
+  if (document.visibilityState === "visible") {
+    return;
+  }
+  if (Notification.permission === "granted") {
+    void new Notification(item.title, {
+      body: item.message,
+      tag: `dmk-notification-${item.id}`
+    });
+  }
+}
+
+function scheduleNotificationsSocketReconnect(): void {
+  if (!authToken.value) {
+    return;
+  }
+  if (notificationsWsReconnectTimer !== null) {
+    return;
+  }
+  notificationsWsReconnectTimer = window.setTimeout(() => {
+    notificationsWsReconnectTimer = null;
+    connectNotificationsSocket();
+  }, 2500);
+}
+
+function connectNotificationsSocket(): void {
+  if (!authToken.value) {
+    return;
+  }
+  closeNotificationsSocket();
+  try {
+    const ws = new WebSocket(notificationsWebSocketUrl(authToken.value));
+    notificationsWs = ws;
+    ws.onopen = () => {
+      if (notificationsPingInterval !== null) {
+        window.clearInterval(notificationsPingInterval);
+      }
+      notificationsPingInterval = window.setInterval(() => {
+        try {
+          ws.send("ping");
+        } catch {
+          // noop
+        }
+      }, 20000);
+    };
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as { type?: string; item?: NotificationDto };
+        if (payload.type === "notification_created" && payload.item) {
+          const exists = notifications.value.some((item) => item.id === payload.item?.id);
+          if (!exists) {
+            notifications.value = [payload.item, ...notifications.value].slice(0, 50);
+            showBrowserPushNotification(payload.item);
+          }
+          unreadNotificationsCount.value += payload.item.is_read ? 0 : 1;
+        }
+      } catch {
+        // heartbeat responses can be non-json (e.g. "pong")
+      }
+    };
+    ws.onclose = () => {
+      clearNotificationsSocketTimers();
+      notificationsWs = null;
+      scheduleNotificationsSocketReconnect();
+    };
+    ws.onerror = () => {
+      clearNotificationsSocketTimers();
+      notificationsWs = null;
+      scheduleNotificationsSocketReconnect();
+    };
+  } catch {
+    scheduleNotificationsSocketReconnect();
+  }
+}
+
 function clearAuth(): void {
-  stopBackgroundSyncLoop();
   authToken.value = "";
+  clearNotificationsSocketTimers();
+  stopBackgroundSyncLoop();
+  closeNotificationsSocket();
   authUser.value = null;
   route.value = null;
+  selectedDriverRoute.value = null;
+  selectedDriverRouteId.value = null;
+  driverAssignedRoutes.value = [];
+  driverHistoryRoutes.value = [];
   adminUsers.value = [];
   adminRoutes.value = [];
   routeDrivers.value = [];
   selectedAdminRoute.value = null;
   notifications.value = [];
-  currentSection.value = "driver_route";
+  unreadNotificationsCount.value = 0;
+  currentSection.value = "driver_home";
+  driverMenuOpen.value = false;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
 }
@@ -134,7 +282,7 @@ function openDefaultSectionByRole(user: AuthUser): void {
     currentSection.value = "admin_routes";
     return;
   }
-  currentSection.value = "driver_route";
+  currentSection.value = "driver_home";
 }
 
 async function applyOverlaysToRoute(baseRoute: RouteDto | null): Promise<RouteDto | null> {
@@ -160,6 +308,28 @@ async function applyOverlaysToRoute(baseRoute: RouteDto | null): Promise<RouteDt
     ...baseRoute,
     points
   } as RouteDto;
+}
+
+async function refreshDriverRoutes(): Promise<void> {
+  if (!authToken.value || !isDriver.value) {
+    return;
+  }
+  driverRoutesLoading.value = true;
+  try {
+    const assigned = await listDriverRoutes(authToken.value, "assigned");
+    const history = await listDriverRoutes(authToken.value, "history");
+    driverAssignedRoutes.value = assigned.items;
+    driverHistoryRoutes.value = history.items;
+    if (!route.value && assigned.active_route_id) {
+      const activeRoute = await getDriverRoute(authToken.value, assigned.active_route_id);
+      route.value = await applyOverlaysToRoute(activeRoute);
+      await saveActiveRoute(route.value);
+    }
+  } catch (error) {
+    syncMessage.value = `Ошибка загрузки рейсов: ${(error as Error).message}`;
+  } finally {
+    driverRoutesLoading.value = false;
+  }
 }
 
 async function refreshRoute(): Promise<void> {
@@ -198,7 +368,9 @@ async function syncOutboxInBackground(): Promise<void> {
       client_event_id: event.client_event_id,
       occurred_at_client: event.occurred_at_client,
       point_id: event.point_id,
-      to_status: event.to_status
+      to_status: event.to_status,
+      odometer: null,
+      coordinates: null
     }));
     const result = await sendEventsBatch(authToken.value, deviceId, events);
     const removable = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.client_event_id);
@@ -208,7 +380,7 @@ async function syncOutboxInBackground(): Promise<void> {
       await removePointOverlays(route.value.id, appliedPointIds);
     }
     await refreshRoute();
-    console.debug(`[pwa-sync] synced ${result.applied}/${result.received} events`);
+    await refreshDriverRoutes();
   } catch (error) {
     console.debug("[pwa-sync] background sync failed", error);
   } finally {
@@ -297,7 +469,10 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
     routeFilters.value = effectiveFilters;
     adminRoutes.value = await listAdminRoutes(authToken.value, effectiveFilters);
     if (selectedAdminRoute.value) {
-      selectedAdminRoute.value = adminRoutes.value.find((item) => item.id === selectedAdminRoute.value?.id) ?? null;
+      const selected = adminRoutes.value.find((item) => item.id === selectedAdminRoute.value?.id);
+      if (selected) {
+        selectedAdminRoute.value = await getAdminRoute(authToken.value, selected.id);
+      }
     }
   } catch (error) {
     routesError.value = `Ошибка загрузки рейсов: ${(error as Error).message}`;
@@ -314,7 +489,7 @@ async function doCreateAdminRoute(payload: AdminRouteCreatePayload): Promise<voi
   routesError.value = "";
   try {
     const routeCreated = await createAdminRoute(authToken.value, payload);
-    await refreshAdminRoutes();
+    await refreshAdminRoutes(routeFilters.value);
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeCreated.id);
   } catch (error) {
     routesError.value = `Ошибка создания рейса: ${(error as Error).message}`;
@@ -340,9 +515,9 @@ async function doUpdateAdminRoute(
   routesLoading.value = true;
   routesError.value = "";
   try {
-    selectedAdminRoute.value = await updateAdminRoute(authToken.value, routeId, payload);
-    await refreshAdminRoutes();
+    await updateAdminRoute(authToken.value, routeId, payload);
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
+    await refreshAdminRoutes(routeFilters.value);
   } catch (error) {
     routesError.value = `Ошибка редактирования рейса: ${(error as Error).message}`;
   } finally {
@@ -372,9 +547,9 @@ async function doAssignAdminRoute(routeId: string, driverUserId: number): Promis
   routesLoading.value = true;
   routesError.value = "";
   try {
-    selectedAdminRoute.value = await assignAdminRouteDriver(authToken.value, routeId, driverUserId);
-    await refreshAdminRoutes();
+    await assignAdminRouteDriver(authToken.value, routeId, driverUserId);
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
+    await refreshAdminRoutes(routeFilters.value);
   } catch (error) {
     routesError.value = `Ошибка назначения водителя: ${(error as Error).message}`;
   } finally {
@@ -389,9 +564,9 @@ async function doCancelAdminRoute(routeId: string): Promise<void> {
   routesLoading.value = true;
   routesError.value = "";
   try {
-    selectedAdminRoute.value = await cancelAdminRoute(authToken.value, routeId);
-    await refreshAdminRoutes();
+    await cancelAdminRoute(authToken.value, routeId);
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
+    await refreshAdminRoutes(routeFilters.value);
   } catch (error) {
     routesError.value = `Ошибка отмены рейса: ${(error as Error).message}`;
   } finally {
@@ -406,9 +581,9 @@ async function doCompleteAdminRoute(routeId: string): Promise<void> {
   routesLoading.value = true;
   routesError.value = "";
   try {
-    selectedAdminRoute.value = await completeAdminRoute(authToken.value, routeId);
-    await refreshAdminRoutes();
+    await completeAdminRoute(authToken.value, routeId);
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
+    await refreshAdminRoutes(routeFilters.value);
   } catch (error) {
     routesError.value = `Ошибка завершения рейса: ${(error as Error).message}`;
   } finally {
@@ -424,6 +599,7 @@ async function refreshNotifications(): Promise<void> {
   notificationsError.value = "";
   try {
     notifications.value = await listNotifications(authToken.value, 50);
+    unreadNotificationsCount.value = await getUnreadNotificationsCount(authToken.value);
   } catch (error) {
     notificationsError.value = `Ошибка загрузки уведомлений: ${(error as Error).message}`;
   } finally {
@@ -431,31 +607,59 @@ async function refreshNotifications(): Promise<void> {
   }
 }
 
+async function doMarkNotificationRead(notificationId: number): Promise<void> {
+  if (!authToken.value) {
+    return;
+  }
+  try {
+    const updated = await markNotificationRead(authToken.value, notificationId);
+    notifications.value = notifications.value.map((item) => (item.id === updated.id ? updated : item));
+    unreadNotificationsCount.value = Math.max(0, unreadNotificationsCount.value - 1);
+  } catch (error) {
+    notificationsError.value = `Ошибка отметки прочитанного: ${(error as Error).message}`;
+  }
+}
+
+async function doMarkAllNotificationsRead(): Promise<void> {
+  if (!authToken.value) {
+    return;
+  }
+  try {
+    await markAllNotificationsRead(authToken.value);
+    notifications.value = notifications.value.map((item) => ({ ...item, is_read: true }));
+    unreadNotificationsCount.value = 0;
+  } catch (error) {
+    notificationsError.value = `Ошибка отметки прочитанного: ${(error as Error).message}`;
+  }
+}
+
 async function bootstrapByRole(user: AuthUser): Promise<void> {
+  if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
+    void Notification.requestPermission();
+  }
+  connectNotificationsSocket();
   if (isAdminRole(user.role_code)) {
     currentSection.value = "admin_users";
     await refreshAdminUsers();
     await refreshRouteDrivers();
-    await refreshAdminRoutes({});
+    await refreshAdminRoutes({ status: "process" });
   } else if (isRouteManagerRole(user.role_code)) {
     currentSection.value = "admin_routes";
     await refreshRouteDrivers();
-    await refreshAdminRoutes({});
+    await refreshAdminRoutes({ status: "process" });
   } else {
-    currentSection.value = "driver_route";
+    currentSection.value = "driver_home";
+    await refreshDriverRoutes();
     await refreshRoute();
     await syncOutboxInBackground();
     startBackgroundSyncLoop();
   }
   await refreshNotifications();
-  if (isDriver.value) {
-    await refreshRoute();
-  }
 }
 
 function openRoleMainSection(section: AppSection): void {
   if (!authUser.value) {
-    currentSection.value = "driver_route";
+    currentSection.value = "driver_home";
     return;
   }
   if (section === "notifications") {
@@ -470,7 +674,7 @@ function openRoleMainSection(section: AppSection): void {
     currentSection.value = section;
     return;
   }
-  if (section === "driver_route" && authUser.value.role_code === "driver") {
+  if ((section === "driver_home" || section === "driver_routes") && authUser.value.role_code === "driver") {
     currentSection.value = section;
     return;
   }
@@ -493,16 +697,23 @@ async function doLogin(loginValue: string, password: string): Promise<void> {
   }
 }
 
-async function doAcceptRoute(): Promise<void> {
-  if (!authToken.value || !route.value || !isDriver.value) {
+async function doAcceptRoute(routeId?: string): Promise<void> {
+  if (!authToken.value || !isDriver.value) {
+    return;
+  }
+  const id = routeId ?? route.value?.id;
+  if (!id) {
     return;
   }
   try {
-    const serverRoute = await acceptRoute(authToken.value, route.value.id);
+    const serverRoute = await acceptRoute(authToken.value, id);
     const merged = await applyOverlaysToRoute(serverRoute);
     route.value = merged;
+    selectedDriverRoute.value = merged;
     await saveActiveRoute(merged);
+    await refreshDriverRoutes();
     await refreshNotifications();
+    syncMessage.value = "Рейс принят";
   } catch (error) {
     syncMessage.value = `Ошибка принятия рейса: ${(error as Error).message}`;
   }
@@ -526,10 +737,18 @@ async function markPointNext(pointId: number): Promise<void> {
     client_event_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     occurred_at_client: occurredAt,
     point_id: pointId,
-    to_status: toStatus
+    to_status: toStatus,
+    odometer: null,
+    coordinates: null
   };
 
   current.status = toStatus;
+  if (selectedDriverRoute.value?.id === route.value.id) {
+    const selectedPoint = selectedDriverRoute.value.points.find((point) => point.id === pointId);
+    if (selectedPoint) {
+      selectedPoint.status = toStatus;
+    }
+  }
   await savePointOverlay(route.value.id, pointId, toStatus, occurredAt);
   await saveActiveRoute(route.value);
   await addOutboxEvent({
@@ -538,7 +757,27 @@ async function markPointNext(pointId: number): Promise<void> {
     created_at: new Date().toISOString()
   });
   syncMessage.value = "Изменение сохранено локально";
-  void syncOutboxInBackground();
+  await syncOutboxInBackground();
+  await refreshRoute();
+  await refreshDriverRoutes();
+  if (route.value?.status === "success") {
+    route.value = null;
+    await saveActiveRoute(null);
+    currentSection.value = "driver_home";
+  }
+}
+
+async function openDriverRouteDetails(routeId: string): Promise<void> {
+  if (!authToken.value || !isDriver.value) {
+    return;
+  }
+  try {
+    selectedDriverRoute.value = await getDriverRoute(authToken.value, routeId);
+    selectedDriverRouteId.value = routeId;
+    currentSection.value = "driver_route_details";
+  } catch (error) {
+    syncMessage.value = `Ошибка загрузки деталей рейса: ${(error as Error).message}`;
+  }
 }
 
 function onOnline(): void {
@@ -554,6 +793,42 @@ function onOffline(): void {
 function openNotifications(): void {
   currentSection.value = "notifications";
   void refreshNotifications();
+}
+
+function toggleDriverMenu(): void {
+  driverMenuOpen.value = !driverMenuOpen.value;
+}
+
+function openDriverHome(): void {
+  driverMenuOpen.value = false;
+  currentSection.value = "driver_home";
+}
+
+function openDriverRoutes(): void {
+  driverMenuOpen.value = false;
+  currentSection.value = "driver_routes";
+  void refreshDriverRoutes();
+}
+
+function openDriverSalary(): void {
+  driverMenuOpen.value = false;
+  syncMessage.value = "Раздел «Зарплата» будет доступен в следующей итерации.";
+}
+
+function openDriverRepair(): void {
+  driverMenuOpen.value = false;
+  syncMessage.value = "Раздел «Ремонт» будет доступен в следующей итерации.";
+}
+
+function advanceActivePointFromHome(): void {
+  if (!route.value) {
+    return;
+  }
+  const activePoint = route.value.points.find((point) => point.status !== "success");
+  if (!activePoint) {
+    return;
+  }
+  void markPointNext(activePoint.id);
 }
 
 function logout(): void {
@@ -578,6 +853,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   stopBackgroundSyncLoop();
+  closeNotificationsSocket();
   window.removeEventListener("online", onOnline);
   window.removeEventListener("offline", onOffline);
 });
@@ -608,10 +884,10 @@ onUnmounted(() => {
         </button>
         <button
           v-if="isAuthed && isDriver"
-          :class="{ activeTab: currentSection === 'driver_route' }"
-          @click="openRoleMainSection('driver_route')"
+          :class="{ activeTab: currentSection === 'driver_home' || currentSection === 'driver_routes' || currentSection === 'driver_route_details' }"
+          @click="openRoleMainSection('driver_home')"
         >
-          Мой рейс
+          Водитель
         </button>
         <button
           v-if="isAuthed"
@@ -619,6 +895,7 @@ onUnmounted(() => {
           @click="openNotifications"
         >
           Уведомления
+          <span v-if="hasUnreadNotifications" class="notif-dot" />
         </button>
         <button v-if="isAuthed" @click="logout">Выход</button>
       </div>
@@ -654,13 +931,45 @@ onUnmounted(() => {
       />
     </section>
 
-    <section v-else-if="currentSection === 'driver_route' && isDriver && route">
-      <ActiveRouteView
-        :route="route"
-        :syncing="syncing"
+    <section v-else-if="isDriver && currentSection === 'driver_home'">
+      <DriverHomeView
+        :active-route="route"
+        :active-route-summary="activeRouteSummary"
+        :has-assigned-routes="hasAssignedRoutes"
         :sync-message="syncMessage"
-        @accept="doAcceptRoute"
-        @advance-status="markPointNext"
+        :syncing="syncing"
+        :show-menu="driverMenuOpen"
+        :unread-count="unreadNotificationsCount"
+        @toggle-menu="toggleDriverMenu"
+        @open-notifications="openNotifications"
+        @open-routes="openDriverRoutes"
+        @open-salary="openDriverSalary"
+        @open-repair="openDriverRepair"
+        @logout="logout"
+        @accept-active-route="doAcceptRoute()"
+        @advance-active-point="advanceActivePointFromHome"
+      />
+    </section>
+
+    <section v-else-if="isDriver && currentSection === 'driver_routes'">
+      <DriverRoutesView
+        :assigned="driverAssignedRoutes"
+        :history="driverHistoryRoutes"
+        :loading="driverRoutesLoading"
+        :active-route-id="route?.id || null"
+        @back="openDriverHome"
+        @open-route="openDriverRouteDetails"
+        @refresh="refreshDriverRoutes"
+      />
+    </section>
+
+    <section v-else-if="isDriver && currentSection === 'driver_route_details' && selectedDriverRoute">
+      <DriverRouteDetailsView
+        :route="selectedDriverRoute"
+        :syncing="syncing"
+        @back="openDriverRoutes"
+        @accept="doAcceptRoute(selectedDriverRoute.id)"
+        @advance-point="markPointNext"
       />
     </section>
 
@@ -669,7 +978,10 @@ onUnmounted(() => {
         :items="notifications"
         :loading="notificationsLoading"
         :error="notificationsError"
+        :unread-count="unreadNotificationsCount"
         @refresh="refreshNotifications"
+        @mark-read="doMarkNotificationRead"
+        @mark-all-read="doMarkAllNotificationsRead"
       />
     </section>
 
@@ -678,7 +990,7 @@ onUnmounted(() => {
       <h1 v-else>Раздел пуст</h1>
       <p v-if="isDriver">Когда диспетчер назначит рейс, он появится здесь.</p>
       <p v-else>Выберите раздел в верхнем меню.</p>
-      <button v-if="isDriver" @click="refreshRoute">Обновить рейс</button>
+      <button v-if="isDriver" @click="refreshDriverRoutes">Обновить рейсы</button>
       <p class="hint">{{ syncMessage }}</p>
     </section>
   </main>
@@ -686,7 +998,7 @@ onUnmounted(() => {
 
 <style scoped>
 .container {
-  max-width: 760px;
+  max-width: 1100px;
   margin: 0 auto;
   padding: 1rem;
   color: #f9fafb;
@@ -722,6 +1034,15 @@ button {
 }
 .actions button {
   width: auto;
+  position: relative;
+}
+.notif-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-left: 6px;
+  border-radius: 999px;
+  background: #ef4444;
 }
 .card {
   padding: 1rem;
