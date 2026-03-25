@@ -18,6 +18,7 @@ from services.notification_service import NotificationService
 from mobile_api.router import router as mobile_router
 from mobile_api.admin_router import router as admin_users_router
 from mobile_api.admin_routes_router import router as admin_mobile_routes_router
+from mobile_api.notifications_router import router as notifications_router
 from mobile_api.bootstrap import ensure_demo_user
 from mobile_api.db import SessionLocal
 
@@ -49,6 +50,8 @@ async def root():
 
 
 def verify_api_key(x_api_key: str = Header(None)):
+    if not API_KEY:
+        return x_api_key
     if x_api_key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API Key")
     return x_api_key
@@ -246,6 +249,7 @@ app.include_router(admin_routes_router)
 app.include_router(mobile_router)
 app.include_router(admin_users_router)
 app.include_router(admin_mobile_routes_router)
+app.include_router(notifications_router)
 
 if __name__ == "__main__":
     import uvicorn

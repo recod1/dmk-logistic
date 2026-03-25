@@ -1,7 +1,24 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from "vue";
+import { reactive, ref, watch } from "vue";
 
-import type { AdminRoute, DriverOption, RouteWorkflowStatus } from "../types";
+import type { AdminRoute, AdminRoutePointPayload, DriverOption, RouteWorkflowStatus } from "../types";
+
+type RouteSearchFilters = {
+  status?: string;
+  route_id?: string;
+  number_auto?: string;
+  driver_query?: string;
+};
+
+type PointForm = {
+  type_point: string;
+  place_point: string;
+  date_point: string;
+  point_name: string;
+  point_contacts: string;
+  point_time: string;
+  point_note: string;
+};
 
 const props = defineProps<{
   routes: AdminRoute[];
@@ -12,7 +29,7 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  refresh: [];
+  refresh: [filters?: RouteSearchFilters];
   create: [
     payload: {
       route_id: string;
@@ -22,16 +39,36 @@ const emit = defineEmits<{
       dispatcher_contacts?: string;
       registration_number?: string;
       trailer_number?: string;
-      points: Array<{ type_point: string; date_point: string; place_point: string; order_index: number }>;
+      points: AdminRoutePointPayload[];
     }
   ];
   selectRoute: [routeId: string];
   assignDriver: [routeId: string, driverUserId: number];
   cancelRoute: [routeId: string];
   completeRoute: [routeId: string];
+  updateRoute: [
+    routeId: string,
+    payload: {
+      number_auto?: string;
+      temperature?: string;
+      dispatcher_contacts?: string;
+      registration_number?: string;
+      trailer_number?: string;
+      points?: AdminRoutePointPayload[];
+    }
+  ];
 }>();
 
 const showCreate = ref(false);
+const assignSelections = reactive<Record<string, number>>({});
+
+const filters = reactive({
+  route_id: "",
+  number_auto: "",
+  driver_query: "",
+  status: ""
+});
+
 const createForm = reactive({
   route_id: "",
   driver_user_id: 0,
@@ -40,12 +77,42 @@ const createForm = reactive({
   dispatcher_contacts: "",
   registration_number: "",
   trailer_number: "",
-  points_text: ""
+  points: [] as PointForm[]
 });
 
-const assignSelections = reactive<Record<string, number>>({});
+const editForm = reactive({
+  number_auto: "",
+  temperature: "",
+  dispatcher_contacts: "",
+  registration_number: "",
+  trailer_number: "",
+  points: [] as PointForm[]
+});
 
-const driversById = computed(() => new Map(props.drivers.map((driver) => [driver.id, driver])));
+function makeEmptyPoint(): PointForm {
+  return {
+    type_point: "loading",
+    place_point: "",
+    date_point: "",
+    point_name: "",
+    point_contacts: "",
+    point_time: "",
+    point_note: ""
+  };
+}
+
+function toPointPayload(points: PointForm[]): AdminRoutePointPayload[] {
+  return points.map((point, index) => ({
+    type_point: point.type_point || "loading",
+    place_point: point.place_point.trim(),
+    date_point: point.date_point.trim(),
+    point_name: point.point_name.trim(),
+    point_contacts: point.point_contacts.trim(),
+    point_time: point.point_time.trim(),
+    point_note: point.point_note.trim(),
+    order_index: index
+  }));
+}
 
 function openCreate(): void {
   showCreate.value = true;
@@ -56,24 +123,15 @@ function openCreate(): void {
   createForm.dispatcher_contacts = "";
   createForm.registration_number = "";
   createForm.trailer_number = "";
-  createForm.points_text = "";
+  createForm.points = [];
 }
 
-function parsePoints(text: string): Array<{ type_point: string; date_point: string; place_point: string; order_index: number }> {
-  return text
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line, idx) => {
-      const [type, date, ...rest] = line.split("|");
-      return {
-        type_point: (type || "loading").trim().toLowerCase(),
-        date_point: (date || "").trim(),
-        place_point: rest.join("|").trim(),
-        order_index: idx
-      };
-    })
-    .filter((point) => point.place_point && point.date_point);
+function addCreatePoint(): void {
+  createForm.points.push(makeEmptyPoint());
+}
+
+function removeCreatePoint(index: number): void {
+  createForm.points.splice(index, 1);
 }
 
 function submitCreate(): void {
@@ -88,9 +146,61 @@ function submitCreate(): void {
     dispatcher_contacts: createForm.dispatcher_contacts.trim(),
     registration_number: createForm.registration_number.trim(),
     trailer_number: createForm.trailer_number.trim(),
-    points: parsePoints(createForm.points_text)
+    points: toPointPayload(createForm.points).filter((point) => point.place_point && point.date_point)
   });
   showCreate.value = false;
+}
+
+watch(
+  () => props.selectedRoute,
+  (route) => {
+    if (!route) {
+      editForm.number_auto = "";
+      editForm.temperature = "";
+      editForm.dispatcher_contacts = "";
+      editForm.registration_number = "";
+      editForm.trailer_number = "";
+      editForm.points = [];
+      return;
+    }
+    editForm.number_auto = route.number_auto || "";
+    editForm.temperature = route.temperature || "";
+    editForm.dispatcher_contacts = route.dispatcher_contacts || "";
+    editForm.registration_number = route.registration_number || "";
+    editForm.trailer_number = route.trailer_number || "";
+    editForm.points = (route.points || []).map((point) => ({
+      type_point: point.type_point || "loading",
+      place_point: point.place_point || "",
+      date_point: point.date_point || "",
+      point_name: point.point_name || "",
+      point_contacts: point.point_contacts || "",
+      point_time: point.point_time || "",
+      point_note: point.point_note || ""
+    }));
+  },
+  { immediate: true }
+);
+
+function addEditPoint(): void {
+  editForm.points.push(makeEmptyPoint());
+}
+
+function removeEditPoint(index: number): void {
+  editForm.points.splice(index, 1);
+}
+
+function submitEdit(): void {
+  if (!props.selectedRoute) {
+    return;
+  }
+  emit("updateRoute", props.selectedRoute.id, {
+    number_auto: editForm.number_auto.trim(),
+    temperature: editForm.temperature.trim(),
+    dispatcher_contacts: editForm.dispatcher_contacts.trim(),
+    registration_number: editForm.registration_number.trim(),
+    trailer_number: editForm.trailer_number.trim(),
+    points: toPointPayload(editForm.points).filter((point) => point.place_point && point.date_point)
+  });
 }
 
 function selectedAssignDriver(routeId: string): number {
@@ -101,8 +211,8 @@ function statusLabel(status: RouteWorkflowStatus): string {
   const labels: Record<RouteWorkflowStatus, string> = {
     new: "Новый",
     process: "В процессе",
-    success: "Завершен",
-    cancelled: "Отменен"
+    success: "Завершён",
+    cancelled: "Отменён"
   };
   return labels[status] ?? status;
 }
@@ -118,6 +228,31 @@ function canComplete(route: AdminRoute): boolean {
   const points = route.points ?? [];
   return points.length > 0 && points.every((point) => point.status === "success");
 }
+
+function doSearch(): void {
+  const payload: RouteSearchFilters = {};
+  if (filters.status.trim()) {
+    payload.status = filters.status.trim();
+  }
+  if (filters.route_id.trim()) {
+    payload.route_id = filters.route_id.trim();
+  }
+  if (filters.number_auto.trim()) {
+    payload.number_auto = filters.number_auto.trim();
+  }
+  if (filters.driver_query.trim()) {
+    payload.driver_query = filters.driver_query.trim();
+  }
+  emit("refresh", payload);
+}
+
+function clearSearch(): void {
+  filters.status = "";
+  filters.route_id = "";
+  filters.number_auto = "";
+  filters.driver_query = "";
+  emit("refresh", {});
+}
 </script>
 
 <template>
@@ -130,60 +265,66 @@ function canComplete(route: AdminRoute): boolean {
       </div>
     </div>
 
+    <section class="card search-card">
+      <h2>Поиск рейсов</h2>
+      <label>
+        ID рейса
+        <input v-model="filters.route_id" placeholder="Например, R-2026-001" />
+      </label>
+      <label>
+        Номер ТС
+        <input v-model="filters.number_auto" placeholder="А123ВС777" />
+      </label>
+      <label>
+        Водитель (логин/ФИО)
+        <input v-model="filters.driver_query" placeholder="Иванов" />
+      </label>
+      <label>
+        Статус
+        <select v-model="filters.status">
+          <option value="">Все</option>
+          <option value="new">Новый</option>
+          <option value="process">В процессе</option>
+          <option value="success">Завершён</option>
+          <option value="cancelled">Отменён</option>
+        </select>
+      </label>
+      <div class="actions">
+        <button :disabled="loading" @click="doSearch">Найти</button>
+        <button :disabled="loading" @click="clearSearch">Сбросить</button>
+      </div>
+    </section>
+
     <p v-if="error" class="error">{{ error }}</p>
 
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>ID</th>
-            <th>Статус</th>
-            <th>Водитель</th>
-            <th>ТС</th>
-            <th>Точки</th>
-            <th>Действия</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="route in routes" :key="route.id">
-            <td>{{ route.id }}</td>
-            <td>{{ statusLabel(route.status) }}</td>
-            <td>{{ route.driver?.full_name || route.driver?.login || "—" }}</td>
-            <td>{{ route.number_auto || "—" }}</td>
-            <td>{{ route.points_count }}</td>
-            <td class="row-actions">
-              <button :disabled="loading" @click="emit('selectRoute', route.id)">Открыть</button>
-              <select v-model.number="assignSelections[route.id]">
-                <option :value="0">Назначить...</option>
-                <option v-for="driver in drivers" :key="driver.id" :value="driver.id">
-                  {{ driver.full_name || driver.login }}
-                </option>
-              </select>
-              <button
-                :disabled="loading || !selectedAssignDriver(route.id)"
-                @click="emit('assignDriver', route.id, selectedAssignDriver(route.id))"
-              >
-                Назначить
-              </button>
-              <button
-                :disabled="loading || !canCancel(route.status)"
-                @click="emit('cancelRoute', route.id)"
-              >
-                Отменить
-              </button>
-              <button
-                :disabled="loading || !canComplete(route)"
-                @click="emit('completeRoute', route.id)"
-              >
-                Завершить
-              </button>
-            </td>
-          </tr>
-          <tr v-if="!routes.length">
-            <td colspan="6" class="empty">Рейсы не найдены</td>
-          </tr>
-        </tbody>
-      </table>
+    <div class="routes-list">
+      <article v-for="route in routes" :key="route.id" class="card route-item">
+        <div class="row">
+          <strong>#{{ route.id }}</strong>
+          <span class="chip">{{ statusLabel(route.status) }}</span>
+        </div>
+        <p><strong>Водитель:</strong> {{ route.driver?.full_name || route.driver?.login || "—" }}</p>
+        <p><strong>ТС:</strong> {{ route.number_auto || "—" }}</p>
+        <p><strong>Точек:</strong> {{ route.points_count }}</p>
+        <div class="actions wrap">
+          <button :disabled="loading" @click="emit('selectRoute', route.id)">Открыть</button>
+          <select v-model.number="assignSelections[route.id]">
+            <option :value="0">Назначить водителя</option>
+            <option v-for="driver in drivers" :key="driver.id" :value="driver.id">
+              {{ driver.full_name || driver.login }}
+            </option>
+          </select>
+          <button
+            :disabled="loading || !selectedAssignDriver(route.id)"
+            @click="emit('assignDriver', route.id, selectedAssignDriver(route.id))"
+          >
+            Назначить
+          </button>
+          <button :disabled="loading || !canCancel(route.status)" @click="emit('cancelRoute', route.id)">Отменить</button>
+          <button :disabled="loading || !canComplete(route)" @click="emit('completeRoute', route.id)">Завершить</button>
+        </div>
+      </article>
+      <p v-if="!routes.length" class="empty">Рейсы не найдены</p>
     </div>
 
     <section v-if="showCreate" class="card form-card">
@@ -220,27 +361,124 @@ function canComplete(route: AdminRoute): boolean {
         Номер прицепа
         <input v-model="createForm.trailer_number" />
       </label>
-      <label>
-        Точки (по одной на строку: type|date|place)
-        <textarea v-model="createForm.points_text" rows="5" />
-      </label>
+
+      <h3>Точки рейса</h3>
+      <div class="actions">
+        <button @click="addCreatePoint">Добавить точку</button>
+      </div>
+      <article v-for="(point, idx) in createForm.points" :key="`new-${idx}`" class="point-card">
+        <div class="row">
+          <strong>Точка {{ idx + 1 }}</strong>
+          <button @click="removeCreatePoint(idx)">Удалить</button>
+        </div>
+        <label>
+          Тип точки
+          <select v-model="point.type_point">
+            <option value="loading">Загрузка</option>
+            <option value="unloading">Выгрузка</option>
+          </select>
+        </label>
+        <label>
+          Адрес
+          <input v-model="point.place_point" />
+        </label>
+        <label>
+          Дата
+          <input v-model="point.date_point" />
+        </label>
+        <label>
+          Название
+          <input v-model="point.point_name" />
+        </label>
+        <label>
+          Контакты
+          <input v-model="point.point_contacts" />
+        </label>
+        <label>
+          Время
+          <input v-model="point.point_time" />
+        </label>
+        <label>
+          Примечание
+          <textarea v-model="point.point_note" rows="2" />
+        </label>
+      </article>
+
       <div class="actions">
         <button @click="submitCreate">Сохранить</button>
         <button @click="showCreate = false">Отмена</button>
       </div>
     </section>
 
-    <section v-if="selectedRoute" class="card detail-card">
-      <h2>Рейс #{{ selectedRoute.id }}</h2>
+    <section v-if="selectedRoute" class="card form-card">
+      <h2>Редактировать рейс #{{ selectedRoute.id }}</h2>
       <p><strong>Статус:</strong> {{ statusLabel(selectedRoute.status) }}</p>
-      <p><strong>Водитель:</strong> {{ selectedRoute.driver?.full_name || selectedRoute.driver?.login || "—" }}</p>
-      <p><strong>ТС:</strong> {{ selectedRoute.number_auto || "—" }}</p>
+      <label>
+        Номер авто
+        <input v-model="editForm.number_auto" />
+      </label>
+      <label>
+        Температура
+        <input v-model="editForm.temperature" />
+      </label>
+      <label>
+        Контакты диспетчера
+        <input v-model="editForm.dispatcher_contacts" />
+      </label>
+      <label>
+        Номер для регистрации
+        <input v-model="editForm.registration_number" />
+      </label>
+      <label>
+        Номер прицепа
+        <input v-model="editForm.trailer_number" />
+      </label>
+
       <h3>Точки</h3>
-      <ol>
-        <li v-for="point in selectedRoute.points || []" :key="point.id">
-          {{ point.type_point }} | {{ point.date_point }} | {{ point.place_point }} ({{ point.status }})
-        </li>
-      </ol>
+      <div class="actions">
+        <button @click="addEditPoint">Добавить точку</button>
+      </div>
+      <article v-for="(point, idx) in editForm.points" :key="`edit-${idx}`" class="point-card">
+        <div class="row">
+          <strong>Точка {{ idx + 1 }}</strong>
+          <button @click="removeEditPoint(idx)">Удалить</button>
+        </div>
+        <label>
+          Тип точки
+          <select v-model="point.type_point">
+            <option value="loading">Загрузка</option>
+            <option value="unloading">Выгрузка</option>
+          </select>
+        </label>
+        <label>
+          Адрес
+          <input v-model="point.place_point" />
+        </label>
+        <label>
+          Дата
+          <input v-model="point.date_point" />
+        </label>
+        <label>
+          Название
+          <input v-model="point.point_name" />
+        </label>
+        <label>
+          Контакты
+          <input v-model="point.point_contacts" />
+        </label>
+        <label>
+          Время
+          <input v-model="point.point_time" />
+        </label>
+        <label>
+          Примечание
+          <textarea v-model="point.point_note" rows="2" />
+        </label>
+      </article>
+
+      <div class="actions">
+        <button :disabled="loading" @click="submitEdit">Сохранить изменения</button>
+      </div>
     </section>
   </section>
 </template>
@@ -254,47 +492,58 @@ function canComplete(route: AdminRoute): boolean {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
 }
 .actions {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
 }
-.table-wrap {
-  overflow-x: auto;
-  border: 1px solid #374151;
-  border-radius: 10px;
-  background: #111827;
+.wrap {
+  flex-wrap: wrap;
 }
-table {
-  width: 100%;
-  border-collapse: collapse;
-}
-th,
-td {
-  padding: 0.55rem;
-  border-bottom: 1px solid #1f2937;
-  text-align: left;
-  white-space: nowrap;
-}
-.row-actions {
-  display: flex;
-  gap: 0.4rem;
-  align-items: center;
-}
-.empty {
-  text-align: center;
-  color: #9ca3af;
-}
-.error {
-  color: #fca5a5;
-}
+.search-card,
 .form-card {
   display: grid;
   gap: 0.55rem;
 }
-.detail-card {
+.routes-list {
+  display: grid;
+  gap: 0.6rem;
+}
+.route-item {
   display: grid;
   gap: 0.35rem;
+}
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.chip {
+  border-radius: 999px;
+  background: #1f2937;
+  padding: 0.1rem 0.6rem;
+  color: #d1d5db;
+  font-size: 0.86rem;
+}
+.point-card {
+  border: 1px solid #374151;
+  border-radius: 10px;
+  padding: 0.65rem;
+  background: #0b1220;
+  display: grid;
+  gap: 0.45rem;
+}
+.empty {
+  color: #9ca3af;
+  margin: 0;
+}
+.error {
+  color: #fca5a5;
 }
 label {
   display: grid;
@@ -302,12 +551,36 @@ label {
 }
 input,
 select,
-textarea {
+textarea,
+button {
+  width: 100%;
   border-radius: 8px;
   border: 1px solid #374151;
   background: #0b1220;
   color: #fff;
   padding: 0.45rem 0.6rem;
+}
+button {
+  background: #2563eb;
+  border: none;
+}
+.card {
+  border: 1px solid #374151;
+  border-radius: 12px;
+  background: #111827;
+  padding: 0.85rem;
+}
+@media (min-width: 760px) {
+  .search-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 760px) {
+  .actions > button,
+  .actions > select {
+    flex: 1 1 calc(50% - 0.3rem);
+    min-width: 0;
+  }
 }
 </style>
 

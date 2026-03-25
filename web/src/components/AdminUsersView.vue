@@ -130,12 +130,12 @@ function toggleActive(user: AdminUser): void {
         <thead>
           <tr>
             <th>ID</th>
-            <th>Login</th>
+            <th>Логин</th>
             <th>ФИО</th>
             <th>Телефон</th>
-            <th>Role</th>
-            <th>Active</th>
-            <th>Created</th>
+            <th>Роль</th>
+            <th>Активен</th>
+            <th>Создан</th>
             <th>Действия</th>
           </tr>
         </thead>
@@ -146,7 +146,7 @@ function toggleActive(user: AdminUser): void {
             <td>{{ user.full_name || "—" }}</td>
             <td>{{ user.phone || "—" }}</td>
             <td>{{ user.role_label }}</td>
-            <td>{{ user.is_active ? "yes" : "no" }}</td>
+            <td>{{ user.is_active ? "да" : "нет" }}</td>
             <td>{{ user.created_at ? new Date(user.created_at).toLocaleString() : "—" }}</td>
             <td class="row-actions">
               <button :disabled="loading" @click="openEdit(user)">Редактировать</button>
@@ -165,11 +165,11 @@ function toggleActive(user: AdminUser): void {
     <section v-if="creating" class="card form-card">
       <h2>Создать пользователя</h2>
       <label>
-        Login
+        Логин
         <input v-model="createForm.login" />
       </label>
       <label>
-        Password
+        Пароль
         <input v-model="createForm.password" type="password" />
       </label>
       <label>
@@ -197,11 +197,11 @@ function toggleActive(user: AdminUser): void {
     <section v-if="editableUser" class="card form-card">
       <h2>Редактировать пользователя #{{ editableUser.id }}</h2>
       <label>
-        Login
+        Логин
         <input v-model="editForm.login" />
       </label>
       <label>
-        New password (optional)
+        Новый пароль (необязательно)
         <input v-model="editForm.password" type="password" />
       </label>
       <label>
@@ -222,7 +222,7 @@ function toggleActive(user: AdminUser): void {
       </label>
       <label class="checkbox">
         <input v-model="editForm.is_active" type="checkbox" />
-        is_active
+        Активен
       </label>
       <div class="actions">
         <button @click="submitEdit">Сохранить</button>
@@ -241,16 +241,16 @@ function toggleActive(user: AdminUser): void {
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 0.6rem;
 }
 .actions {
   display: flex;
   gap: 0.5rem;
 }
 .table-wrap {
-  overflow-x: auto;
-  border: 1px solid #374151;
-  border-radius: 10px;
-  background: #111827;
+  display: grid;
+  gap: 0.6rem;
 }
 table {
   width: 100%;
@@ -294,6 +294,53 @@ select {
   display: flex;
   align-items: center;
   gap: 0.4rem;
+}
+
+@media (max-width: 760px) {
+  .table-wrap {
+    border: 0;
+    background: transparent;
+  }
+  table,
+  thead,
+  tbody,
+  tr,
+  th,
+  td {
+    display: block;
+  }
+  thead {
+    display: none;
+  }
+  tr {
+    border: 1px solid #374151;
+    border-radius: 10px;
+    background: #111827;
+    padding: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  td {
+    border: none;
+    padding: 0.2rem 0;
+    white-space: normal;
+  }
+  td::before {
+    display: inline-block;
+    min-width: 6.5rem;
+    color: #9ca3af;
+    font-size: 0.82rem;
+  }
+  td:nth-child(1)::before { content: "ID: "; }
+  td:nth-child(2)::before { content: "Логин: "; }
+  td:nth-child(3)::before { content: "ФИО: "; }
+  td:nth-child(4)::before { content: "Телефон: "; }
+  td:nth-child(5)::before { content: "Роль: "; }
+  td:nth-child(6)::before { content: "Активен: "; }
+  td:nth-child(7)::before { content: "Создан: "; }
+  td:nth-child(8)::before { content: "Действия: "; }
+  .row-actions {
+    flex-wrap: wrap;
+  }
 }
 </style>
 

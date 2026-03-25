@@ -10,6 +10,12 @@ from sqlalchemy.orm import Session
 from mobile_api.auth import get_current_route_manager
 from mobile_api.db import get_db
 from mobile_api.models import Point, Route, RoutePoint, User
+from mobile_api.route_notification_logic import (
+    build_route_assigned_notifications,
+    build_route_cancelled_notifications,
+    build_route_completed_notifications,
+    persist_notifications,
+)
 from mobile_api.roles import RoleCode, role_label_ru
 
 
@@ -21,13 +27,14 @@ ROUTE_STATUS_TRANSITIONS: dict[str, set[str]] = {
     "success": set(),
     "cancelled": set(),
 }
-ROUTE_LIST_STATUSES: tuple[str, ...] = ("new", "process", "success", "cancelled")
-
-
 class AdminRoutePointCreate(BaseModel):
     type_point: str = Field(min_length=1, max_length=32)
     place_point: str = Field(min_length=1, max_length=2000)
     date_point: str = Field(min_length=1, max_length=64)
+    point_name: str = Field(default="", max_length=255)
+    point_contacts: str = Field(default="", max_length=255)
+    point_time: str = Field(default="", max_length=128)
+    point_note: str = Field(default="", max_length=2000)
     order_index: int | None = Field(default=None, ge=0)
 
 
@@ -48,6 +55,24 @@ class AssignDriverPayload(BaseModel):
 
 class UpdateRouteStatusPayload(BaseModel):
     status: str = Field(min_length=1, max_length=32)
+
+class UpdateAdminRoutePayload(BaseModel):
+    number_auto: str | None = Field(default=None, max_length=64)
+    temperature: str | None = Field(default=None, max_length=64)
+    dispatcher_contacts: str | None = Field(default=None, max_length=2000)
+    registration_number: str | None = Field(default=None, max_length=64)
+    trailer_number: str | None = Field(default=None, max_length=64)
+    points: list[AdminRoutePointCreate] | None = Field(default=None, max_items=200)
+
+
+class AdminPointPatchPayload(BaseModel):
+    type_point: str | None = Field(default=None, max_length=32)
+    place_point: str | None = Field(default=None, max_length=2000)
+    date_point: str | None = Field(default=None, max_length=64)
+    point_name: str | None = Field(default=None, max_length=255)
+    point_contacts: str | None = Field(default=None, max_length=255)
+    point_time: str | None = Field(default=None, max_length=128)
+    point_note: str | None = Field(default=None, max_length=2000)
 
 
 def _route_points(db: Session, route_id: str) -> list[Point]:
@@ -82,6 +107,10 @@ def _point_out(point: Point, order_index: int) -> dict:
         "type_point": point.type_point,
         "place_point": point.place_point,
         "date_point": point.date_point,
+        "point_name": point.point_name,
+        "point_contacts": point.point_contacts,
+        "point_time": point.point_time,
+        "point_note": point.point_note,
         "status": point.status,
         "time_accepted": point.time_accepted.isoformat() if point.time_accepted else None,
         "time_registration": point.time_registration.isoformat() if point.time_registration else None,
@@ -147,6 +176,66 @@ def _ensure_driver(db: Session, driver_user_id: int) -> User:
     return user
 
 
+def _apply_points_replace(db: Session, route: Route, points_in: list[AdminRoutePointCreate]) -> None:
+    existing_ids = db.scalars(select(RoutePoint.point_id).where(RoutePoint.route_id == route.id)).all()
+    if existing_ids:
+        db.query(RoutePoint).filter(RoutePoint.route_id == route.id).delete(synchronize_session=False)
+        db.query(Point).filter(Point.id.in_(existing_ids)).delete(synchronize_session=False)
+
+    if not points_in:
+        return
+
+    next_point_id = db.scalar(select(func.coalesce(func.max(Point.id), 0))) or 0
+    sorted_points = sorted(
+        enumerate(points_in),
+        key=lambda item: item[1].order_index if item[1].order_index is not None else item[0],
+    )
+    for order_index, (_, point_in) in enumerate(sorted_points):
+        next_point_id += 1
+        type_point = (point_in.type_point or "").strip().lower()
+        if type_point not in {"loading", "unloading"}:
+            type_point = "loading"
+        point = Point(
+            id=next_point_id,
+            route_id=route.id,
+            type_point=type_point,
+            place_point=(point_in.place_point or "").strip(),
+            date_point=(point_in.date_point or "").strip(),
+            point_name=(point_in.point_name or "").strip(),
+            point_contacts=(point_in.point_contacts or "").strip(),
+            point_time=(point_in.point_time or "").strip(),
+            point_note=(point_in.point_note or "").strip(),
+            status="new",
+        )
+        db.add(point)
+        db.flush()
+        db.add(RoutePoint(route_id=route.id, point_id=point.id, order_index=order_index))
+
+
+def _route_id_by_point_id(db: Session, point_id: int) -> str | None:
+    route_id = db.scalar(select(RoutePoint.route_id).where(RoutePoint.point_id == point_id).limit(1))
+    if route_id:
+        return route_id
+    point = db.get(Point, point_id)
+    return point.route_id if point else None
+
+
+def _normalize_type_point(value: str) -> str:
+    text = value.strip().lower()
+    if text in {"loading", "загрузка"}:
+        return "loading"
+    if text in {"unloading", "выгрузка"}:
+        return "unloading"
+    return "loading"
+
+
+def _point_order_index(db: Session, route_id: str, point_id: int) -> int:
+    order_idx = db.scalar(
+        select(RoutePoint.order_index).where(RoutePoint.route_id == route_id, RoutePoint.point_id == point_id).limit(1)
+    )
+    return int(order_idx) if order_idx is not None else 0
+
+
 @router.get("/drivers")
 def list_drivers(
     db: Session = Depends(get_db),
@@ -191,28 +280,16 @@ def create_route(
     db.flush()
 
     if payload.points:
-        next_point_id = db.scalar(select(func.coalesce(func.max(Point.id), 0))) or 0
-        sorted_points = sorted(
-            enumerate(payload.points),
-            key=lambda item: item[1].order_index if item[1].order_index is not None else item[0],
-        )
-        for order_index, (_, point_in) in enumerate(sorted_points):
-            next_point_id += 1
-            type_point = point_in.type_point.strip().lower()
-            if type_point not in {"loading", "unloading"}:
-                type_point = "loading"
-            point = Point(
-                id=next_point_id,
-                route_id=route.id,
-                type_point=type_point,
-                place_point=point_in.place_point.strip(),
-                date_point=point_in.date_point.strip(),
-                status="new",
-            )
-            db.add(point)
-            db.flush()
-            db.add(RoutePoint(route_id=route.id, point_id=point.id, order_index=order_index))
+        _apply_points_replace(db, route, payload.points)
 
+    persist_notifications(
+        db,
+        build_route_assigned_notifications(
+            route=route,
+            assigned_user=driver,
+            actor_user=current_user,
+        ),
+    )
     db.commit()
     db.refresh(route)
     return _route_out(db, route, include_points=True)
@@ -222,14 +299,34 @@ def create_route(
 def list_routes(
     status_filter: str | None = Query(default=None, alias="status"),
     driver_user_id: int | None = Query(default=None),
+    route_id: str | None = Query(default=None),
+    number_auto: str | None = Query(default=None),
+    driver_query: str | None = Query(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_route_manager),
 ) -> dict:
     query = select(Route).order_by(Route.created_at.desc())
     if status_filter:
-        query = query.where(Route.status == status_filter.strip())
+        statuses = [item.strip() for item in status_filter.split(",") if item.strip()]
+        if statuses:
+            query = query.where(Route.status.in_(statuses))
+    if route_id:
+        query = query.where(Route.id == route_id.strip())
+    if number_auto:
+        query = query.where(func.lower(Route.number_auto) == number_auto.strip().lower())
     if driver_user_id is not None:
         query = query.where(Route.assigned_user_id == driver_user_id)
+    elif driver_query:
+        q = f"%{driver_query.strip().lower()}%"
+        driver_ids = db.scalars(
+            select(User.id).where(
+                User.role_code == RoleCode.DRIVER.value,
+                func.coalesce(func.lower(User.full_name), "").like(q) | func.coalesce(func.lower(User.login), "").like(q),
+            )
+        ).all()
+        if not driver_ids:
+            return {"items": []}
+        query = query.where(Route.assigned_user_id.in_(driver_ids))
     routes = db.scalars(query).all()
     return {"items": [_route_out(db, route, include_points=False) for route in routes]}
 
@@ -251,7 +348,7 @@ def assign_route_driver(
     route_id: str,
     payload: AssignDriverPayload,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_route_manager),
+    current_user: User = Depends(get_current_route_manager),
 ) -> dict:
     route = db.get(Route, route_id)
     if route is None:
@@ -260,6 +357,14 @@ def assign_route_driver(
     route.assigned_user_id = driver.id
     route.legacy_driver_tg_id = int(driver.legacy_tg_id) if (driver.legacy_tg_id or "").isdigit() else None
     db.add(route)
+    persist_notifications(
+        db,
+        build_route_assigned_notifications(
+            route=route,
+            assigned_user=driver,
+            actor_user=current_user,
+        ),
+    )
     db.commit()
     db.refresh(route)
     return _route_out(db, route, include_points=True)
@@ -269,7 +374,7 @@ def assign_route_driver(
 def cancel_route(
     route_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_route_manager),
+    current_user: User = Depends(get_current_route_manager),
 ) -> dict:
     route = db.get(Route, route_id)
     if route is None:
@@ -278,6 +383,15 @@ def cancel_route(
     _assert_route_status_transition(route.status, "cancelled")
     route.status = "cancelled"
     db.add(route)
+    assigned_user = db.get(User, route.assigned_user_id) if route.assigned_user_id else None
+    persist_notifications(
+        db,
+        build_route_cancelled_notifications(
+            route=route,
+            assigned_user=assigned_user,
+            actor_user=current_user,
+        ),
+    )
     db.commit()
     db.refresh(route)
     return _route_out(db, route, include_points=True)
@@ -287,7 +401,7 @@ def cancel_route(
 def complete_route(
     route_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_route_manager),
+    current_user: User = Depends(get_current_route_manager),
 ) -> dict:
     route = db.get(Route, route_id)
     if route is None:
@@ -302,6 +416,10 @@ def complete_route(
 
     route.status = "success"
     db.add(route)
+    persist_notifications(
+        db,
+        build_route_completed_notifications(route=route, actor_user=current_user),
+    )
     db.commit()
     db.refresh(route)
     return _route_out(db, route, include_points=True)
@@ -312,7 +430,7 @@ def update_route_status(
     route_id: str,
     payload: UpdateRouteStatusPayload,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_route_manager),
+    current_user: User = Depends(get_current_route_manager),
 ) -> dict:
     route = db.get(Route, route_id)
     if route is None:
@@ -334,7 +452,114 @@ def update_route_status(
 
     route.status = next_status
     db.add(route)
+    if next_status == "cancelled":
+        assigned_user = db.get(User, route.assigned_user_id) if route.assigned_user_id else None
+        persist_notifications(
+            db,
+            build_route_cancelled_notifications(route=route, assigned_user=assigned_user, actor_user=current_user),
+        )
+    elif next_status == "success":
+        persist_notifications(
+            db,
+            build_route_completed_notifications(route=route, actor_user=current_user),
+        )
     db.commit()
     db.refresh(route)
     return _route_out(db, route, include_points=True)
+
+
+@router.patch("/{route_id}")
+def update_route(
+    route_id: str,
+    payload: UpdateAdminRoutePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_route_manager),
+) -> dict:
+    route = db.get(Route, route_id)
+    if route is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
+
+    if payload.number_auto is not None:
+        route.number_auto = payload.number_auto.strip()
+    if payload.temperature is not None:
+        route.temperature = payload.temperature.strip()
+    if payload.dispatcher_contacts is not None:
+        route.dispatcher_contacts = payload.dispatcher_contacts.strip()
+    if payload.registration_number is not None:
+        route.registration_number = payload.registration_number.strip()
+    if payload.trailer_number is not None:
+        route.trailer_number = payload.trailer_number.strip()
+    if payload.points is not None:
+        _apply_points_replace(db, route, payload.points)
+        route.status = "new"
+
+    db.add(route)
+    assigned_user = db.get(User, route.assigned_user_id) if route.assigned_user_id else None
+    if assigned_user is not None:
+        persist_notifications(
+            db,
+            build_route_assigned_notifications(route=route, assigned_user=assigned_user, actor_user=current_user),
+        )
+    db.commit()
+    db.refresh(route)
+    return _route_out(db, route, include_points=True)
+
+
+@router.patch("/points/{point_id}")
+def update_route_point(
+    point_id: int,
+    payload: AdminPointPatchPayload,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_route_manager),
+) -> dict:
+    point = db.get(Point, point_id)
+    if point is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Point not found")
+
+    if payload.type_point is not None:
+        point.type_point = _normalize_type_point(payload.type_point)
+    if payload.place_point is not None:
+        point.place_point = payload.place_point.strip()
+    if payload.date_point is not None:
+        point.date_point = payload.date_point.strip()
+    if payload.point_name is not None:
+        point.point_name = payload.point_name.strip()
+    if payload.point_contacts is not None:
+        point.point_contacts = payload.point_contacts.strip()
+    if payload.point_time is not None:
+        point.point_time = payload.point_time.strip()
+    if payload.point_note is not None:
+        point.point_note = payload.point_note.strip()
+
+    db.add(point)
+    db.commit()
+    db.refresh(point)
+    route_id = _route_id_by_point_id(db, point.id)
+    order_index = _point_order_index(db, route_id, point.id) if route_id else 0
+    return _point_out(point, order_index)
+
+
+@router.delete("/points/{point_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_route_point(
+    point_id: int,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_route_manager),
+) -> None:
+    point = db.get(Point, point_id)
+    if point is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Point not found")
+    route_id = _route_id_by_point_id(db, point_id)
+    db.query(RoutePoint).filter(RoutePoint.point_id == point_id).delete(synchronize_session=False)
+    db.delete(point)
+    if route_id:
+        ordered = (
+            db.query(RoutePoint)
+            .filter(RoutePoint.route_id == route_id)
+            .order_by(RoutePoint.order_index.asc(), RoutePoint.id.asc())
+            .all()
+        )
+        for idx, link in enumerate(ordered):
+            link.order_index = idx
+            db.add(link)
+    db.commit()
 

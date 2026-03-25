@@ -22,6 +22,10 @@ export interface PointDto {
   type_point: string;
   place_point: string;
   date_point: string;
+  point_name: string;
+  point_contacts: string;
+  point_time: string;
+  point_note: string;
   status: PointStatus;
   time_accepted: string | null;
   time_registration: string | null;
@@ -38,6 +42,7 @@ export interface RouteDto {
   dispatcher_contacts: string;
   registration_number: string;
   trailer_number: string;
+  created_at: string | null;
   accepted_at: string | null;
   points: PointDto[];
 }
@@ -117,6 +122,10 @@ export interface AdminRoutePointPayload {
   type_point: string;
   place_point: string;
   date_point: string;
+  point_name?: string;
+  point_contacts?: string;
+  point_time?: string;
+  point_note?: string;
   order_index?: number;
 }
 
@@ -153,6 +162,10 @@ export interface AdminRoute {
       type_point: string;
       place_point: string;
       date_point: string;
+      point_name: string;
+      point_contacts: string;
+      point_time: string;
+      point_note: string;
       status: string;
       time_accepted: string | null;
       time_registration: string | null;
@@ -177,5 +190,16 @@ export interface AdminRouteActionPayload {
 
 export interface RouteStatusUpdatePayload {
   status: RouteWorkflowStatus;
+}
+
+export interface NotificationDto {
+  id: number;
+  event_type: string;
+  title: string;
+  message: string;
+  route_id: string | null;
+  point_id: number | null;
+  is_read: boolean;
+  created_at: string;
 }
 

@@ -21,11 +21,11 @@ function onSubmit() {
 <template>
   <section class="card">
     <h1>Вход</h1>
-    <p class="hint">Новый вход для мобильного клиента</p>
+    <p class="hint">Вход в систему</p>
     <form @submit.prevent="onSubmit">
       <label>
         Логин
-        <input v-model="login" autocomplete="username" required />
+        <input v-model="login" autocomplete="username" autocapitalize="off" required />
       </label>
       <label>
         Пароль

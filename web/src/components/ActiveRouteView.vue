@@ -11,7 +11,6 @@ defineProps<{
 const emit = defineEmits<{
   accept: [];
   advanceStatus: [pointId: number];
-  manualSync: [];
 }>();
 </script>
 
@@ -30,10 +29,7 @@ const emit = defineEmits<{
     </article>
 
     <article class="route-card">
-      <div class="row">
-        <h2>Синхронизация</h2>
-        <button :disabled="syncing" @click="emit('manualSync')">{{ syncing ? "..." : "Sync" }}</button>
-      </div>
+      <h2>Состояние</h2>
       <p>{{ syncMessage }}</p>
     </article>
 
@@ -56,6 +52,7 @@ const emit = defineEmits<{
   display: flex;
   justify-content: space-between;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 h1,
