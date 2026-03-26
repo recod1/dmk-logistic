@@ -1,17 +1,24 @@
 import type { PointStatus } from "./types";
 
-const STATUS_CHAIN: PointStatus[] = ["new", "process", "registration", "load", "docs", "success"];
+const STATUS_CHAIN: PointStatus[] = ["new", "process", "registration", "load", "docs"];
 
 const STATUS_LABELS: Record<PointStatus, string> = {
   new: "Новая",
-  process: "Выехал",
-  registration: "Регистрация",
+  process: "Выехал на точку",
+  registration: "Зарегистрировался",
   load: "На воротах",
-  docs: "Документы",
-  success: "Выехал с точки"
+  docs: "Забрал документы",
+  success: "Забрал документы"
 };
 
+export function isPointDone(status: PointStatus): boolean {
+  return status === "docs" || status === "success";
+}
+
 export function nextStatus(current: PointStatus): Exclude<PointStatus, "new"> | null {
+  if (isPointDone(current)) {
+    return null;
+  }
   const index = STATUS_CHAIN.indexOf(current);
   if (index < 0 || index + 1 >= STATUS_CHAIN.length) {
     return null;

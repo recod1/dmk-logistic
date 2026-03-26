@@ -117,6 +117,18 @@ def _point_out(point: Point, order_index: int) -> dict:
         "time_put_on_gate": point.time_put_on_gate.isoformat() if point.time_put_on_gate else None,
         "time_docs": point.time_docs.isoformat() if point.time_docs else None,
         "time_departure": point.time_departure.isoformat() if point.time_departure else None,
+        "departure_time": point.departure_time.isoformat() if point.departure_time else None,
+        "departure_odometer": point.departure_odometer,
+        "departure_coordinates": {"lat": point.departure_lat, "lng": point.departure_lng},
+        "registration_time": point.registration_time.isoformat() if point.registration_time else None,
+        "registration_odometer": point.registration_odometer,
+        "registration_coordinates": {"lat": point.registration_lat, "lng": point.registration_lng},
+        "gate_time": point.gate_time.isoformat() if point.gate_time else None,
+        "gate_odometer": point.gate_odometer,
+        "gate_coordinates": {"lat": point.gate_lat, "lng": point.gate_lng},
+        "docs_time": point.docs_time.isoformat() if point.docs_time else None,
+        "docs_odometer": point.docs_odometer,
+        "docs_coordinates": {"lat": point.docs_lat, "lng": point.docs_lng},
         "odometer": point.odometer,
         "coordinates": {"lat": point.lat, "lng": point.lng},
     }
@@ -164,7 +176,7 @@ def _can_mark_success(db: Session, route_id: str) -> bool:
     statuses = db.scalars(select(Point.status).where(Point.route_id == route_id)).all()
     if not statuses:
         return False
-    return all(point_status == "success" for point_status in statuses)
+    return all(point_status in {"docs", "success"} for point_status in statuses)
 
 
 def _ensure_driver(db: Session, driver_user_id: int) -> User:
@@ -563,5 +575,18 @@ def delete_route_point(
         for idx, link in enumerate(ordered):
             link.order_index = idx
             db.add(link)
+    db.commit()
+
+
+@router.delete("/{route_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_route(
+    route_id: str,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_route_manager),
+) -> None:
+    route = db.get(Route, route_id)
+    if route is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
+    db.delete(route)
     db.commit()
 

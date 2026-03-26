@@ -8,10 +8,10 @@ from mobile_api.notifications_service import create_notification_for_users
 POINT_STATUS_LABELS_RU: dict[str, str] = {
     "new": "Новая",
     "process": "Выехал на точку",
-    "registration": "Регистрация",
+    "registration": "Зарегистрировался",
     "load": "На воротах",
-    "docs": "Документы",
-    "success": "Выехал с точки",
+    "docs": "Забрал документы",
+    "success": "Забрал документы",
 }
 
 

@@ -17,6 +17,7 @@ const emit = defineEmits<{
     userId: number,
     payload: { login?: string; password?: string; role_code?: string; full_name?: string | null; phone?: string | null; is_active?: boolean }
   ];
+  delete: [userId: number];
 }>();
 
 const creating = ref(false);
@@ -111,6 +112,13 @@ function submitEdit(): void {
 function toggleActive(user: AdminUser): void {
   emit("update", user.id, { is_active: !user.is_active });
 }
+
+function removeUser(user: AdminUser): void {
+  if (!window.confirm(`Удалить пользователя ${user.login}?`)) {
+    return;
+  }
+  emit("delete", user.id);
+}
 </script>
 
 <template>
@@ -153,6 +161,7 @@ function toggleActive(user: AdminUser): void {
               <button :disabled="loading" @click="toggleActive(user)">
                 {{ user.is_active ? "Заблокировать" : "Разблокировать" }}
               </button>
+              <button class="danger" :disabled="loading" @click="removeUser(user)">Удалить</button>
             </td>
           </tr>
           <tr v-if="!users.length">
@@ -266,6 +275,9 @@ td {
 .row-actions {
   display: flex;
   gap: 0.4rem;
+}
+.danger {
+  background: #7f1d1d;
 }
 .empty {
   text-align: center;

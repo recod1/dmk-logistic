@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import { statusLabel } from "../status";
+import { isPointDone, statusLabel } from "../status";
 import type { RouteDto } from "../types";
 
 const props = defineProps<{
@@ -16,7 +16,7 @@ const emit = defineEmits<{
 }>();
 
 const firstIncompletePoint = computed(() =>
-  props.route.points.find((point) => point.status !== "success") ?? null
+  props.route.points.find((point) => !isPointDone(point.status)) ?? null
 );
 
 function actionLabel(status: string): string {
@@ -32,9 +32,6 @@ function actionLabel(status: string): string {
   if (status === "load") {
     return "Забрал документы";
   }
-  if (status === "docs") {
-    return "Выехал с точки";
-  }
   return "Завершено";
 }
 
@@ -43,7 +40,7 @@ function canAdvancePoint(pointId: number): boolean {
   if (!point) {
     return false;
   }
-  return point.status !== "success" && props.route.status === "process";
+  return !isPointDone(point.status) && props.route.status === "process";
 }
 </script>
 
@@ -80,8 +77,10 @@ function canAdvancePoint(pointId: number): boolean {
           <p>{{ point.place_point }}</p>
           <small>{{ point.date_point }}</small>
           <div class="meta">
-            <span>Одометр: {{ point.odometer || "—" }}</span>
-            <span>Координаты: {{ point.coordinates?.lat ?? "—" }}, {{ point.coordinates?.lng ?? "—" }}</span>
+            <span>Выезд: {{ point.departure_time || point.time_accepted || "—" }}</span>
+            <span>Регистрация: {{ point.registration_time || point.time_registration || "—" }}</span>
+            <span>Ворота: {{ point.gate_time || point.time_put_on_gate || "—" }}</span>
+            <span>Документы: {{ point.docs_time || point.time_docs || "—" }}</span>
           </div>
           <button class="ghost" :disabled="!canAdvancePoint(point.id) || syncing" @click="emit('advancePoint', point.id)">
             {{ actionLabel(point.status) }}

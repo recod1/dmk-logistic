@@ -123,6 +123,19 @@ export async function createAdminUser(token: string, payload: AdminUserCreatePay
   });
 }
 
+export async function deleteAdminUser(token: string, userId: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/v1/admin/users/${userId}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `HTTP ${response.status}`);
+  }
+}
+
 export async function updateAdminUser(
   token: string,
   userId: number,
@@ -218,13 +231,17 @@ export async function cancelAdminRoute(token: string, routeId: string): Promise<
   });
 }
 
-export async function completeAdminRoute(token: string, routeId: string): Promise<AdminRoute> {
-  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${routeId}/complete`, {
-    method: "POST",
+export async function deleteAdminRoute(token: string, routeId: string): Promise<void> {
+  const response = await fetch(`${API_BASE}/v1/admin/routes/${routeId}`, {
+    method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`
     }
   });
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(body || `HTTP ${response.status}`);
+  }
 }
 
 export async function updateAdminRoute(
