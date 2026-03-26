@@ -7,10 +7,7 @@ type PointForm = {
   type_point: string;
   place_point: string;
   date_point: string;
-  point_name: string;
-  point_contacts: string;
   point_time: string;
-  point_note: string;
 };
 
 const props = defineProps<{
@@ -92,10 +89,7 @@ function makeEmptyPoint(): PointForm {
     type_point: "loading",
     place_point: "",
     date_point: "",
-    point_name: "",
-    point_contacts: "",
-    point_time: "",
-    point_note: ""
+    point_time: ""
   };
 }
 
@@ -104,10 +98,10 @@ function toPointPayload(points: PointForm[]): AdminRoutePointPayload[] {
     type_point: point.type_point || "loading",
     place_point: point.place_point.trim(),
     date_point: point.date_point.trim(),
-    point_name: point.point_name.trim(),
-    point_contacts: point.point_contacts.trim(),
+    point_name: "",
+    point_contacts: "",
     point_time: point.point_time.trim(),
-    point_note: point.point_note.trim(),
+    point_note: "",
     order_index: index
   }));
 }
@@ -124,10 +118,7 @@ watch(
       type_point: point.type_point || "loading",
       place_point: point.place_point || "",
       date_point: point.date_point || "",
-      point_name: point.point_name || "",
-      point_contacts: point.point_contacts || "",
-      point_time: point.point_time || "",
-      point_note: point.point_note || ""
+      point_time: point.point_time || ""
     }));
     reassignDriverId.value = route.driver?.id ?? 0;
     showReassign.value = false;
@@ -248,7 +239,7 @@ function removeRoute(): void {
             <button v-if="showEdit" class="danger soft" @click="removeEditPoint(idx)">Удалить</button>
           </div>
           <p class="muted">{{ point.date_point || "—" }} · {{ point.point_time || "—" }}</p>
-          <p class="muted">{{ point.point_name || point.place_point || "—" }}</p>
+          <p class="muted">{{ point.place_point || "—" }}</p>
           <div v-if="showEdit" class="point-edit-grid">
             <label>
               Тип
@@ -259,27 +250,15 @@ function removeRoute(): void {
             </label>
             <label>
               Дата
-              <input v-model="point.date_point" />
+              <input v-model="point.date_point" type="date" />
             </label>
             <label>
               Время
-              <input v-model="point.point_time" />
-            </label>
-            <label>
-              Название
-              <input v-model="point.point_name" />
+              <input v-model="point.point_time" type="time" step="60" />
             </label>
             <label>
               Адрес
               <input v-model="point.place_point" />
-            </label>
-            <label>
-              Контакты
-              <input v-model="point.point_contacts" />
-            </label>
-            <label class="full">
-              Примечание
-              <textarea v-model="point.point_note" rows="2" />
             </label>
           </div>
           <div v-else class="point-view-grid">
@@ -287,7 +266,6 @@ function removeRoute(): void {
             <p><strong>Адрес:</strong> {{ point.place_point || "—" }}</p>
             <p><strong>Дата:</strong> {{ point.date_point || "—" }}</p>
             <p><strong>Время:</strong> {{ point.point_time || "—" }}</p>
-            <p><strong>Контакты:</strong> {{ point.point_contacts || "—" }}</p>
           </div>
         </article>
       </section>
@@ -296,7 +274,7 @@ function removeRoute(): void {
         <h3>Этапы по точкам</h3>
         <article v-for="point in route.points || []" :key="point.id" class="point-card">
           <div class="point-top">
-            <strong>{{ pointTypeLabel(point.type_point) }} · {{ point.point_name || point.place_point || "Без названия" }}</strong>
+            <strong>{{ pointTypeLabel(point.type_point) }} · {{ point.place_point || "Без адреса" }}</strong>
             <span class="status-chip">{{ point.status }}</span>
           </div>
           <p class="muted">{{ point.date_point || "—" }} · {{ point.point_time || "—" }}</p>

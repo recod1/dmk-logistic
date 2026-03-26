@@ -13,10 +13,9 @@ from mobile_api.db import get_db
 from mobile_api.driver_trip_rules import DriverRouteState, can_accept_route, pick_active_route
 from mobile_api.models import Point, Route, RouteEvent, RoutePoint, User
 from mobile_api.route_notification_logic import (
-    build_point_status_changed_notifications,
-    build_route_assigned_notifications,
-    build_route_completed_notifications,
-    persist_notifications,
+    notify_point_status_changed,
+    notify_route_assigned,
+    notify_route_completed,
 )
 from mobile_api.roles import role_label_ru
 
@@ -280,13 +279,11 @@ def accept_route(
         route.status = "process"
         route.accepted_at = datetime.now(timezone.utc)
         db.add(route)
-        persist_notifications(
+        notify_route_assigned(
             db,
-            build_route_assigned_notifications(
-                route=route,
-                assigned_user=current_user,
-                actor_user=current_user,
-            ),
+            route=route,
+            assigned_user=current_user,
+            actor_user=current_user,
         )
         db.commit()
         db.refresh(route)
@@ -367,10 +364,6 @@ def _apply_point_telemetry(point: Point, status_value: str, odometer: str | None
             point.docs_lat = lat_value
         if lng_value is not None:
             point.docs_lng = lng_value
-
-
-def _manager_notification_recipient_ids(db: Session) -> list[int]:
-    return [int(item) for item in db.scalars(select(User.id).where(User.role_code.in_(["admin", "superadmin", "logistic"]))).all()]
 
 
 def _refresh_route_status_if_completed(db: Session, route: Route) -> None:
@@ -493,29 +486,19 @@ def batch_events(
             _apply_point_telemetry(point, target_status, event.odometer, event.coordinates)
             db.add(point)
             _refresh_route_status_if_completed(db, route)
-            manager_ids = _manager_notification_recipient_ids(db)
-            point_notifications = build_point_status_changed_notifications(
+            notify_point_status_changed(
+                db,
                 route=route,
                 point=point,
                 actor_user=current_user,
                 new_status=target_status,
             )
-            for item in point_notifications:
-                base_recipients = [user_id for user_id in item.get("user_ids", []) if user_id]
-                item["user_ids"] = sorted(set(base_recipients + manager_ids))
-            persist_notifications(
-                db,
-                point_notifications,
-            )
             db.flush()
             if route.status == "success":
-                completed_notifications = build_route_completed_notifications(route=route, actor_user=current_user)
-                for item in completed_notifications:
-                    base_recipients = [user_id for user_id in item.get("user_ids", []) if user_id]
-                    item["user_ids"] = sorted(set(base_recipients + manager_ids))
-                persist_notifications(
+                notify_route_completed(
                     db,
-                    completed_notifications,
+                    route=route,
+                    actor_user=current_user,
                 )
 
         delta_ms = int((server_received_at - _as_utc(event.occurred_at_client)).total_seconds() * 1000)

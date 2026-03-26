@@ -54,13 +54,19 @@ const canAdvance = computed(() => {
   <section class="driver-shell">
     <article v-if="activeRoute" class="card main-card">
       <h2>Рейс #{{ activeRoute.id }}</h2>
-      <p><strong>Статус:</strong> {{ activeRoute.status }}</p>
-      <p><strong>ТС:</strong> {{ activeRoute.number_auto || "—" }}</p>
+      <p class="route-meta">
+        <span v-if="activeRoute.number_auto"><strong>ТС:</strong> {{ activeRoute.number_auto }}</span>
+        <span v-if="activeRoute.trailer_number"><strong>Прицеп:</strong> {{ activeRoute.trailer_number }}</span>
+        <span v-if="activeRoute.registration_number"><strong>Рег. №:</strong> {{ activeRoute.registration_number }}</span>
+        <span v-if="activeRoute.temperature"><strong>Темп.:</strong> {{ activeRoute.temperature }}</span>
+      </p>
       <p><strong>Точек:</strong> {{ activeRoute.points.length }}</p>
 
       <div v-if="activePoint" class="point-pill">
-        <strong>Текущая точка:</strong>
-        <span>#{{ activePoint.id }} · {{ statusLabel(activePoint.status) }}</span>
+        <strong>Текущая точка: {{ statusLabel(activePoint.status) }}</strong>
+        <span><strong>Тип:</strong> {{ activePoint.type_point === "unloading" ? "Выгрузка" : "Загрузка" }}</span>
+        <span><strong>Адрес:</strong> {{ activePoint.place_point || "—" }}</span>
+        <span><strong>Плановое время:</strong> {{ activePoint.date_point || "—" }} {{ activePoint.point_time || "" }}</span>
       </div>
 
       <button v-if="activeRoute.status === 'new'" class="primary" @click="emit('acceptActiveRoute')">Принять рейс</button>
@@ -92,6 +98,12 @@ const canAdvance = computed(() => {
 .main-card {
   display: grid;
   gap: 0.6rem;
+}
+.route-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin: 0;
 }
 .point-pill {
   display: grid;

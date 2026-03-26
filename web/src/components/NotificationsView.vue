@@ -12,17 +12,8 @@ const emit = defineEmits<{
   refresh: [];
   markRead: [notificationId: number];
   markAllRead: [];
+  openRoute: [routeId: string, notificationId: number];
 }>();
-
-function eventTypeLabel(eventType: string): string {
-  const map: Record<string, string> = {
-    route_assigned: "Назначение рейса",
-    route_cancelled: "Отмена рейса",
-    route_completed: "Завершение рейса",
-    point_status_changed: "Статус точки"
-  };
-  return map[eventType] ?? eventType;
-}
 
 function formatDate(value: string): string {
   const d = new Date(value);
@@ -30,6 +21,13 @@ function formatDate(value: string): string {
     return value;
   }
   return d.toLocaleString("ru-RU");
+}
+
+function openRouteFromItem(item: NotificationDto): void {
+  if (!item.route_id) {
+    return;
+  }
+  emit("openRoute", item.route_id, item.id);
 }
 </script>
 
@@ -50,17 +48,19 @@ function formatDate(value: string): string {
     </article>
 
     <section class="list">
-      <article v-for="item in items" :key="item.id" class="card item-card" :class="{ unread: !item.is_read }">
+      <article
+        v-for="item in items"
+        :key="item.id"
+        class="card item-card"
+        :class="{ unread: !item.is_read, clickable: Boolean(item.route_id) }"
+        @click="openRouteFromItem(item)"
+      >
         <div class="row-top">
-          <strong>{{ item.title }}</strong>
-          <span class="type">{{ eventTypeLabel(item.event_type) }}</span>
+          <strong>{{ item.message }}</strong>
         </div>
-        <p>{{ item.message }}</p>
         <div class="meta">
-          <span v-if="item.route_id">Рейс: {{ item.route_id }}</span>
-          <span v-if="item.point_id">Точка: {{ item.point_id }}</span>
           <span>{{ formatDate(item.created_at) }}</span>
-          <button v-if="!item.is_read" class="link-btn" @click="emit('markRead', item.id)">Отметить прочитанным</button>
+          <button v-if="!item.is_read" class="link-btn" @click.stop="emit('markRead', item.id)">Отметить прочитанным</button>
         </div>
       </article>
     </section>
@@ -92,6 +92,9 @@ function formatDate(value: string): string {
   display: grid;
   gap: 0.45rem;
 }
+.item-card.clickable {
+  cursor: pointer;
+}
 .item-card.unread {
   border-color: #ef4444;
 }
@@ -100,13 +103,6 @@ function formatDate(value: string): string {
   justify-content: space-between;
   align-items: flex-start;
   gap: 0.5rem;
-}
-.type {
-  border-radius: 999px;
-  border: 1px solid #334155;
-  color: #bfdbfe;
-  padding: 0.05rem 0.45rem;
-  font-size: 0.8rem;
 }
 p {
   margin: 0;

@@ -46,10 +46,24 @@ db.version(3).stores({
   pointOverlay: "++id,route_id,point_id,[route_id+point_id],updated_at"
 });
 
+function toPlainObject<T>(value: T): T {
+  if (value === null || value === undefined) {
+    return value;
+  }
+  if (typeof structuredClone === "function") {
+    try {
+      return structuredClone(value);
+    } catch {
+      // Vue reactive proxies may throw DataCloneError with structuredClone.
+    }
+  }
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
 export async function saveActiveRoute(route: RouteDto | null): Promise<void> {
   await db.activeRoute.put({
     key: "active",
-    route,
+    route: toPlainObject(route),
     updatedAt: new Date().toISOString()
   });
 }

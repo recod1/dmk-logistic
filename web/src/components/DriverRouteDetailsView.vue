@@ -71,11 +71,11 @@ function canAdvancePoint(pointId: number): boolean {
       <div class="points">
         <div v-for="point in route.points" :key="point.id" class="point-card">
           <div class="row">
-            <strong>#{{ point.id }} · {{ point.type_point }}</strong>
+            <strong>{{ point.type_point === "unloading" ? "Выгрузка" : "Загрузка" }}</strong>
             <span class="chip">{{ statusLabel(point.status) }}</span>
           </div>
           <p>{{ point.place_point }}</p>
-          <small>{{ point.date_point }}</small>
+          <small>{{ point.date_point }} {{ point.point_time || "" }}</small>
           <div class="meta">
             <span>Выезд: {{ point.departure_time || point.time_accepted || "—" }}</span>
             <span>Регистрация: {{ point.registration_time || point.time_registration || "—" }}</span>
