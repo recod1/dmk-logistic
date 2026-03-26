@@ -32,6 +32,30 @@ export interface PointDto {
   time_put_on_gate: string | null;
   time_docs: string | null;
   time_departure: string | null;
+  departure_time?: string | null;
+  departure_odometer?: string | null;
+  departure_coordinates?: {
+    lat: number | null;
+    lng: number | null;
+  } | null;
+  registration_time?: string | null;
+  registration_odometer?: string | null;
+  registration_coordinates?: {
+    lat: number | null;
+    lng: number | null;
+  } | null;
+  gate_time?: string | null;
+  gate_odometer?: string | null;
+  gate_coordinates?: {
+    lat: number | null;
+    lng: number | null;
+  } | null;
+  docs_time?: string | null;
+  docs_odometer?: string | null;
+  docs_coordinates?: {
+    lat: number | null;
+    lng: number | null;
+  } | null;
   odometer?: string | null;
   coordinates?: {
     lat: number | null;
@@ -182,6 +206,30 @@ export interface AdminRoute {
       time_put_on_gate: string | null;
       time_docs: string | null;
       time_departure: string | null;
+      departure_time?: string | null;
+      departure_odometer?: string | null;
+      departure_coordinates?: {
+        lat: number | null;
+        lng: number | null;
+      } | null;
+      registration_time?: string | null;
+      registration_odometer?: string | null;
+      registration_coordinates?: {
+        lat: number | null;
+        lng: number | null;
+      } | null;
+      gate_time?: string | null;
+      gate_odometer?: string | null;
+      gate_coordinates?: {
+        lat: number | null;
+        lng: number | null;
+      } | null;
+      docs_time?: string | null;
+      docs_odometer?: string | null;
+      docs_coordinates?: {
+        lat: number | null;
+        lng: number | null;
+      } | null;
       odometer?: string | null;
       coordinates?: {
         lat: number | null;

@@ -107,6 +107,28 @@ class Point(Base):
     time_docs: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     photo_docs: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Новая модель этапов точки рейса для PWA:
+    # выезд -> регистрация -> ворота -> документы.
+    departure_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    departure_odometer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    departure_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    departure_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    registration_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    registration_odometer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    registration_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    registration_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    gate_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    gate_odometer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gate_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    gate_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    docs_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    docs_odometer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    docs_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    docs_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="new", server_default="new")
     lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     lng: Mapped[float | None] = mapped_column(Float, nullable=True)

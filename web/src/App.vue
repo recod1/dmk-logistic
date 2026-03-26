@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from "vue";
 
+import AdminRouteDetailsView from "./components/AdminRouteDetailsView.vue";
 import AdminRoutesView from "./components/AdminRoutesView.vue";
 import AdminUsersView from "./components/AdminUsersView.vue";
 import DriverHomeView from "./components/DriverHomeView.vue";
@@ -12,9 +13,10 @@ import {
   acceptRoute,
   assignAdminRouteDriver,
   cancelAdminRoute,
-  completeAdminRoute,
   createAdminRoute,
   createAdminUser,
+  deleteAdminRoute,
+  deleteAdminUser,
   getActiveRoute,
   getAdminRoute,
   getDriverRoute,
@@ -43,7 +45,7 @@ import {
   savePointOverlay
 } from "./db";
 import { isAdminRole, isRouteManagerRole } from "./roles";
-import { nextStatus } from "./status";
+import { isPointDone, nextStatus } from "./status";
 import type {
   AdminRoute,
   AdminRouteCreatePayload,
@@ -60,7 +62,14 @@ const TOKEN_STORAGE_KEY = "dmk_mobile_token";
 const USER_STORAGE_KEY = "dmk_mobile_user";
 const DEVICE_ID_STORAGE_KEY = "dmk_mobile_device_id";
 
-type AppSection = "driver_home" | "driver_routes" | "driver_route_details" | "notifications" | "admin_users" | "admin_routes";
+type AppSection =
+  | "driver_home"
+  | "driver_routes"
+  | "driver_route_details"
+  | "notifications"
+  | "admin_users"
+  | "admin_routes"
+  | "admin_route_details";
 type RouteFilters = { status?: string; route_id?: string; number_auto?: string; driver_query?: string };
 
 const authToken = ref<string>("");
@@ -70,11 +79,9 @@ const authLoading = ref(false);
 const authError = ref("");
 const syncing = ref(false);
 const syncMessage = ref("Готово");
-const isOnline = ref(navigator.onLine);
 const currentSection = ref<AppSection>("driver_home");
-const driverMenuOpen = ref(false);
+const profileMenuOpen = ref(false);
 const selectedDriverRoute = ref<RouteDto | null>(null);
-const selectedDriverRouteId = ref<string | null>(null);
 const driverAssignedRoutes = ref<DriverRouteListItem[]>([]);
 const driverHistoryRoutes = ref<DriverRouteListItem[]>([]);
 const driverRoutesLoading = ref(false);
@@ -101,7 +108,6 @@ let notificationsWsReconnectTimer: number | null = null;
 let notificationsPingInterval: number | null = null;
 
 const isAuthed = computed(() => Boolean(authToken.value));
-const onlineLabel = computed(() => (isOnline.value ? "Онлайн" : "Офлайн"));
 const isAdmin = computed(() => isAdminRole(authUser.value?.role_code || ""));
 const isRouteManager = computed(() => isRouteManagerRole(authUser.value?.role_code || ""));
 const isDriver = computed(() => authUser.value?.role_code === "driver");
@@ -113,6 +119,56 @@ const activeRouteSummary = computed(() => {
 });
 const hasAssignedRoutes = computed(() => driverAssignedRoutes.value.some((item) => item.status === "new"));
 const hasUnreadNotifications = computed(() => unreadNotificationsCount.value > 0);
+
+const currentPageTitle = computed(() => {
+  if (!isAuthed.value) {
+    return "ДМК - Вход";
+  }
+  if (currentSection.value === "driver_home") {
+    return "ДМК - Главная";
+  }
+  if (
+    currentSection.value === "driver_routes" ||
+    currentSection.value === "driver_route_details" ||
+    currentSection.value === "admin_routes" ||
+    currentSection.value === "admin_route_details"
+  ) {
+    return "ДМК - Рейсы";
+  }
+  if (currentSection.value === "admin_users") {
+    return "ДМК - Пользователи";
+  }
+  if (currentSection.value === "notifications") {
+    return "ДМК - Уведомления";
+  }
+  return "ДМК";
+});
+
+const profileDisplayName = computed(() => authUser.value?.full_name || authUser.value?.login || "");
+
+const profileMenuItems = computed<Array<{ section: AppSection; label: string }>>(() => {
+  if (!authUser.value) {
+    return [];
+  }
+  if (isAdminRole(authUser.value.role_code)) {
+    return [
+      { section: "admin_routes", label: "Рейсы" },
+      { section: "admin_users", label: "Пользователи" },
+      { section: "notifications", label: "Уведомления" }
+    ];
+  }
+  if (isRouteManagerRole(authUser.value.role_code)) {
+    return [
+      { section: "admin_routes", label: "Рейсы" },
+      { section: "notifications", label: "Уведомления" }
+    ];
+  }
+  return [
+    { section: "driver_home", label: "Главная" },
+    { section: "driver_routes", label: "Рейсы" },
+    { section: "notifications", label: "Уведомления" }
+  ];
+});
 
 function getDeviceId(): string {
   const existing = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
@@ -258,7 +314,6 @@ function clearAuth(): void {
   authUser.value = null;
   route.value = null;
   selectedDriverRoute.value = null;
-  selectedDriverRouteId.value = null;
   driverAssignedRoutes.value = [];
   driverHistoryRoutes.value = [];
   adminUsers.value = [];
@@ -268,17 +323,13 @@ function clearAuth(): void {
   notifications.value = [];
   unreadNotificationsCount.value = 0;
   currentSection.value = "driver_home";
-  driverMenuOpen.value = false;
+  profileMenuOpen.value = false;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
 }
 
 function openDefaultSectionByRole(user: AuthUser): void {
-  if (isAdminRole(user.role_code)) {
-    currentSection.value = "admin_users";
-    return;
-  }
-  if (isRouteManagerRole(user.role_code)) {
+  if (isAdminRole(user.role_code) || isRouteManagerRole(user.role_code)) {
     currentSection.value = "admin_routes";
     return;
   }
@@ -320,10 +371,16 @@ async function refreshDriverRoutes(): Promise<void> {
     const history = await listDriverRoutes(authToken.value, "history");
     driverAssignedRoutes.value = assigned.items;
     driverHistoryRoutes.value = history.items;
-    if (!route.value && assigned.active_route_id) {
-      const activeRoute = await getDriverRoute(authToken.value, assigned.active_route_id);
-      route.value = await applyOverlaysToRoute(activeRoute);
-      await saveActiveRoute(route.value);
+
+    if (assigned.active_route_id) {
+      if (!route.value || route.value.id !== assigned.active_route_id) {
+        const activeRoute = await getDriverRoute(authToken.value, assigned.active_route_id);
+        route.value = await applyOverlaysToRoute(activeRoute);
+        await saveActiveRoute(route.value);
+      }
+    } else {
+      route.value = null;
+      await saveActiveRoute(null);
     }
   } catch (error) {
     syncMessage.value = `Ошибка загрузки рейсов: ${(error as Error).message}`;
@@ -350,10 +407,7 @@ async function syncOutboxInBackground(): Promise<void> {
   if (!authToken.value || !isDriver.value) {
     return;
   }
-  if (!navigator.onLine) {
-    return;
-  }
-  if (syncing.value) {
+  if (!navigator.onLine || syncing.value) {
     return;
   }
   const deviceId = getDeviceId();
@@ -447,6 +501,22 @@ async function doUpdateAdminUser(
   }
 }
 
+async function doDeleteAdminUser(userId: number): Promise<void> {
+  if (!authToken.value || !isAdmin.value) {
+    return;
+  }
+  usersLoading.value = true;
+  usersError.value = "";
+  try {
+    await deleteAdminUser(authToken.value, userId);
+    await refreshAdminUsers();
+  } catch (error) {
+    usersError.value = `Ошибка удаления: ${(error as Error).message}`;
+  } finally {
+    usersLoading.value = false;
+  }
+}
+
 async function refreshRouteDrivers(): Promise<void> {
   if (!authToken.value || !isRouteManager.value) {
     return;
@@ -472,6 +542,9 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
       const selected = adminRoutes.value.find((item) => item.id === selectedAdminRoute.value?.id);
       if (selected) {
         selectedAdminRoute.value = await getAdminRoute(authToken.value, selected.id);
+      } else if (currentSection.value === "admin_route_details") {
+        selectedAdminRoute.value = null;
+        currentSection.value = "admin_routes";
       }
     }
   } catch (error) {
@@ -491,6 +564,7 @@ async function doCreateAdminRoute(payload: AdminRouteCreatePayload): Promise<voi
     const routeCreated = await createAdminRoute(authToken.value, payload);
     await refreshAdminRoutes(routeFilters.value);
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeCreated.id);
+    currentSection.value = "admin_route_details";
   } catch (error) {
     routesError.value = `Ошибка создания рейса: ${(error as Error).message}`;
   } finally {
@@ -533,11 +607,17 @@ async function doSelectAdminRoute(routeId: string): Promise<void> {
   routesError.value = "";
   try {
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
+    currentSection.value = "admin_route_details";
   } catch (error) {
     routesError.value = `Ошибка загрузки рейса: ${(error as Error).message}`;
   } finally {
     routesLoading.value = false;
   }
+}
+
+function openAdminRouteList(): void {
+  profileMenuOpen.value = false;
+  currentSection.value = "admin_routes";
 }
 
 async function doAssignAdminRoute(routeId: string, driverUserId: number): Promise<void> {
@@ -574,18 +654,19 @@ async function doCancelAdminRoute(routeId: string): Promise<void> {
   }
 }
 
-async function doCompleteAdminRoute(routeId: string): Promise<void> {
+async function doDeleteAdminRoute(routeId: string): Promise<void> {
   if (!authToken.value || !isRouteManager.value) {
     return;
   }
   routesLoading.value = true;
   routesError.value = "";
   try {
-    await completeAdminRoute(authToken.value, routeId);
-    selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
+    await deleteAdminRoute(authToken.value, routeId);
+    selectedAdminRoute.value = null;
+    currentSection.value = "admin_routes";
     await refreshAdminRoutes(routeFilters.value);
   } catch (error) {
-    routesError.value = `Ошибка завершения рейса: ${(error as Error).message}`;
+    routesError.value = `Ошибка удаления рейса: ${(error as Error).message}`;
   } finally {
     routesLoading.value = false;
   }
@@ -639,7 +720,7 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
   }
   connectNotificationsSocket();
   if (isAdminRole(user.role_code)) {
-    currentSection.value = "admin_users";
+    currentSection.value = "admin_routes";
     await refreshAdminUsers();
     await refreshRouteDrivers();
     await refreshAdminRoutes({ status: "process" });
@@ -662,6 +743,7 @@ function openRoleMainSection(section: AppSection): void {
     currentSection.value = "driver_home";
     return;
   }
+  profileMenuOpen.value = false;
   if (section === "notifications") {
     currentSection.value = "notifications";
     return;
@@ -670,8 +752,8 @@ function openRoleMainSection(section: AppSection): void {
     currentSection.value = section;
     return;
   }
-  if (section === "admin_routes" && isRouteManagerRole(authUser.value.role_code)) {
-    currentSection.value = section;
+  if ((section === "admin_routes" || section === "admin_route_details") && isRouteManagerRole(authUser.value.role_code)) {
+    currentSection.value = section === "admin_route_details" && !selectedAdminRoute.value ? "admin_routes" : section;
     return;
   }
   if ((section === "driver_home" || section === "driver_routes") && authUser.value.role_code === "driver") {
@@ -679,6 +761,17 @@ function openRoleMainSection(section: AppSection): void {
     return;
   }
   openDefaultSectionByRole(authUser.value);
+}
+
+function toggleProfileMenu(): void {
+  if (!isAuthed.value) {
+    return;
+  }
+  profileMenuOpen.value = !profileMenuOpen.value;
+}
+
+function selectProfileSection(section: AppSection): void {
+  openRoleMainSection(section);
 }
 
 async function doLogin(loginValue: string, password: string): Promise<void> {
@@ -773,58 +866,36 @@ async function openDriverRouteDetails(routeId: string): Promise<void> {
   }
   try {
     selectedDriverRoute.value = await getDriverRoute(authToken.value, routeId);
-    selectedDriverRouteId.value = routeId;
     currentSection.value = "driver_route_details";
   } catch (error) {
     syncMessage.value = `Ошибка загрузки деталей рейса: ${(error as Error).message}`;
   }
 }
 
-function onOnline(): void {
-  isOnline.value = true;
-  void syncOutboxInBackground();
-}
-
-function onOffline(): void {
-  isOnline.value = false;
-  syncMessage.value = "Офлайн-режим";
+function onDocumentClick(event: MouseEvent): void {
+  const target = event.target as HTMLElement | null;
+  if (!target?.closest(".profile-wrap")) {
+    profileMenuOpen.value = false;
+  }
 }
 
 function openNotifications(): void {
+  profileMenuOpen.value = false;
   currentSection.value = "notifications";
   void refreshNotifications();
 }
 
-function toggleDriverMenu(): void {
-  driverMenuOpen.value = !driverMenuOpen.value;
-}
-
-function openDriverHome(): void {
-  driverMenuOpen.value = false;
-  currentSection.value = "driver_home";
-}
-
 function openDriverRoutes(): void {
-  driverMenuOpen.value = false;
+  profileMenuOpen.value = false;
   currentSection.value = "driver_routes";
   void refreshDriverRoutes();
-}
-
-function openDriverSalary(): void {
-  driverMenuOpen.value = false;
-  syncMessage.value = "Раздел «Зарплата» будет доступен в следующей итерации.";
-}
-
-function openDriverRepair(): void {
-  driverMenuOpen.value = false;
-  syncMessage.value = "Раздел «Ремонт» будет доступен в следующей итерации.";
 }
 
 function advanceActivePointFromHome(): void {
   if (!route.value) {
     return;
   }
-  const activePoint = route.value.points.find((point) => point.status !== "success");
+  const activePoint = route.value.points.find((point) => !isPointDone(point.status));
   if (!activePoint) {
     return;
   }
@@ -849,6 +920,7 @@ onMounted(async () => {
   }
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
+  window.addEventListener("mousedown", onDocumentClick);
 });
 
 onUnmounted(() => {
@@ -856,52 +928,71 @@ onUnmounted(() => {
   closeNotificationsSocket();
   window.removeEventListener("online", onOnline);
   window.removeEventListener("offline", onOffline);
+  window.removeEventListener("mousedown", onDocumentClick);
 });
 </script>
 
 <template>
   <main class="container">
     <header class="topbar">
-      <div>
-        <strong>ДМК Логистика</strong>
-        <small>{{ onlineLabel }}</small>
-      </div>
-      <div class="actions">
-        <span v-if="authUser">{{ authUser.login }} · {{ authUser.role_label }}</span>
-        <button
-          v-if="isAuthed && isAdmin"
-          :class="{ activeTab: currentSection === 'admin_users' }"
-          @click="openRoleMainSection('admin_users')"
-        >
-          Пользователи
-        </button>
-        <button
-          v-if="isAuthed && isRouteManager"
-          :class="{ activeTab: currentSection === 'admin_routes' }"
-          @click="openRoleMainSection('admin_routes')"
-        >
-          Рейсы
-        </button>
-        <button
-          v-if="isAuthed && isDriver"
-          :class="{ activeTab: currentSection === 'driver_home' || currentSection === 'driver_routes' || currentSection === 'driver_route_details' }"
-          @click="openRoleMainSection('driver_home')"
-        >
-          Водитель
-        </button>
-        <button
-          v-if="isAuthed"
-          :class="{ activeTab: currentSection === 'notifications' }"
-          @click="openNotifications"
-        >
-          Уведомления
+      <div class="topbar-side">
+        <button v-if="isAuthed" class="icon-btn bell-btn" @click="openNotifications">
+          🔔
           <span v-if="hasUnreadNotifications" class="notif-dot" />
         </button>
-        <button v-if="isAuthed" @click="logout">Выход</button>
+      </div>
+
+      <h1 class="topbar-title">{{ currentPageTitle }}</h1>
+
+      <div class="topbar-side right">
+        <div v-if="isAuthed" class="profile-wrap">
+          <button class="profile-btn" @click="toggleProfileMenu">
+            {{ profileDisplayName }}
+            <span class="caret">▾</span>
+          </button>
+          <div v-if="profileMenuOpen" class="profile-dropdown">
+            <p class="profile-name">{{ profileDisplayName }}</p>
+            <p class="profile-role">{{ authUser?.role_label }}</p>
+            <button
+              v-for="item in profileMenuItems"
+              :key="item.section"
+              class="menu-item"
+              @click="selectProfileSection(item.section)"
+            >
+              {{ item.label }}
+            </button>
+            <button class="menu-item danger" @click="logout">Выход</button>
+          </div>
+        </div>
       </div>
     </header>
 
     <LoginView v-if="!isAuthed" :loading="authLoading" :error="authError" @submit="doLogin" />
+
+    <section v-else-if="isRouteManager && currentSection === 'admin_routes'">
+      <AdminRoutesView
+        :routes="adminRoutes"
+        :drivers="routeDrivers"
+        :loading="routesLoading"
+        :error="routesError"
+        @refresh="refreshAdminRoutes"
+        @create="doCreateAdminRoute"
+        @select-route="doSelectAdminRoute"
+      />
+    </section>
+
+    <section v-else-if="isRouteManager && currentSection === 'admin_route_details' && selectedAdminRoute">
+      <AdminRouteDetailsView
+        :route="selectedAdminRoute"
+        :drivers="routeDrivers"
+        :loading="routesLoading"
+        @back="openAdminRouteList"
+        @assign-driver="doAssignAdminRoute"
+        @cancel-route="doCancelAdminRoute"
+        @delete-route="doDeleteAdminRoute"
+        @update-route="doUpdateAdminRoute"
+      />
+    </section>
 
     <section v-else-if="isAdmin && currentSection === 'admin_users'">
       <AdminUsersView
@@ -911,23 +1002,7 @@ onUnmounted(() => {
         @refresh="refreshAdminUsers"
         @create="doCreateAdminUser"
         @update="doUpdateAdminUser"
-      />
-    </section>
-
-    <section v-else-if="isRouteManager && currentSection === 'admin_routes'">
-      <AdminRoutesView
-        :routes="adminRoutes"
-        :drivers="routeDrivers"
-        :selected-route="selectedAdminRoute"
-        :loading="routesLoading"
-        :error="routesError"
-        @refresh="refreshAdminRoutes"
-        @create="doCreateAdminRoute"
-        @select-route="doSelectAdminRoute"
-        @assign-driver="doAssignAdminRoute"
-        @cancel-route="doCancelAdminRoute"
-        @complete-route="doCompleteAdminRoute"
-        @update-route="doUpdateAdminRoute"
+        @delete="doDeleteAdminUser"
       />
     </section>
 
@@ -938,14 +1013,7 @@ onUnmounted(() => {
         :has-assigned-routes="hasAssignedRoutes"
         :sync-message="syncMessage"
         :syncing="syncing"
-        :show-menu="driverMenuOpen"
-        :unread-count="unreadNotificationsCount"
-        @toggle-menu="toggleDriverMenu"
-        @open-notifications="openNotifications"
         @open-routes="openDriverRoutes"
-        @open-salary="openDriverSalary"
-        @open-repair="openDriverRepair"
-        @logout="logout"
         @accept-active-route="doAcceptRoute()"
         @advance-active-point="advanceActivePointFromHome"
       />
@@ -957,7 +1025,7 @@ onUnmounted(() => {
         :history="driverHistoryRoutes"
         :loading="driverRoutesLoading"
         :active-route-id="route?.id || null"
-        @back="openDriverHome"
+        @back="openDriverRoutes"
         @open-route="openDriverRouteDetails"
         @refresh="refreshDriverRoutes"
       />
@@ -986,10 +1054,10 @@ onUnmounted(() => {
     </section>
 
     <section v-else class="card">
-      <h1 v-if="isDriver">Активного рейса нет</h1>
+      <h1 v-if="isDriver">Назначенных рейсов нет</h1>
       <h1 v-else>Раздел пуст</h1>
-      <p v-if="isDriver">Когда диспетчер назначит рейс, он появится здесь.</p>
-      <p v-else>Выберите раздел в верхнем меню.</p>
+      <p v-if="isDriver">Когда логист или администратор назначит рейс, он появится здесь.</p>
+      <p v-else>Выберите раздел в меню профиля.</p>
       <button v-if="isDriver" @click="refreshDriverRoutes">Обновить рейсы</button>
       <p class="hint">{{ syncMessage }}</p>
     </section>
@@ -1005,25 +1073,96 @@ onUnmounted(() => {
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
 }
 .topbar {
-  display: flex;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.6rem;
-  margin-bottom: 0.8rem;
+  gap: 0.7rem;
+  margin-bottom: 0.95rem;
 }
-.topbar small {
-  display: block;
-  color: #9ca3af;
-}
-.actions {
+.topbar-side {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.6rem;
+  min-width: 0;
 }
-.activeTab {
-  background: #1d4ed8;
+.topbar-side.right {
+  justify-content: flex-end;
+}
+.topbar-title {
+  margin: 0;
+  text-align: center;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+.icon-btn {
+  width: 42px;
+  height: 42px;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #0f172a;
+  color: #fff;
+  font-size: 1.05rem;
+  position: relative;
+}
+.notif-dot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: #ef4444;
+}
+.profile-wrap {
+  position: relative;
+}
+.profile-btn {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #0f172a;
+  color: #fff;
+  padding: 0.45rem 0.65rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.caret {
+  font-size: 0.8rem;
+  color: #cbd5e1;
+}
+.profile-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.45rem);
+  z-index: 20;
+  width: min(260px, 80vw);
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: #0b1220;
+  padding: 0.6rem;
+  display: grid;
+  gap: 0.35rem;
+  box-shadow: 0 12px 30px rgba(2, 6, 23, 0.45);
+}
+.profile-name {
+  margin: 0;
+  font-weight: 700;
+}
+.profile-role {
+  margin: 0 0 0.25rem;
+  color: #94a3b8;
+  font-size: 0.85rem;
+}
+.menu-item {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: #111827;
+  color: #fff;
+  padding: 0.42rem 0.58rem;
+  text-align: left;
+}
+.menu-item.danger {
+  background: #7f1d1d;
+  border-color: #7f1d1d;
 }
 button {
   border: none;
@@ -1031,18 +1170,6 @@ button {
   background: #2563eb;
   color: #fff;
   padding: 0.4rem 0.7rem;
-}
-.actions button {
-  width: auto;
-  position: relative;
-}
-.notif-dot {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-left: 6px;
-  border-radius: 999px;
-  background: #ef4444;
 }
 .card {
   padding: 1rem;
@@ -1057,16 +1184,17 @@ button {
   .container {
     padding: 0.75rem;
   }
-  .actions {
-    width: 100%;
+  .topbar {
+    grid-template-columns: auto 1fr auto;
   }
-  .actions > span {
-    width: 100%;
+  .topbar-title {
+    font-size: 0.95rem;
   }
-  .actions button {
-    flex: 1 1 calc(50% - 0.3rem);
-    min-width: 0;
+  .profile-btn {
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 </style>
-

@@ -26,15 +26,22 @@ POINT_STATUS_FLOW = {
     "process": "registration",
     "registration": "load",
     "load": "docs",
-    "docs": "success",
 }
 
+COMPLETED_POINT_STATUSES = {"docs", "success"}
+
 STATUS_TIME_COLUMN = {
+    "process": "departure_time",
+    "registration": "registration_time",
+    "load": "gate_time",
+    "docs": "docs_time",
+}
+
+LEGACY_STATUS_TIME_COLUMN = {
     "process": "time_accepted",
     "registration": "time_registration",
     "load": "time_put_on_gate",
     "docs": "time_docs",
-    "success": "time_departure",
 }
 
 
@@ -83,6 +90,18 @@ def _point_to_dict(point: Point) -> dict:
         "time_put_on_gate": point.time_put_on_gate.isoformat() if point.time_put_on_gate else None,
         "time_docs": point.time_docs.isoformat() if point.time_docs else None,
         "time_departure": point.time_departure.isoformat() if point.time_departure else None,
+        "departure_time": point.departure_time.isoformat() if point.departure_time else None,
+        "departure_odometer": point.departure_odometer,
+        "departure_coordinates": {"lat": point.departure_lat, "lng": point.departure_lng},
+        "registration_time": point.registration_time.isoformat() if point.registration_time else None,
+        "registration_odometer": point.registration_odometer,
+        "registration_coordinates": {"lat": point.registration_lat, "lng": point.registration_lng},
+        "gate_time": point.gate_time.isoformat() if point.gate_time else None,
+        "gate_odometer": point.gate_odometer,
+        "gate_coordinates": {"lat": point.gate_lat, "lng": point.gate_lng},
+        "docs_time": point.docs_time.isoformat() if point.docs_time else None,
+        "docs_odometer": point.docs_odometer,
+        "docs_coordinates": {"lat": point.docs_lat, "lng": point.docs_lng},
         "odometer": point.odometer,
         "coordinates": {"lat": point.lat, "lng": point.lng},
     }
@@ -148,7 +167,10 @@ def _driver_routes_for_user(db: Session, user_id: int) -> list[Route]:
 
 def _route_summary(db: Session, route: Route) -> dict:
     points = _get_ordered_points(db, route.id)
-    active_point = next((point for point in points if point.status != "success"), points[-1] if points else None)
+    active_point = next(
+        (point for point in points if point.status not in COMPLETED_POINT_STATUSES),
+        points[-1] if points else None,
+    )
     return {
         "id": route.id,
         "status": route.status,
@@ -286,19 +308,65 @@ def _try_apply_point_status(point: Point, to_status: str, occurred_at_client: da
     time_column = STATUS_TIME_COLUMN.get(to_status)
     if time_column:
         setattr(point, time_column, occurred_at_client)
+    legacy_time_column = LEGACY_STATUS_TIME_COLUMN.get(to_status)
+    if legacy_time_column:
+        setattr(point, legacy_time_column, occurred_at_client)
     return True, None
 
 
-def _apply_point_telemetry(point: Point, odometer: str | None, coordinates: dict | None) -> None:
+def _normalize_target_status(to_status: str) -> str:
+    # Поддержка старых офлайн-событий, где последним статусом точки был "success".
+    if to_status == "success":
+        return "docs"
+    return to_status
+
+
+def _apply_point_telemetry(point: Point, status_value: str, odometer: str | None, coordinates: dict | None) -> None:
+    odometer_value: str | None = None
+    lat_value: float | None = None
+    lng_value: float | None = None
+
     if odometer is not None:
-        point.odometer = odometer.strip() if isinstance(odometer, str) else str(odometer)
+        odometer_value = odometer.strip() if isinstance(odometer, str) else str(odometer)
+        point.odometer = odometer_value
     if coordinates and isinstance(coordinates, dict):
-        lat_value = coordinates.get("lat")
-        lng_value = coordinates.get("lng")
-        if isinstance(lat_value, (int, float)):
-            point.lat = float(lat_value)
-        if isinstance(lng_value, (int, float)):
-            point.lng = float(lng_value)
+        lat_raw = coordinates.get("lat")
+        lng_raw = coordinates.get("lng")
+        if isinstance(lat_raw, (int, float)):
+            lat_value = float(lat_raw)
+            point.lat = lat_value
+        if isinstance(lng_raw, (int, float)):
+            lng_value = float(lng_raw)
+            point.lng = lng_value
+
+    if status_value == "process":
+        if odometer_value is not None:
+            point.departure_odometer = odometer_value
+        if lat_value is not None:
+            point.departure_lat = lat_value
+        if lng_value is not None:
+            point.departure_lng = lng_value
+    elif status_value == "registration":
+        if odometer_value is not None:
+            point.registration_odometer = odometer_value
+        if lat_value is not None:
+            point.registration_lat = lat_value
+        if lng_value is not None:
+            point.registration_lng = lng_value
+    elif status_value == "load":
+        if odometer_value is not None:
+            point.gate_odometer = odometer_value
+        if lat_value is not None:
+            point.gate_lat = lat_value
+        if lng_value is not None:
+            point.gate_lng = lng_value
+    elif status_value == "docs":
+        if odometer_value is not None:
+            point.docs_odometer = odometer_value
+        if lat_value is not None:
+            point.docs_lat = lat_value
+        if lng_value is not None:
+            point.docs_lng = lng_value
 
 
 def _manager_notification_recipient_ids(db: Session) -> list[int]:
@@ -310,7 +378,7 @@ def _refresh_route_status_if_completed(db: Session, route: Route) -> None:
         return
 
     point_statuses = db.scalars(select(Point.status).where(Point.route_id == route.id)).all()
-    if point_statuses and all(status == "success" for status in point_statuses):
+    if point_statuses and all(status_value in COMPLETED_POINT_STATUSES for status_value in point_statuses):
         route.status = "success"
         db.add(route)
 
@@ -406,7 +474,8 @@ def batch_events(
             continue
 
         server_received_at = datetime.now(timezone.utc)
-        applied, error = _try_apply_point_status(point, event.to_status, event.occurred_at_client)
+        target_status = _normalize_target_status(event.to_status)
+        applied, error = _try_apply_point_status(point, target_status, event.occurred_at_client)
         stored_event = RouteEvent(
             route_id=route.id,
             point_id=event.point_id,
@@ -414,14 +483,14 @@ def batch_events(
             device_id=payload.device_id,
             client_event_id=event.client_event_id,
             occurred_at_client=_as_utc(event.occurred_at_client),
-            to_status=event.to_status,
+            to_status=target_status,
             applied=applied,
             error=error,
             server_received_at=server_received_at,
         )
         db.add(stored_event)
         if applied:
-            _apply_point_telemetry(point, event.odometer, event.coordinates)
+            _apply_point_telemetry(point, target_status, event.odometer, event.coordinates)
             db.add(point)
             _refresh_route_status_if_completed(db, route)
             manager_ids = _manager_notification_recipient_ids(db)
@@ -429,7 +498,7 @@ def batch_events(
                 route=route,
                 point=point,
                 actor_user=current_user,
-                new_status=event.to_status,
+                new_status=target_status,
             )
             for item in point_notifications:
                 base_recipients = [user_id for user_id in item.get("user_ids", []) if user_id]
@@ -454,7 +523,7 @@ def batch_events(
             {
                 "client_event_id": event.client_event_id,
                 "point_id": event.point_id,
-                "to_status": event.to_status,
+                "to_status": target_status,
                 "applied": applied,
                 "duplicate": False,
                 "error": error,
