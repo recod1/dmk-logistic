@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from "vue";
 
-import type { AdminRoute, AdminRoutePointPayload, DriverOption } from "../types";
+import type { AdminRoute, AdminRoutePointPayload, DriverOption, RouteWorkflowStatus } from "../types";
 
 type RouteSearchFilters = {
   status?: string;
@@ -14,10 +14,7 @@ type PointForm = {
   type_point: string;
   place_point: string;
   date_point: string;
-  point_name: string;
-  point_contacts: string;
   point_time: string;
-  point_note: string;
 };
 
 const props = defineProps<{
@@ -82,10 +79,7 @@ function makeEmptyPoint(): PointForm {
     type_point: "loading",
     place_point: "",
     date_point: "",
-    point_name: "",
-    point_contacts: "",
-    point_time: "",
-    point_note: ""
+    point_time: ""
   };
 }
 
@@ -94,10 +88,10 @@ function toPointPayload(points: PointForm[]): AdminRoutePointPayload[] {
     type_point: point.type_point || "loading",
     place_point: point.place_point.trim(),
     date_point: point.date_point.trim(),
-    point_name: point.point_name.trim(),
-    point_contacts: point.point_contacts.trim(),
+    point_name: "",
+    point_contacts: "",
     point_time: point.point_time.trim(),
-    point_note: point.point_note.trim(),
+    point_note: "",
     order_index: index
   }));
 }
@@ -177,7 +171,7 @@ onMounted(() => {
   <section class="admin-routes-page">
     <button v-if="!showCreate" class="ghost create-toggle" :disabled="loading || !drivers.length" @click="openCreate">+ Создать рейс</button>
 
-    <section class="card">
+    <section v-if="!showCreate" class="card">
       <h2>Выберите статус</h2>
       <div class="tabs">
         <button
@@ -192,7 +186,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section class="card filters-card">
+    <section v-if="!showCreate" class="card filters-card">
       <h2>{{ filteredTitle }}</h2>
       <div class="filters-grid">
         <label>
@@ -295,23 +289,11 @@ onMounted(() => {
           </label>
           <label>
             Дата
-            <input v-model="point.date_point" />
-          </label>
-          <label>
-            Название
-            <input v-model="point.point_name" />
-          </label>
-          <label>
-            Контакты
-            <input v-model="point.point_contacts" />
+            <input v-model="point.date_point" type="date" />
           </label>
           <label>
             Время
-            <input v-model="point.point_time" />
-          </label>
-          <label class="full">
-            Примечание
-            <textarea v-model="point.point_note" rows="2" />
+            <input v-model="point.point_time" type="time" step="60" />
           </label>
         </div>
       </article>

@@ -284,8 +284,20 @@ function connectNotificationsSocket(): void {
           if (!exists) {
             notifications.value = [payload.item, ...notifications.value].slice(0, 50);
             showBrowserPushNotification(payload.item);
+            if (!payload.item.is_read) {
+              unreadNotificationsCount.value += 1;
+            }
           }
-          unreadNotificationsCount.value += payload.item.is_read ? 0 : 1;
+          if (payload.item.route_id) {
+            if (isDriver.value) {
+              void refreshDriverRoutes();
+              if (currentSection.value === "driver_route_details" && selectedDriverRoute.value?.id === payload.item.route_id) {
+                void openDriverRouteDetails(payload.item.route_id);
+              }
+            } else if (isRouteManager.value) {
+              void refreshAdminRoutes(routeFilters.value);
+            }
+          }
         }
       } catch {
         // heartbeat responses can be non-json (e.g. "pong")
@@ -401,6 +413,25 @@ async function refreshRoute(): Promise<void> {
   } catch (error) {
     syncMessage.value = `Режим офлайн: ${(error as Error).message}`;
   }
+}
+
+function onOnline(): void {
+  syncMessage.value = "Онлайн: синхронизация возобновлена";
+  if (authToken.value) {
+    connectNotificationsSocket();
+    void refreshNotifications();
+  }
+  if (isDriver.value) {
+    void syncOutboxInBackground();
+    void refreshDriverRoutes();
+  } else if (isRouteManager.value) {
+    void refreshAdminRoutes(routeFilters.value);
+  }
+}
+
+function onOffline(): void {
+  syncMessage.value = "Офлайн: изменения сохраняются локально";
+  closeNotificationsSocket();
 }
 
 async function syncOutboxInBackground(): Promise<void> {
@@ -714,6 +745,32 @@ async function doMarkAllNotificationsRead(): Promise<void> {
   }
 }
 
+async function openRouteFromNotification(routeId: string, notificationId: number): Promise<void> {
+  if (!authToken.value || !authUser.value) {
+    return;
+  }
+  await doMarkNotificationRead(notificationId);
+  profileMenuOpen.value = false;
+  notificationsError.value = "";
+  if (isDriver.value) {
+    try {
+      selectedDriverRoute.value = await getDriverRoute(authToken.value, routeId);
+      currentSection.value = "driver_route_details";
+    } catch (error) {
+      syncMessage.value = `Ошибка открытия рейса: ${(error as Error).message}`;
+    }
+    return;
+  }
+  if (isRouteManager.value) {
+    try {
+      selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
+      currentSection.value = "admin_route_details";
+    } catch (error) {
+      routesError.value = `Ошибка открытия рейса: ${(error as Error).message}`;
+    }
+  }
+}
+
 async function bootstrapByRole(user: AuthUser): Promise<void> {
   if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
     void Notification.requestPermission();
@@ -853,8 +910,16 @@ async function markPointNext(pointId: number): Promise<void> {
   await syncOutboxInBackground();
   await refreshRoute();
   await refreshDriverRoutes();
+  if (authToken.value && selectedDriverRoute.value?.id) {
+    try {
+      selectedDriverRoute.value = await getDriverRoute(authToken.value, selectedDriverRoute.value.id);
+    } catch {
+      // keep current snapshot if details refresh failed
+    }
+  }
   if (route.value?.status === "success") {
     route.value = null;
+    selectedDriverRoute.value = null;
     await saveActiveRoute(null);
     currentSection.value = "driver_home";
   }
@@ -1050,6 +1115,7 @@ onUnmounted(() => {
         @refresh="refreshNotifications"
         @mark-read="doMarkNotificationRead"
         @mark-all-read="doMarkAllNotificationsRead"
+        @open-route="openRouteFromNotification"
       />
     </section>
 

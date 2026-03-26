@@ -11,10 +11,9 @@ from mobile_api.auth import get_current_route_manager
 from mobile_api.db import get_db
 from mobile_api.models import Point, Route, RoutePoint, User
 from mobile_api.route_notification_logic import (
-    build_route_assigned_notifications,
-    build_route_cancelled_notifications,
-    build_route_completed_notifications,
-    persist_notifications,
+    notify_route_assigned,
+    notify_route_cancelled,
+    notify_route_completed,
 )
 from mobile_api.roles import RoleCode, role_label_ru
 
@@ -296,13 +295,11 @@ def create_route(
     if payload.points:
         _apply_points_replace(db, route, payload.points)
 
-    persist_notifications(
+    notify_route_assigned(
         db,
-        build_route_assigned_notifications(
-            route=route,
-            assigned_user=driver,
-            actor_user=current_user,
-        ),
+        route=route,
+        assigned_user=driver,
+        actor_user=current_user,
     )
     db.commit()
     db.refresh(route)
@@ -371,13 +368,11 @@ def assign_route_driver(
     route.assigned_user_id = driver.id
     route.legacy_driver_tg_id = int(driver.legacy_tg_id) if (driver.legacy_tg_id or "").isdigit() else None
     db.add(route)
-    persist_notifications(
+    notify_route_assigned(
         db,
-        build_route_assigned_notifications(
-            route=route,
-            assigned_user=driver,
-            actor_user=current_user,
-        ),
+        route=route,
+        assigned_user=driver,
+        actor_user=current_user,
     )
     db.commit()
     db.refresh(route)
@@ -398,13 +393,11 @@ def cancel_route(
     route.status = "cancelled"
     db.add(route)
     assigned_user = db.get(User, route.assigned_user_id) if route.assigned_user_id else None
-    persist_notifications(
+    notify_route_cancelled(
         db,
-        build_route_cancelled_notifications(
-            route=route,
-            assigned_user=assigned_user,
-            actor_user=current_user,
-        ),
+        route=route,
+        assigned_user=assigned_user,
+        actor_user=current_user,
     )
     db.commit()
     db.refresh(route)
@@ -430,9 +423,10 @@ def complete_route(
 
     route.status = "success"
     db.add(route)
-    persist_notifications(
+    notify_route_completed(
         db,
-        build_route_completed_notifications(route=route, actor_user=current_user),
+        route=route,
+        actor_user=current_user,
     )
     db.commit()
     db.refresh(route)
@@ -468,14 +462,17 @@ def update_route_status(
     db.add(route)
     if next_status == "cancelled":
         assigned_user = db.get(User, route.assigned_user_id) if route.assigned_user_id else None
-        persist_notifications(
+        notify_route_cancelled(
             db,
-            build_route_cancelled_notifications(route=route, assigned_user=assigned_user, actor_user=current_user),
+            route=route,
+            assigned_user=assigned_user,
+            actor_user=current_user,
         )
     elif next_status == "success":
-        persist_notifications(
+        notify_route_completed(
             db,
-            build_route_completed_notifications(route=route, actor_user=current_user),
+            route=route,
+            actor_user=current_user,
         )
     db.commit()
     db.refresh(route)
@@ -510,9 +507,11 @@ def update_route(
     db.add(route)
     assigned_user = db.get(User, route.assigned_user_id) if route.assigned_user_id else None
     if assigned_user is not None:
-        persist_notifications(
+        notify_route_assigned(
             db,
-            build_route_assigned_notifications(route=route, assigned_user=assigned_user, actor_user=current_user),
+            route=route,
+            assigned_user=assigned_user,
+            actor_user=current_user,
         )
     db.commit()
     db.refresh(route)
