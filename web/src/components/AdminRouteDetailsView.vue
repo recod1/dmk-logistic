@@ -80,6 +80,18 @@ function normalizePointStageLabel(stage: string): string {
   return labels[stage] ?? stage;
 }
 
+function pointStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    new: "Новая",
+    process: "Выехал на точку",
+    registration: "Зарегистрировался",
+    load: "На воротах",
+    docs: "Забрал документы",
+    success: "Забрал документы"
+  };
+  return labels[status] ?? status;
+}
+
 function canCancel(status: RouteWorkflowStatus): boolean {
   return status === "new" || status === "process";
 }
@@ -228,19 +240,19 @@ function removeRoute(): void {
         </div>
       </section>
 
-      <section class="points-wrap">
-        <div v-if="showEdit" class="points-head">
+      <section v-if="showEdit" class="points-wrap">
+        <div class="points-head">
           <h3>Точки</h3>
           <button class="secondary" @click="addEditPoint">Добавить точку</button>
         </div>
-        <article v-for="(point, idx) in showEdit ? editForm.points : route.points || []" :key="`edit-${idx}`" class="point-card">
+        <article v-for="(point, idx) in editForm.points" :key="`edit-${idx}`" class="point-card">
           <div class="point-top">
             <strong>{{ pointTypeLabel(point.type_point) }}</strong>
-            <button v-if="showEdit" class="danger soft" @click="removeEditPoint(idx)">Удалить</button>
+            <button class="danger soft" @click="removeEditPoint(idx)">Удалить</button>
           </div>
           <p class="muted">{{ point.date_point || "—" }} · {{ point.point_time || "—" }}</p>
           <p class="muted">{{ point.place_point || "—" }}</p>
-          <div v-if="showEdit" class="point-edit-grid">
+          <div class="point-edit-grid">
             <label>
               Тип
               <select v-model="point.type_point">
@@ -261,12 +273,6 @@ function removeRoute(): void {
               <input v-model="point.place_point" />
             </label>
           </div>
-          <div v-else class="point-view-grid">
-            <p><strong>Тип:</strong> {{ pointTypeLabel(point.type_point) }}</p>
-            <p><strong>Адрес:</strong> {{ point.place_point || "—" }}</p>
-            <p><strong>Дата:</strong> {{ point.date_point || "—" }}</p>
-            <p><strong>Время:</strong> {{ point.point_time || "—" }}</p>
-          </div>
         </article>
       </section>
 
@@ -275,7 +281,7 @@ function removeRoute(): void {
         <article v-for="point in route.points || []" :key="point.id" class="point-card">
           <div class="point-top">
             <strong>{{ pointTypeLabel(point.type_point) }} · {{ point.place_point || "Без адреса" }}</strong>
-            <span class="status-chip">{{ point.status }}</span>
+            <span class="status-chip">{{ pointStatusLabel(point.status) }}</span>
           </div>
           <p class="muted">{{ point.date_point || "—" }} · {{ point.point_time || "—" }}</p>
           <table class="stage-table">

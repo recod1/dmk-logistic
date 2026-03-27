@@ -40,7 +40,7 @@ def _manager_ids(db: Session) -> list[int]:
 
 
 def _format_notification_message(action: str, route_id: str, at: datetime | None = None) -> str:
-    return f"{action} · Рейс {route_id} · {_format_event_time(at)}"
+    return f"Рейс {route_id} · {action} · {_format_event_time(at)}"
 
 
 def _point_event_time(point: Point, status_value: str) -> datetime | None:
@@ -113,6 +113,29 @@ def build_route_completed_notifications(
             "title": action,
             "message": _format_notification_message(action, route.id, route.updated_at),
             "route_id": route.id,
+            "point_id": None,
+            "payload": {"route_status": route.status},
+        }
+    ]
+
+
+def build_route_deleted_notifications(
+    *,
+    route: Route,
+    assigned_user: User | None,
+    actor_user: User,
+) -> list[dict]:
+    recipients: list[int | None] = [route.created_by_user_id]
+    if assigned_user is not None:
+        recipients.append(assigned_user.id)
+    action = "Рейс удален"
+    return [
+        {
+            "user_ids": recipients,
+            "event_type": "route_deleted",
+            "title": action,
+            "message": _format_notification_message(action, route.id, route.updated_at),
+            "route_id": None,
             "point_id": None,
             "payload": {"route_status": route.status},
         }
@@ -202,6 +225,25 @@ def notify_route_completed(
 ) -> None:
     notifications = build_route_completed_notifications(
         route=route,
+        actor_user=actor_user,
+    )
+    manager_ids = _manager_ids(db)
+    for item in notifications:
+        base_recipients = [user_id for user_id in item.get("user_ids", []) if user_id]
+        item["user_ids"] = sorted(set(base_recipients + manager_ids))
+    persist_notifications(db, notifications)
+
+
+def notify_route_deleted(
+    db: Session,
+    *,
+    route: Route,
+    assigned_user: User | None,
+    actor_user: User,
+) -> None:
+    notifications = build_route_deleted_notifications(
+        route=route,
+        assigned_user=assigned_user,
         actor_user=actor_user,
     )
     manager_ids = _manager_ids(db)

@@ -6,17 +6,21 @@ import type { RouteDto } from "../types";
 
 const props = defineProps<{
   route: RouteDto;
+  activeRouteId: string | null;
   syncing: boolean;
 }>();
 
 const emit = defineEmits<{
   back: [];
-  accept: [];
   advancePoint: [pointId: number];
 }>();
 
 const firstIncompletePoint = computed(() =>
   props.route.points.find((point) => !isPointDone(point.status)) ?? null
+);
+
+const isAcceptedCurrentRoute = computed(
+  () => props.route.status === "process" && props.route.id === props.activeRouteId
 );
 
 function actionLabel(status: string): string {
@@ -48,22 +52,22 @@ function canAdvancePoint(pointId: number): boolean {
   <section class="details-wrap">
     <header class="head-row">
       <button class="ghost" @click="emit('back')">← К списку рейсов</button>
-      <h1>Рейс #{{ route.id }}</h1>
     </header>
+    <h1 class="route-title">Рейс #{{ route.id }}</h1>
 
     <article class="card">
       <p><strong>Статус рейса:</strong> {{ route.status }}</p>
       <p><strong>ТС:</strong> {{ route.number_auto || "—" }}</p>
       <p><strong>Прицеп:</strong> {{ route.trailer_number || "—" }}</p>
-      <button v-if="route.status === 'new'" class="primary" @click="emit('accept')">Принять рейс</button>
       <button
-        v-else-if="firstIncompletePoint"
+        v-if="isAcceptedCurrentRoute && firstIncompletePoint"
         class="primary"
         :disabled="syncing || !canAdvancePoint(firstIncompletePoint.id)"
         @click="emit('advancePoint', firstIncompletePoint.id)"
       >
         {{ actionLabel(firstIncompletePoint.status) }}
       </button>
+      <p v-else class="note">Изменение статусов доступно только для принятого текущего рейса.</p>
     </article>
 
     <article class="card">
@@ -82,7 +86,11 @@ function canAdvancePoint(pointId: number): boolean {
             <span>Ворота: {{ point.gate_time || point.time_put_on_gate || "—" }}</span>
             <span>Документы: {{ point.docs_time || point.time_docs || "—" }}</span>
           </div>
-          <button class="ghost" :disabled="!canAdvancePoint(point.id) || syncing" @click="emit('advancePoint', point.id)">
+          <button
+            class="ghost"
+            :disabled="!isAcceptedCurrentRoute || !canAdvancePoint(point.id) || syncing"
+            @click="emit('advancePoint', point.id)"
+          >
             {{ actionLabel(point.status) }}
           </button>
         </div>
@@ -96,10 +104,16 @@ function canAdvancePoint(pointId: number): boolean {
   display: grid;
   gap: 0.8rem;
 }
+.route-title {
+  margin: 0;
+  font-size: 1.1rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
 .head-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   gap: 0.5rem;
 }
 .points {
@@ -150,5 +164,9 @@ small {
   background: transparent;
   color: #bfdbfe;
   padding: 0.42rem 0.62rem;
+}
+.note {
+  margin: 0;
+  color: #94a3b8;
 }
 </style>

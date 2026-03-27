@@ -14,6 +14,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   openRoutes: [];
+  openActiveRoute: [];
   acceptActiveRoute: [];
   advanceActivePoint: [];
 }>();
@@ -52,7 +53,7 @@ const canAdvance = computed(() => {
 
 <template>
   <section class="driver-shell">
-    <article v-if="activeRoute" class="card main-card">
+    <article v-if="activeRoute" class="card main-card clickable-card" @click="emit('openActiveRoute')">
       <h2>Рейс #{{ activeRoute.id }}</h2>
       <p class="route-meta">
         <span v-if="activeRoute.number_auto"><strong>ТС:</strong> {{ activeRoute.number_auto }}</span>
@@ -69,10 +70,11 @@ const canAdvance = computed(() => {
         <span><strong>Плановое время:</strong> {{ activePoint.date_point || "—" }} {{ activePoint.point_time || "" }}</span>
       </div>
 
-      <button v-if="activeRoute.status === 'new'" class="primary" @click="emit('acceptActiveRoute')">Принять рейс</button>
-      <button v-else class="primary" :disabled="!canAdvance || syncing" @click="emit('advanceActivePoint')">
+      <button v-if="activeRoute.status === 'new'" class="primary" @click.stop="emit('acceptActiveRoute')">Принять рейс</button>
+      <button v-else class="primary" :disabled="!canAdvance || syncing" @click.stop="emit('advanceActivePoint')">
         {{ actionLabel }}
       </button>
+      <button class="secondary" @click.stop="emit('openActiveRoute')">Открыть всю информацию о рейсе</button>
       <p class="hint">{{ syncMessage }}</p>
     </article>
 
@@ -99,6 +101,9 @@ const canAdvance = computed(() => {
   display: grid;
   gap: 0.6rem;
 }
+.clickable-card {
+  cursor: pointer;
+}
 .route-meta {
   display: flex;
   flex-wrap: wrap;
@@ -119,6 +124,13 @@ const canAdvance = computed(() => {
   background: #2563eb;
   color: #fff;
   padding: 0.55rem 0.8rem;
+}
+.secondary {
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: transparent;
+  color: #bfdbfe;
+  padding: 0.5rem 0.75rem;
 }
 .hint {
   margin: 0;

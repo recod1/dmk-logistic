@@ -232,14 +232,74 @@ function showBrowserPushNotification(item: NotificationDto): void {
   if (typeof window === "undefined" || !("Notification" in window)) {
     return;
   }
-  if (document.visibilityState === "visible") {
-    return;
-  }
   if (Notification.permission === "granted") {
     void new Notification(item.title, {
       body: item.message,
       tag: `dmk-notification-${item.id}`
     });
+  }
+}
+
+function handleIncomingNotification(
+  item: NotificationDto,
+  options: { playEffects?: boolean; syncDriverState?: boolean } = {}
+): void {
+  const playEffects = options.playEffects ?? true;
+  const syncDriverState = options.syncDriverState ?? true;
+  const exists = notifications.value.some((candidate) => candidate.id === item.id);
+  if (!exists) {
+    notifications.value = [item, ...notifications.value].slice(0, 50);
+    if (playEffects) {
+      playNotificationSound();
+      showBrowserPushNotification(item);
+    }
+    if (!item.is_read) {
+      unreadNotificationsCount.value += 1;
+    }
+  }
+
+  if (syncDriverState && item.event_type === "route_deleted" && isDriver.value) {
+    if (!item.route_id || selectedDriverRoute.value?.id === item.route_id) {
+      selectedDriverRoute.value = null;
+      if (currentSection.value === "driver_route_details") {
+        currentSection.value = "driver_home";
+      }
+    }
+    void refreshDriverData();
+  }
+}
+
+function playNotificationSound(): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+  try {
+    const audioContextClass =
+      (window as Window & { AudioContext?: typeof AudioContext }).AudioContext ||
+      (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!audioContextClass) {
+      return;
+    }
+    const context = new audioContextClass();
+    const now = context.currentTime;
+    const gain = context.createGain();
+    gain.gain.value = 0.001;
+    gain.connect(context.destination);
+    gain.gain.exponentialRampToValueAtTime(0.22, now + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+
+    const oscillator = context.createOscillator();
+    oscillator.type = "sine";
+    oscillator.frequency.setValueAtTime(930, now);
+    oscillator.connect(gain);
+    oscillator.start(now);
+    oscillator.stop(now + 0.4);
+
+    window.setTimeout(() => {
+      void context.close();
+    }, 550);
+  } catch {
+    // Ignore sound errors on restricted devices.
   }
 }
 
@@ -280,14 +340,7 @@ function connectNotificationsSocket(): void {
       try {
         const payload = JSON.parse(event.data) as { type?: string; item?: NotificationDto };
         if (payload.type === "notification_created" && payload.item) {
-          const exists = notifications.value.some((item) => item.id === payload.item?.id);
-          if (!exists) {
-            notifications.value = [payload.item, ...notifications.value].slice(0, 50);
-            showBrowserPushNotification(payload.item);
-            if (!payload.item.is_read) {
-              unreadNotificationsCount.value += 1;
-            }
-          }
+          handleIncomingNotification(payload.item, { playEffects: true, syncDriverState: true });
           if (payload.item.route_id) {
             if (isDriver.value) {
               void refreshDriverRoutes();
@@ -696,6 +749,7 @@ async function doDeleteAdminRoute(routeId: string): Promise<void> {
     selectedAdminRoute.value = null;
     currentSection.value = "admin_routes";
     await refreshAdminRoutes(routeFilters.value);
+    await refreshNotifications();
   } catch (error) {
     routesError.value = `Ошибка удаления рейса: ${(error as Error).message}`;
   } finally {
@@ -710,7 +764,9 @@ async function refreshNotifications(): Promise<void> {
   notificationsLoading.value = true;
   notificationsError.value = "";
   try {
-    notifications.value = await listNotifications(authToken.value, 50);
+    const latestNotifications = await listNotifications(authToken.value, 50);
+    latestNotifications.forEach((item) => handleIncomingNotification(item, { playEffects: false, syncDriverState: true }));
+    notifications.value = latestNotifications;
     unreadNotificationsCount.value = await getUnreadNotificationsCount(authToken.value);
   } catch (error) {
     notificationsError.value = `Ошибка загрузки уведомлений: ${(error as Error).message}`;
@@ -768,6 +824,23 @@ async function openRouteFromNotification(routeId: string, notificationId: number
     } catch (error) {
       routesError.value = `Ошибка открытия рейса: ${(error as Error).message}`;
     }
+  }
+}
+
+async function openActiveRouteFromHome(): Promise<void> {
+  if (!route.value || !isDriver.value || !authToken.value) {
+    return;
+  }
+  try {
+    await refreshDriverData();
+    if (!route.value) {
+      currentSection.value = "driver_home";
+      return;
+    }
+    selectedDriverRoute.value = await getDriverRoute(authToken.value, route.value.id);
+    currentSection.value = "driver_route_details";
+  } catch (error) {
+    syncMessage.value = `Ошибка загрузки деталей рейса: ${(error as Error).message}`;
   }
 }
 
@@ -937,6 +1010,11 @@ async function openDriverRouteDetails(routeId: string): Promise<void> {
   }
 }
 
+async function refreshDriverData(): Promise<void> {
+  await refreshDriverRoutes();
+  await refreshRoute();
+}
+
 function onDocumentClick(event: MouseEvent): void {
   const target = event.target as HTMLElement | null;
   if (!target?.closest(".profile-wrap")) {
@@ -953,7 +1031,13 @@ function openNotifications(): void {
 function openDriverRoutes(): void {
   profileMenuOpen.value = false;
   currentSection.value = "driver_routes";
-  void refreshDriverRoutes();
+  void refreshDriverData();
+}
+
+function openDriverHome(): void {
+  profileMenuOpen.value = false;
+  currentSection.value = "driver_home";
+  void refreshDriverData();
 }
 
 function advanceActivePointFromHome(): void {
@@ -1079,7 +1163,8 @@ onUnmounted(() => {
         :sync-message="syncMessage"
         :syncing="syncing"
         @open-routes="openDriverRoutes"
-        @accept-active-route="doAcceptRoute()"
+        @open-active-route="openActiveRouteFromHome"
+        @accept-active-route="doAcceptRoute"
         @advance-active-point="advanceActivePointFromHome"
       />
     </section>
@@ -1090,7 +1175,7 @@ onUnmounted(() => {
         :history="driverHistoryRoutes"
         :loading="driverRoutesLoading"
         :active-route-id="route?.id || null"
-        @back="openDriverRoutes"
+        @back="openDriverHome"
         @open-route="openDriverRouteDetails"
         @refresh="refreshDriverRoutes"
       />
@@ -1099,9 +1184,9 @@ onUnmounted(() => {
     <section v-else-if="isDriver && currentSection === 'driver_route_details' && selectedDriverRoute">
       <DriverRouteDetailsView
         :route="selectedDriverRoute"
+        :active-route-id="route?.id || null"
         :syncing="syncing"
         @back="openDriverRoutes"
-        @accept="doAcceptRoute(selectedDriverRoute.id)"
         @advance-point="markPointNext"
       />
     </section>

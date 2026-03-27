@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { DriverRouteListItem } from "../types";
 
-defineProps<{
+const props = defineProps<{
   assigned: DriverRouteListItem[];
   history: DriverRouteListItem[];
   loading: boolean;
@@ -23,6 +23,10 @@ function routeStatusLabel(status: string): string {
   };
   return labels[status] ?? status;
 }
+
+function isActiveRoute(routeId: string): boolean {
+  return props.activeRouteId === routeId;
+}
 </script>
 
 <template>
@@ -43,6 +47,8 @@ function routeStatusLabel(status: string): string {
           </div>
           <small>ТС: {{ item.number_auto || "—" }}</small>
           <small>Точек: {{ item.points_count }}</small>
+          <small v-if="isActiveRoute(item.id)" class="active-note">Текущий принятый рейс</small>
+          <small v-else class="inactive-note">Только просмотр. Принятие/этапы недоступны</small>
         </button>
         <p v-if="!assigned.length" class="empty">Нет назначенных рейсов</p>
       </div>
@@ -104,6 +110,12 @@ function routeStatusLabel(status: string): string {
 }
 .chip.active {
   background: #1d4ed8;
+}
+.active-note {
+  color: #93c5fd;
+}
+.inactive-note {
+  color: #94a3b8;
 }
 .empty {
   margin: 0;
