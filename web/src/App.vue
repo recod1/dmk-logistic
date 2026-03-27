@@ -1177,7 +1177,7 @@ onUnmounted(() => {
         :active-route-id="route?.id || null"
         @back="openDriverHome"
         @open-route="openDriverRouteDetails"
-        @refresh="refreshDriverRoutes"
+        @refresh="refreshDriverData"
       />
     </section>
 
