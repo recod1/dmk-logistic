@@ -15,14 +15,6 @@ const emit = defineEmits<{
   openRoute: [routeId: string, notificationId: number];
 }>();
 
-function formatDate(value: string): string {
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) {
-    return value;
-  }
-  return d.toLocaleString("ru-RU");
-}
-
 function openRouteFromItem(item: NotificationDto): void {
   if (!item.route_id) {
     return;
@@ -58,9 +50,8 @@ function openRouteFromItem(item: NotificationDto): void {
         <div class="row-top">
           <strong>{{ item.message }}</strong>
         </div>
-        <div class="meta">
-          <span>{{ formatDate(item.created_at) }}</span>
-          <button v-if="!item.is_read" class="link-btn" @click.stop="emit('markRead', item.id)">Отметить прочитанным</button>
+        <div v-if="!item.is_read" class="meta">
+          <button class="link-btn" @click.stop="emit('markRead', item.id)">Отметить прочитанным</button>
         </div>
       </article>
     </section>
@@ -86,11 +77,14 @@ function openRouteFromItem(item: NotificationDto): void {
 }
 .list {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.7rem;
 }
 .item-card {
   display: grid;
   gap: 0.45rem;
+  border-bottom: 1px solid #334155;
+  padding-bottom: 0.7rem;
+  border-radius: 12px;
 }
 .item-card.clickable {
   cursor: pointer;
@@ -112,7 +106,7 @@ p {
   flex-wrap: wrap;
   gap: 0.6rem;
   color: #94a3b8;
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   align-items: center;
 }
 .counter {

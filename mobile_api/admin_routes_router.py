@@ -1,19 +1,20 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_route_manager
 from mobile_api.db import get_db
-from mobile_api.models import Point, Route, RoutePoint, User
+from mobile_api.models import Notification, Point, Route, RouteEvent, RoutePoint, User
 from mobile_api.route_notification_logic import (
     notify_route_assigned,
     notify_route_cancelled,
     notify_route_completed,
+    notify_route_deleted,
 )
 from mobile_api.roles import RoleCode, role_label_ru
 
@@ -26,6 +27,17 @@ ROUTE_STATUS_TRANSITIONS: dict[str, set[str]] = {
     "success": set(),
     "cancelled": set(),
 }
+
+
+def _format_datetime_ru(value: datetime | None) -> str | None:
+    if value is None:
+        return None
+    dt_value = value
+    if dt_value.tzinfo is None:
+        dt_value = dt_value.replace(tzinfo=timezone.utc)
+    return dt_value.astimezone().strftime("%d.%m.%Y %H:%M")
+
+
 class AdminRoutePointCreate(BaseModel):
     type_point: str = Field(min_length=1, max_length=32)
     place_point: str = Field(min_length=1, max_length=2000)
@@ -111,21 +123,21 @@ def _point_out(point: Point, order_index: int) -> dict:
         "point_time": point.point_time,
         "point_note": point.point_note,
         "status": point.status,
-        "time_accepted": point.time_accepted.isoformat() if point.time_accepted else None,
-        "time_registration": point.time_registration.isoformat() if point.time_registration else None,
-        "time_put_on_gate": point.time_put_on_gate.isoformat() if point.time_put_on_gate else None,
-        "time_docs": point.time_docs.isoformat() if point.time_docs else None,
-        "time_departure": point.time_departure.isoformat() if point.time_departure else None,
-        "departure_time": point.departure_time.isoformat() if point.departure_time else None,
+        "time_accepted": _format_datetime_ru(point.time_accepted),
+        "time_registration": _format_datetime_ru(point.time_registration),
+        "time_put_on_gate": _format_datetime_ru(point.time_put_on_gate),
+        "time_docs": _format_datetime_ru(point.time_docs),
+        "time_departure": _format_datetime_ru(point.time_departure),
+        "departure_time": _format_datetime_ru(point.departure_time),
         "departure_odometer": point.departure_odometer,
         "departure_coordinates": {"lat": point.departure_lat, "lng": point.departure_lng},
-        "registration_time": point.registration_time.isoformat() if point.registration_time else None,
+        "registration_time": _format_datetime_ru(point.registration_time),
         "registration_odometer": point.registration_odometer,
         "registration_coordinates": {"lat": point.registration_lat, "lng": point.registration_lng},
-        "gate_time": point.gate_time.isoformat() if point.gate_time else None,
+        "gate_time": _format_datetime_ru(point.gate_time),
         "gate_odometer": point.gate_odometer,
         "gate_coordinates": {"lat": point.gate_lat, "lng": point.gate_lng},
-        "docs_time": point.docs_time.isoformat() if point.docs_time else None,
+        "docs_time": _format_datetime_ru(point.docs_time),
         "docs_odometer": point.docs_odometer,
         "docs_coordinates": {"lat": point.docs_lat, "lng": point.docs_lng},
         "odometer": point.odometer,
@@ -581,11 +593,33 @@ def delete_route_point(
 def delete_route(
     route_id: str,
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_route_manager),
+    current_user: User = Depends(get_current_route_manager),
 ) -> None:
     route = db.get(Route, route_id)
     if route is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
+
+    assigned_user = db.get(User, route.assigned_user_id) if route.assigned_user_id else None
+    notify_route_deleted(
+        db,
+        route=route,
+        assigned_user=assigned_user,
+        actor_user=current_user,
+    )
+
+    point_ids = db.scalars(select(Point.id).where(Point.route_id == route.id)).all()
+    if point_ids:
+        db.query(Notification).filter(Notification.point_id.in_(point_ids)).delete(synchronize_session=False)
+        db.query(RouteEvent).filter(RouteEvent.point_id.in_(point_ids)).delete(synchronize_session=False)
+    db.query(RouteEvent).filter(RouteEvent.route_id == route.id).delete(synchronize_session=False)
+    db.query(Notification).filter(
+        or_(
+            Notification.route_id == route.id,
+            Notification.point_id.in_(point_ids) if point_ids else False,
+        )
+    ).delete(synchronize_session=False)
+    db.query(RoutePoint).filter(RoutePoint.route_id == route.id).delete(synchronize_session=False)
+    db.query(Point).filter(Point.route_id == route.id).delete(synchronize_session=False)
     db.delete(route)
     db.commit()
 

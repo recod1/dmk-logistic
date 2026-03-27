@@ -72,6 +72,15 @@ def _as_utc(dt: datetime) -> datetime:
     return dt.astimezone(timezone.utc)
 
 
+def _format_datetime_ru(dt: datetime | None) -> str | None:
+    if dt is None:
+        return None
+    value = dt
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone().strftime("%d.%m.%Y %H:%M")
+
+
 def _point_to_dict(point: Point) -> dict:
     return {
         "id": point.id,
@@ -84,21 +93,21 @@ def _point_to_dict(point: Point) -> dict:
         "point_time": point.point_time,
         "point_note": point.point_note,
         "status": point.status,
-        "time_accepted": point.time_accepted.isoformat() if point.time_accepted else None,
-        "time_registration": point.time_registration.isoformat() if point.time_registration else None,
-        "time_put_on_gate": point.time_put_on_gate.isoformat() if point.time_put_on_gate else None,
-        "time_docs": point.time_docs.isoformat() if point.time_docs else None,
-        "time_departure": point.time_departure.isoformat() if point.time_departure else None,
-        "departure_time": point.departure_time.isoformat() if point.departure_time else None,
+        "time_accepted": _format_datetime_ru(point.time_accepted),
+        "time_registration": _format_datetime_ru(point.time_registration),
+        "time_put_on_gate": _format_datetime_ru(point.time_put_on_gate),
+        "time_docs": _format_datetime_ru(point.time_docs),
+        "time_departure": _format_datetime_ru(point.time_departure),
+        "departure_time": _format_datetime_ru(point.departure_time),
         "departure_odometer": point.departure_odometer,
         "departure_coordinates": {"lat": point.departure_lat, "lng": point.departure_lng},
-        "registration_time": point.registration_time.isoformat() if point.registration_time else None,
+        "registration_time": _format_datetime_ru(point.registration_time),
         "registration_odometer": point.registration_odometer,
         "registration_coordinates": {"lat": point.registration_lat, "lng": point.registration_lng},
-        "gate_time": point.gate_time.isoformat() if point.gate_time else None,
+        "gate_time": _format_datetime_ru(point.gate_time),
         "gate_odometer": point.gate_odometer,
         "gate_coordinates": {"lat": point.gate_lat, "lng": point.gate_lng},
-        "docs_time": point.docs_time.isoformat() if point.docs_time else None,
+        "docs_time": _format_datetime_ru(point.docs_time),
         "docs_odometer": point.docs_odometer,
         "docs_coordinates": {"lat": point.docs_lat, "lng": point.docs_lng},
         "odometer": point.odometer,
@@ -186,6 +195,15 @@ def _route_summary(db: Session, route: Route) -> dict:
     }
 
 
+def _recalculate_driver_routes_completion(db: Session, user_id: int) -> bool:
+    rows = _driver_routes_for_user(db, user_id)
+    has_changes = False
+    for route in rows:
+        if _refresh_route_status_if_completed(db, route):
+            has_changes = True
+    return has_changes
+
+
 @router.post("/auth/login")
 def login(payload: LoginRequest, db: Session = Depends(get_db)) -> dict:
     user = db.scalar(select(User).where(User.login == payload.login))
@@ -214,6 +232,8 @@ def get_active_route(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_driver),
 ) -> dict:
+    if _recalculate_driver_routes_completion(db, current_user.id):
+        db.commit()
     route = _active_route_for_user(db, current_user.id)
     if route is None:
         return {"route": None}
@@ -226,6 +246,8 @@ def list_driver_routes(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_driver),
 ) -> dict:
+    if _recalculate_driver_routes_completion(db, current_user.id):
+        db.commit()
     all_routes = _driver_routes_for_user(db, current_user.id)
     if scope == "assigned":
         routes = [route for route in all_routes if route.status in {"new", "process"}]
@@ -254,6 +276,9 @@ def get_driver_route(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
     if route.assigned_user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Route is assigned to another user")
+    if _refresh_route_status_if_completed(db, route):
+        db.commit()
+        db.refresh(route)
     return {"route": _route_snapshot(db, route)}
 
 
@@ -366,14 +391,16 @@ def _apply_point_telemetry(point: Point, status_value: str, odometer: str | None
             point.docs_lng = lng_value
 
 
-def _refresh_route_status_if_completed(db: Session, route: Route) -> None:
-    if route.status == "cancelled":
-        return
+def _refresh_route_status_if_completed(db: Session, route: Route) -> bool:
+    if route.status in {"cancelled", "success"}:
+        return False
 
     point_statuses = db.scalars(select(Point.status).where(Point.route_id == route.id)).all()
     if point_statuses and all(status_value in COMPLETED_POINT_STATUSES for status_value in point_statuses):
         route.status = "success"
         db.add(route)
+        return True
+    return False
 
 
 @router.post("/v1/mobile/events:batch")
@@ -485,7 +512,7 @@ def batch_events(
         if applied:
             _apply_point_telemetry(point, target_status, event.odometer, event.coordinates)
             db.add(point)
-            _refresh_route_status_if_completed(db, route)
+            route_completed_now = _refresh_route_status_if_completed(db, route)
             notify_point_status_changed(
                 db,
                 route=route,
@@ -494,7 +521,7 @@ def batch_events(
                 new_status=target_status,
             )
             db.flush()
-            if route.status == "success":
+            if route_completed_now:
                 notify_route_completed(
                     db,
                     route=route,
