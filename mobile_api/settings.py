@@ -18,6 +18,10 @@ class MobileSettings:
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
     jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))
 
+    vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "").strip()
+    vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "").strip()
+    vapid_claim_email: str = os.getenv("VAPID_CLAIM_EMAIL", "mailto:admin@localhost").strip()
+
     bootstrap_demo_user: bool = _as_bool(os.getenv("BOOTSTRAP_DEMO_USER"), default=False)
     demo_login: str = os.getenv("DEMO_LOGIN", "driver")
     demo_password: str = os.getenv("DEMO_PASSWORD", "driver123")

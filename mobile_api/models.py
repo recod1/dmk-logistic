@@ -47,6 +47,10 @@ class User(Base):
         foreign_keys="Route.created_by_user_id",
     )
     notifications: Mapped[list[Notification]] = relationship(back_populates="user")
+    web_push_subscriptions: Mapped[list["WebPushSubscription"]] = relationship(
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
 
 
 class Route(Base):
@@ -213,6 +217,22 @@ class Notification(Base):
     user: Mapped[User] = relationship(back_populates="notifications")
     route: Mapped[Route | None] = relationship(back_populates="notifications")
     point: Mapped[Point | None] = relationship(back_populates="notifications")
+
+
+class WebPushSubscription(Base):
+    __tablename__ = "web_push_subscriptions"
+    __table_args__ = (UniqueConstraint("user_id", "endpoint", name="uq_web_push_user_endpoint"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    endpoint: Mapped[str] = mapped_column(Text, nullable=False)
+    p256dh: Mapped[str] = mapped_column(String(255), nullable=False)
+    auth: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    user: Mapped[User] = relationship(back_populates="web_push_subscriptions")
 
 
 class Salary(Base):

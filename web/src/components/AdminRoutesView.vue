@@ -309,6 +309,9 @@ onMounted(() => {
 .admin-routes-page {
   display: grid;
   gap: 0.9rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 .card {
   border: 1px solid #243043;
@@ -345,11 +348,14 @@ onMounted(() => {
 .table-wrap {
   margin-top: 0.75rem;
   overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
   border: 1px solid #243043;
   border-radius: 12px;
 }
 table {
   width: 100%;
+  min-width: 520px;
   border-collapse: collapse;
 }
 th,
@@ -438,6 +444,15 @@ button {
   background: transparent;
   border: 1px solid #334155;
   color: #cbd5e1;
+}
+@media (max-width: 640px) {
+  .tabs {
+    flex-direction: column;
+  }
+  .tab-btn {
+    width: 100%;
+    text-align: center;
+  }
 }
 @media (min-width: 900px) {
   .filters-grid {

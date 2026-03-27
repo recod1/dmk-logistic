@@ -2,17 +2,23 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from jose import JWTError, jwt
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_user
 from mobile_api.db import SessionLocal, get_db
-from mobile_api.models import Notification, User
+from mobile_api.models import Notification, User, WebPushSubscription
 from mobile_api.notifications_realtime import notifications_realtime_hub
 from mobile_api.settings import mobile_settings
 
 
 router = APIRouter(tags=["notifications"])
+
+
+class PushSubscribePayload(BaseModel):
+    endpoint: str = Field(min_length=8, max_length=4096)
+    keys: dict[str, str]
 
 
 def _list_notifications_impl(
@@ -70,6 +76,51 @@ def list_notifications_v1(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     return _list_notifications_impl(limit=limit, db=db, current_user=current_user)
+
+
+@router.get("/v1/notifications/push/vapid-public-key")
+def push_vapid_public_key(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    _ = current_user
+    key = mobile_settings.vapid_public_key or None
+    return {"public_key": key}
+
+
+@router.post("/v1/notifications/push/subscribe")
+def push_subscribe(
+    payload: PushSubscribePayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    p256dh = payload.keys.get("p256dh")
+    auth = payload.keys.get("auth")
+    if not p256dh or not auth:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="keys must include p256dh and auth",
+        )
+    existing = db.scalar(
+        select(WebPushSubscription).where(
+            WebPushSubscription.user_id == current_user.id,
+            WebPushSubscription.endpoint == payload.endpoint,
+        )
+    )
+    if existing is not None:
+        existing.p256dh = p256dh
+        existing.auth = auth
+        db.add(existing)
+    else:
+        db.add(
+            WebPushSubscription(
+                user_id=current_user.id,
+                endpoint=payload.endpoint,
+                p256dh=p256dh,
+                auth=auth,
+            )
+        )
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/v1/mobile/notifications")

@@ -340,6 +340,38 @@ export async function markAllNotificationsRead(token: string): Promise<number> {
   return data.updated ?? 0;
 }
 
+export async function getVapidPublicKey(token: string): Promise<{ public_key: string | null }> {
+  return requestJson<{ public_key: string | null }>(`${API_BASE}/v1/notifications/push/vapid-public-key`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}
+
+export async function subscribeWebPush(
+  token: string,
+  payload: { endpoint: string; keys: { p256dh: string; auth: string } }
+): Promise<void> {
+  await requestJson<{ ok: boolean }>(`${API_BASE}/v1/notifications/push/subscribe`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function revertPointStatus(token: string, pointId: number): Promise<RouteDto> {
+  const data = await requestJson<{ route: RouteDto }>(`${API_BASE}/v1/mobile/points/${pointId}/status:revert`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.route;
+}
+
 export function notificationsWebSocketUrl(token: string): string {
   const base = new URL(API_BASE, window.location.origin);
   const wsProtocol = base.protocol === "https:" ? "wss:" : "ws:";

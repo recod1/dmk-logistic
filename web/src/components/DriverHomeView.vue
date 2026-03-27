@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import { isPointDone, statusLabel } from "../status";
+import { canRevertPointStatus, isPointDone, mapsSearchUrl, routeStatusLabel, statusLabel } from "../status";
 import type { DriverRouteListItem, RouteDto } from "../types";
 
 const props = defineProps<{
@@ -17,6 +17,7 @@ const emit = defineEmits<{
   openActiveRoute: [];
   acceptActiveRoute: [];
   advanceActivePoint: [];
+  revertActivePoint: [pointId: number];
 }>();
 
 const activePoint = computed(() =>
@@ -54,7 +55,10 @@ const canAdvance = computed(() => {
 <template>
   <section class="driver-shell">
     <article v-if="activeRoute" class="card main-card clickable-card" @click="emit('openActiveRoute')">
-      <h2>Рейс #{{ activeRoute.id }}</h2>
+      <div class="title-row">
+        <h2>Рейс #{{ activeRoute.id }}</h2>
+        <span class="status-chip">{{ routeStatusLabel(activeRoute.status) }}</span>
+      </div>
       <p class="route-meta">
         <span v-if="activeRoute.number_auto"><strong>ТС:</strong> {{ activeRoute.number_auto }}</span>
         <span v-if="activeRoute.trailer_number"><strong>Прицеп:</strong> {{ activeRoute.trailer_number }}</span>
@@ -66,14 +70,36 @@ const canAdvance = computed(() => {
       <div v-if="activePoint" class="point-pill">
         <strong>Текущая точка: {{ statusLabel(activePoint.status) }}</strong>
         <span><strong>Тип:</strong> {{ activePoint.type_point === "unloading" ? "Выгрузка" : "Загрузка" }}</span>
-        <span><strong>Адрес:</strong> {{ activePoint.place_point || "—" }}</span>
+        <span v-if="activePoint.place_point"
+          ><strong>Адрес:</strong>
+          <a
+            class="maps-link"
+            :href="mapsSearchUrl(activePoint.place_point)"
+            target="_blank"
+            rel="noopener noreferrer"
+            @click.stop
+            >{{ activePoint.place_point }}</a
+          ></span
+        >
+        <span v-else><strong>Адрес:</strong> —</span>
         <span><strong>Плановое время:</strong> {{ activePoint.date_point || "—" }} {{ activePoint.point_time || "" }}</span>
       </div>
 
       <button v-if="activeRoute.status === 'new'" class="primary" @click.stop="emit('acceptActiveRoute')">Принять рейс</button>
-      <button v-else class="primary" :disabled="!canAdvance || syncing" @click.stop="emit('advanceActivePoint')">
-        {{ actionLabel }}
-      </button>
+      <template v-else>
+        <button class="primary" :disabled="!canAdvance || syncing" @click.stop="emit('advanceActivePoint')">
+          {{ actionLabel }}
+        </button>
+        <button
+          v-if="activePoint && canRevertPointStatus(activePoint.status)"
+          type="button"
+          class="revert"
+          :disabled="syncing"
+          @click.stop="emit('revertActivePoint', activePoint.id)"
+        >
+          Вернуть предыдущий статус
+        </button>
+      </template>
       <button class="secondary" @click.stop="emit('openActiveRoute')">Открыть всю информацию о рейсе</button>
       <p class="hint">{{ syncMessage }}</p>
     </article>
@@ -100,6 +126,23 @@ const canAdvance = computed(() => {
 .main-card {
   display: grid;
   gap: 0.6rem;
+}
+.title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.title-row h2 {
+  margin: 0;
+}
+.status-chip {
+  border-radius: 999px;
+  background: #1f2937;
+  padding: 0.12rem 0.55rem;
+  font-size: 0.78rem;
+  color: #e2e8f0;
 }
 .clickable-card {
   cursor: pointer;
@@ -132,8 +175,20 @@ const canAdvance = computed(() => {
   color: #bfdbfe;
   padding: 0.5rem 0.75rem;
 }
+.revert {
+  border: 1px solid #78350f;
+  border-radius: 10px;
+  background: #451a03;
+  color: #fed7aa;
+  padding: 0.5rem 0.75rem;
+}
 .hint {
   margin: 0;
   color: #94a3b8;
+}
+.maps-link {
+  color: #38bdf8;
+  text-decoration: underline;
+  word-break: break-word;
 }
 </style>

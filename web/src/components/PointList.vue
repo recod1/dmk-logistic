@@ -1,16 +1,18 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import { nextStatus, nextStatusLabel, statusLabel } from "../status";
+import { canRevertPointStatus, mapsSearchUrl, nextStatus, nextStatusLabel, statusLabel } from "../status";
 import type { PointDto } from "../types";
 
 const props = defineProps<{
   points: PointDto[];
+  routeStatus: string;
   syncing: boolean;
 }>();
 
 const emit = defineEmits<{
   advanceStatus: [pointId: number];
+  revertStatus: [pointId: number];
 }>();
 
 const sortedPoints = computed(() => props.points.slice());
@@ -23,6 +25,10 @@ function nextLabel(point: PointDto): string {
   const label = nextStatusLabel(point.status);
   return label ? `Следующий статус: ${label}` : "Завершено";
 }
+
+function showRevert(point: PointDto): boolean {
+  return props.routeStatus === "process" && canRevertPointStatus(point.status);
+}
 </script>
 
 <template>
@@ -33,7 +39,12 @@ function nextLabel(point: PointDto): string {
         <strong>#{{ point.id }} · {{ point.type_point }}</strong>
         <span class="status">{{ statusLabel(point.status) }}</span>
       </div>
-      <p>{{ point.place_point }}</p>
+      <p v-if="point.place_point" class="addr">
+        <a class="maps-link" :href="mapsSearchUrl(point.place_point)" target="_blank" rel="noopener noreferrer">{{
+          point.place_point
+        }}</a>
+      </p>
+      <p v-else class="addr-muted">Адрес не указан</p>
       <small>{{ point.date_point }}</small>
       <small v-if="point.point_name || point.point_contacts || point.point_time || point.point_note" class="point-meta">
         {{ point.point_name || "Без названия" }}
@@ -41,9 +52,20 @@ function nextLabel(point: PointDto): string {
         <span v-if="point.point_time"> · {{ point.point_time }}</span>
       </small>
       <small v-if="point.point_note" class="point-note">{{ point.point_note }}</small>
-      <button :disabled="!canAdvance(point) || syncing" @click="emit('advanceStatus', point.id)">
-        {{ nextLabel(point) }}
-      </button>
+      <div class="btn-row">
+        <button :disabled="!canAdvance(point) || syncing" @click="emit('advanceStatus', point.id)">
+          {{ nextLabel(point) }}
+        </button>
+        <button
+          v-if="showRevert(point)"
+          class="revert"
+          type="button"
+          :disabled="syncing"
+          @click="emit('revertStatus', point.id)"
+        >
+          Вернуть предыдущий статус
+        </button>
+      </div>
     </article>
   </section>
 </template>
@@ -76,9 +98,26 @@ function nextLabel(point: PointDto): string {
 .point-note {
   color: #d1d5db;
 }
+.addr {
+  margin: 0;
+}
+.addr-muted {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.85rem;
+}
+.maps-link {
+  color: #38bdf8;
+  text-decoration: underline;
+  word-break: break-word;
+}
 p,
 small {
   margin: 0;
+}
+.btn-row {
+  display: grid;
+  gap: 0.45rem;
 }
 button {
   width: 100%;
@@ -89,5 +128,10 @@ button {
   padding: 0.45rem 0.7rem;
   font-weight: 600;
 }
+button.revert {
+  background: #451a03;
+  color: #fed7aa;
+  border: 1px solid #78350f;
+  font-weight: 500;
+}
 </style>
-

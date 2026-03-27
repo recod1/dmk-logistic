@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -17,6 +17,7 @@ from mobile_api.route_notification_logic import (
     notify_route_deleted,
 )
 from mobile_api.roles import RoleCode, role_label_ru
+from mobile_api.time_formatting import format_dt_for_app
 
 
 router = APIRouter(prefix="/v1/admin/routes", tags=["admin-routes"])
@@ -30,12 +31,7 @@ ROUTE_STATUS_TRANSITIONS: dict[str, set[str]] = {
 
 
 def _format_datetime_ru(value: datetime | None) -> str | None:
-    if value is None:
-        return None
-    dt_value = value
-    if dt_value.tzinfo is None:
-        dt_value = dt_value.replace(tzinfo=timezone.utc)
-    return dt_value.astimezone().strftime("%d.%m.%Y %H:%M")
+    return format_dt_for_app(value)
 
 
 class AdminRoutePointCreate(BaseModel):

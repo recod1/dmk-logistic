@@ -6,7 +6,13 @@ export default defineConfig({
   plugins: [
     vue(),
     VitePWA({
+      strategies: "injectManifest",
+      srcDir: "src",
+      filename: "sw.ts",
       registerType: "autoUpdate",
+      injectManifest: {
+        globPatterns: ["**/*.{js,css,html,ico,png,jpg,jpeg,svg,json,webmanifest}"]
+      },
       includeAssets: ["logo.jpg", "pwa-192.png", "pwa-512.png", "apple-touch-icon.png", "screenshots/pwa-home-1280x720.png"],
       manifest: {
         name: "ДМК",
@@ -53,8 +59,8 @@ export default defineConfig({
           }
         ]
       },
-      workbox: {
-        globPatterns: ["**/*.{js,css,html,ico,png,jpg,jpeg,svg,json,webmanifest}"]
+      devOptions: {
+        enabled: false
       }
     })
   ],

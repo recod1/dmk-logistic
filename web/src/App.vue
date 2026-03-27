@@ -9,6 +9,7 @@ import DriverRouteDetailsView from "./components/DriverRouteDetailsView.vue";
 import DriverRoutesView from "./components/DriverRoutesView.vue";
 import LoginView from "./components/LoginView.vue";
 import NotificationsView from "./components/NotificationsView.vue";
+import StatusConfirmDialog from "./components/StatusConfirmDialog.vue";
 import {
   acceptRoute,
   assignAdminRouteDriver,
@@ -21,6 +22,7 @@ import {
   getAdminRoute,
   getDriverRoute,
   getUnreadNotificationsCount,
+  getVapidPublicKey,
   listAdminRoutes,
   listAdminUsers,
   listDriverRoutes,
@@ -30,7 +32,9 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
   notificationsWebSocketUrl,
+  revertPointStatus,
   sendEventsBatch,
+  subscribeWebPush,
   updateAdminRoute,
   updateAdminUser
 } from "./api";
@@ -44,8 +48,9 @@ import {
   saveActiveRoute,
   savePointOverlay
 } from "./db";
+import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
 import { isAdminRole, isRouteManagerRole } from "./roles";
-import { isPointDone, nextStatus } from "./status";
+import { isPointDone, nextStatus, nextStatusLabel } from "./status";
 import type {
   AdminRoute,
   AdminRouteCreatePayload,
@@ -102,6 +107,14 @@ const notifications = ref<NotificationDto[]>([]);
 const notificationsLoading = ref(false);
 const notificationsError = ref("");
 
+const driverActiveRouteId = ref<string | null>(null);
+const useLegacyBrowserNotification = ref(true);
+const statusConfirm = ref<{
+  pointId: number;
+  nextLabel: string;
+  datetimeLocal: string;
+} | null>(null);
+
 let syncIntervalId: number | null = null;
 let notificationsWs: WebSocket | null = null;
 let notificationsWsReconnectTimer: number | null = null;
@@ -119,6 +132,15 @@ const activeRouteSummary = computed(() => {
 });
 const hasAssignedRoutes = computed(() => driverAssignedRoutes.value.some((item) => item.status === "new"));
 const hasUnreadNotifications = computed(() => unreadNotificationsCount.value > 0);
+
+const canAcceptSelectedDriverRoute = computed(() => {
+  if (!isDriver.value || !selectedDriverRoute.value) {
+    return false;
+  }
+  return (
+    selectedDriverRoute.value.status === "new" && selectedDriverRoute.value.id === driverActiveRouteId.value
+  );
+});
 
 const currentPageTitle = computed(() => {
   if (!isAuthed.value) {
@@ -153,20 +175,15 @@ const profileMenuItems = computed<Array<{ section: AppSection; label: string }>>
   if (isAdminRole(authUser.value.role_code)) {
     return [
       { section: "admin_routes", label: "Рейсы" },
-      { section: "admin_users", label: "Пользователи" },
-      { section: "notifications", label: "Уведомления" }
+      { section: "admin_users", label: "Пользователи" }
     ];
   }
   if (isRouteManagerRole(authUser.value.role_code)) {
-    return [
-      { section: "admin_routes", label: "Рейсы" },
-      { section: "notifications", label: "Уведомления" }
-    ];
+    return [{ section: "admin_routes", label: "Рейсы" }];
   }
   return [
     { section: "driver_home", label: "Главная" },
-    { section: "driver_routes", label: "Рейсы" },
-    { section: "notifications", label: "Уведомления" }
+    { section: "driver_routes", label: "Рейсы" }
   ];
 });
 
@@ -251,7 +268,9 @@ function handleIncomingNotification(
     notifications.value = [item, ...notifications.value].slice(0, 50);
     if (playEffects) {
       playNotificationSound();
-      showBrowserPushNotification(item);
+      if (useLegacyBrowserNotification.value) {
+        showBrowserPushNotification(item);
+      }
     }
     if (!item.is_read) {
       unreadNotificationsCount.value += 1;
@@ -387,6 +406,7 @@ function clearAuth(): void {
   selectedAdminRoute.value = null;
   notifications.value = [];
   unreadNotificationsCount.value = 0;
+  driverActiveRouteId.value = null;
   currentSection.value = "driver_home";
   profileMenuOpen.value = false;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -426,6 +446,48 @@ async function applyOverlaysToRoute(baseRoute: RouteDto | null): Promise<RouteDt
   } as RouteDto;
 }
 
+function urlBase64ToUint8Array(base64String: string): Uint8Array {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const rawData = atob(base64);
+  const outputArray = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i += 1) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
+async function trySubscribeWebPush(): Promise<void> {
+  if (!authToken.value || typeof window === "undefined") {
+    return;
+  }
+  try {
+    const { public_key: publicKey } = await getVapidPublicKey(authToken.value);
+    if (!publicKey || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+      useLegacyBrowserNotification.value = true;
+      return;
+    }
+    useLegacyBrowserNotification.value = false;
+    const registration = await navigator.serviceWorker.ready;
+    const sub = await registration.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey)
+    });
+    const json = sub.toJSON();
+    const key = json.keys;
+    if (!json.endpoint || !key?.p256dh || !key?.auth) {
+      useLegacyBrowserNotification.value = true;
+      return;
+    }
+    await subscribeWebPush(authToken.value, {
+      endpoint: json.endpoint,
+      keys: { p256dh: key.p256dh, auth: key.auth }
+    });
+  } catch {
+    useLegacyBrowserNotification.value = true;
+  }
+}
+
 async function refreshDriverRoutes(): Promise<void> {
   if (!authToken.value || !isDriver.value) {
     return;
@@ -436,6 +498,7 @@ async function refreshDriverRoutes(): Promise<void> {
     const history = await listDriverRoutes(authToken.value, "history");
     driverAssignedRoutes.value = assigned.items;
     driverHistoryRoutes.value = history.items;
+    driverActiveRouteId.value = assigned.active_route_id ?? null;
 
     if (assigned.active_route_id) {
       if (!route.value || route.value.id !== assigned.active_route_id) {
@@ -468,11 +531,27 @@ async function refreshRoute(): Promise<void> {
   }
 }
 
+function onVisibilityChange(): void {
+  if (typeof document === "undefined" || document.visibilityState !== "visible") {
+    return;
+  }
+  if (!authToken.value) {
+    return;
+  }
+  void refreshNotifications();
+  if (isDriver.value) {
+    void refreshDriverData();
+  } else if (isRouteManager.value) {
+    void refreshAdminRoutes(routeFilters.value);
+  }
+}
+
 function onOnline(): void {
   syncMessage.value = "Онлайн: синхронизация возобновлена";
   if (authToken.value) {
     connectNotificationsSocket();
     void refreshNotifications();
+    void trySubscribeWebPush();
   }
   if (isDriver.value) {
     void syncOutboxInBackground();
@@ -849,6 +928,7 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
     void Notification.requestPermission();
   }
   connectNotificationsSocket();
+  void trySubscribeWebPush();
   if (isAdminRole(user.role_code)) {
     currentSection.value = "admin_routes";
     await refreshAdminUsers();
@@ -942,7 +1022,50 @@ async function doAcceptRoute(routeId?: string): Promise<void> {
   }
 }
 
-async function markPointNext(pointId: number): Promise<void> {
+function openStatusConfirm(pointId: number): void {
+  if (!isDriver.value) {
+    return;
+  }
+  const base =
+    currentSection.value === "driver_route_details" && selectedDriverRoute.value
+      ? selectedDriverRoute.value
+      : route.value;
+  if (!base) {
+    return;
+  }
+  const current = base.points.find((point) => point.id === pointId);
+  if (!current) {
+    return;
+  }
+  if (!nextStatus(current.status)) {
+    return;
+  }
+  statusConfirm.value = {
+    pointId,
+    nextLabel: nextStatusLabel(current.status) || "",
+    datetimeLocal: toDatetimeLocalValue(new Date())
+  };
+}
+
+function cancelStatusConfirm(): void {
+  statusConfirm.value = null;
+}
+
+async function applyStatusConfirm(datetimeLocal: string): Promise<void> {
+  const pending = statusConfirm.value;
+  statusConfirm.value = null;
+  if (!pending) {
+    return;
+  }
+  try {
+    const iso = fromDatetimeLocalToIso(datetimeLocal);
+    await markPointNext(pending.pointId, iso);
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  }
+}
+
+async function markPointNext(pointId: number, occurredAtOverride?: string): Promise<void> {
   if (!route.value || !isDriver.value) {
     return;
   }
@@ -955,7 +1078,7 @@ async function markPointNext(pointId: number): Promise<void> {
     return;
   }
 
-  const occurredAt = new Date().toISOString();
+  const occurredAt = occurredAtOverride ?? new Date().toISOString();
   const event: EventPayload = {
     client_event_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     occurred_at_client: occurredAt,
@@ -995,6 +1118,31 @@ async function markPointNext(pointId: number): Promise<void> {
     selectedDriverRoute.value = null;
     await saveActiveRoute(null);
     currentSection.value = "driver_home";
+  }
+}
+
+async function doRevertPoint(pointId: number): Promise<void> {
+  if (!authToken.value || !isDriver.value) {
+    return;
+  }
+  if (!navigator.onLine) {
+    syncMessage.value = "Откат статуса недоступен без сети.";
+    return;
+  }
+  try {
+    const updated = await revertPointStatus(authToken.value, pointId);
+    if (route.value?.id === updated.id) {
+      route.value = await applyOverlaysToRoute(updated);
+      await saveActiveRoute(route.value);
+    }
+    if (selectedDriverRoute.value?.id === updated.id) {
+      selectedDriverRoute.value = updated;
+    }
+    await refreshDriverRoutes();
+    await refreshNotifications();
+    syncMessage.value = "Статус точки возвращён";
+  } catch (error) {
+    syncMessage.value = `Не удалось откатить статус: ${(error as Error).message}`;
   }
 }
 
@@ -1048,7 +1196,7 @@ function advanceActivePointFromHome(): void {
   if (!activePoint) {
     return;
   }
-  void markPointNext(activePoint.id);
+  openStatusConfirm(activePoint.id);
 }
 
 function logout(): void {
@@ -1070,6 +1218,7 @@ onMounted(async () => {
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
   window.addEventListener("mousedown", onDocumentClick);
+  document.addEventListener("visibilitychange", onVisibilityChange);
 });
 
 onUnmounted(() => {
@@ -1078,6 +1227,7 @@ onUnmounted(() => {
   window.removeEventListener("online", onOnline);
   window.removeEventListener("offline", onOffline);
   window.removeEventListener("mousedown", onDocumentClick);
+  document.removeEventListener("visibilitychange", onVisibilityChange);
 });
 </script>
 
@@ -1166,6 +1316,7 @@ onUnmounted(() => {
         @open-active-route="openActiveRouteFromHome"
         @accept-active-route="doAcceptRoute"
         @advance-active-point="advanceActivePointFromHome"
+        @revert-active-point="doRevertPoint"
       />
     </section>
 
@@ -1186,8 +1337,11 @@ onUnmounted(() => {
         :route="selectedDriverRoute"
         :active-route-id="route?.id || null"
         :syncing="syncing"
+        :can-accept-route="canAcceptSelectedDriverRoute"
         @back="openDriverRoutes"
-        @advance-point="markPointNext"
+        @advance-point="openStatusConfirm"
+        @revert-point="doRevertPoint"
+        @accept-route="() => doAcceptRoute(selectedDriverRoute.id)"
       />
     </section>
 
@@ -1212,6 +1366,20 @@ onUnmounted(() => {
       <button v-if="isDriver" @click="refreshDriverRoutes">Обновить рейсы</button>
       <p class="hint">{{ syncMessage }}</p>
     </section>
+
+    <StatusConfirmDialog
+      v-if="isAuthed && statusConfirm"
+      :open="true"
+      :next-status-label="statusConfirm.nextLabel"
+      :datetime-local="statusConfirm.datetimeLocal"
+      @update:datetime-local="
+        (v) => {
+          if (statusConfirm) statusConfirm.datetimeLocal = v;
+        }
+      "
+      @cancel="cancelStatusConfirm"
+      @confirm="applyStatusConfirm($event)"
+    />
   </main>
 </template>
 
@@ -1222,6 +1390,7 @@ onUnmounted(() => {
   padding: 1rem;
   color: #f9fafb;
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  overflow-x: hidden;
 }
 .topbar {
   display: grid;

@@ -33,8 +33,10 @@ def create_notification_for_users(
     route_id: str | None = None,
     point_id: int | None = None,
     payload: dict[str, Any] | None = None,
+    skip_user_ids: Iterable[int] | None = None,
 ) -> None:
-    unique_ids = sorted({int(user_id) for user_id in user_ids if user_id})
+    skip = {int(x) for x in skip_user_ids or []}
+    unique_ids = sorted({int(user_id) for user_id in user_ids if user_id and int(user_id) not in skip})
     if not unique_ids:
         return
 
@@ -82,6 +84,23 @@ def create_notification_for_users(
     if realtime_payloads:
         _publish_realtime_notifications(realtime_payloads)
 
+    from mobile_api.web_push_service import collect_subscriptions_for_users, send_web_push_to_users
+
+    subs_by_user: dict[int, list[tuple[int, str, str, str]]] = {}
+    for sub_id, user_id, endpoint, p256dh, auth in collect_subscriptions_for_users(db, unique_ids):
+        subs_by_user.setdefault(user_id, []).append((sub_id, endpoint, p256dh, auth))
+
+    for created in created_items:
+        row: Notification = created["row"]
+        subs = subs_by_user.get(created["user_id"], [])
+        if subs:
+            send_web_push_to_users(
+                subscriptions=subs,
+                title=title,
+                body=message,
+                notification_id=row.id,
+            )
+
 
 def _publish_realtime_notifications(payloads: list[tuple[int, dict[str, Any]]]) -> None:
     def _run() -> None:
@@ -118,10 +137,11 @@ def notify_route_created(db: Session, *, route: Route, actor_user: User | None) 
         message=f"{actor_name} создал(а) рейс {route.id}.",
         route_id=route.id,
         payload={"route_id": route.id},
+        skip_user_ids=[actor_user.id] if actor_user else [],
     )
 
 
-def notify_route_assigned(db: Session, *, route: Route, assigned_user: User | None) -> None:
+def notify_route_assigned(db: Session, *, route: Route, assigned_user: User | None, actor_user: User | None = None) -> None:
     assignee_name = (assigned_user.full_name or assigned_user.login) if assigned_user else "Водитель"
     create_notification_for_users(
         db,
@@ -131,6 +151,7 @@ def notify_route_assigned(db: Session, *, route: Route, assigned_user: User | No
         message=f"Рейс {route.id} принят/назначен: {assignee_name}.",
         route_id=route.id,
         payload={"route_id": route.id, "assigned_user_id": assigned_user.id if assigned_user else None},
+        skip_user_ids=[actor_user.id] if actor_user else [],
     )
 
 
@@ -144,6 +165,7 @@ def notify_route_cancelled(db: Session, *, route: Route, actor_user: User | None
         message=f"{actor_name} отменил(а) рейс {route.id}.",
         route_id=route.id,
         payload={"route_id": route.id},
+        skip_user_ids=[actor_user.id] if actor_user else [],
     )
 
 
@@ -157,6 +179,7 @@ def notify_route_completed(db: Session, *, route: Route, actor_user: User | None
         message=f"{actor_name} завершил(а) рейс {route.id}.",
         route_id=route.id,
         payload={"route_id": route.id},
+        skip_user_ids=[actor_user.id] if actor_user else [],
     )
 
 
@@ -185,4 +208,5 @@ def notify_point_status_changed(
             "point_label": point_label,
             "status": new_status,
         },
+        skip_user_ids=[actor_user.id] if actor_user else [],
     )

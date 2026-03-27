@@ -284,6 +284,7 @@ function removeRoute(): void {
             <span class="status-chip">{{ pointStatusLabel(point.status) }}</span>
           </div>
           <p class="muted">{{ point.date_point || "—" }} · {{ point.point_time || "—" }}</p>
+          <div class="stage-scroll">
           <table class="stage-table">
             <thead>
               <tr>
@@ -320,6 +321,7 @@ function removeRoute(): void {
               </tr>
             </tbody>
           </table>
+          </div>
         </article>
       </section>
 
@@ -362,6 +364,9 @@ function removeRoute(): void {
 .details-page {
   display: grid;
   gap: 0.9rem;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 .card {
   border: 1px solid #243043;
@@ -448,6 +453,14 @@ function removeRoute(): void {
 }
 .point-edit-grid .full {
   grid-column: 1 / -1;
+}
+.stage-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+}
+.stage-table {
+  min-width: 520px;
 }
 .stage-table th,
 .stage-table td {

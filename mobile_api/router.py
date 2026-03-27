@@ -14,9 +14,11 @@ from mobile_api.driver_trip_rules import DriverRouteState, can_accept_route, pic
 from mobile_api.models import Point, Route, RouteEvent, RoutePoint, User
 from mobile_api.route_notification_logic import (
     notify_point_status_changed,
-    notify_route_assigned,
+    notify_point_status_reverted,
+    notify_route_accepted_by_driver,
     notify_route_completed,
 )
+from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.roles import role_label_ru
 
 
@@ -25,6 +27,20 @@ POINT_STATUS_FLOW = {
     "process": "registration",
     "registration": "load",
     "load": "docs",
+}
+
+POINT_STATUS_REVERSE = {
+    "process": "new",
+    "registration": "process",
+    "load": "registration",
+    "docs": "load",
+}
+
+STATUS_CLEAR_WHEN_REVERTING_FROM = {
+    "process": ("departure_time", "time_accepted"),
+    "registration": ("registration_time", "time_registration"),
+    "load": ("gate_time", "time_put_on_gate"),
+    "docs": ("docs_time", "time_docs"),
 }
 
 COMPLETED_POINT_STATUSES = {"docs", "success"}
@@ -73,12 +89,7 @@ def _as_utc(dt: datetime) -> datetime:
 
 
 def _format_datetime_ru(dt: datetime | None) -> str | None:
-    if dt is None:
-        return None
-    value = dt
-    if value.tzinfo is None:
-        value = value.replace(tzinfo=timezone.utc)
-    return value.astimezone().strftime("%d.%m.%Y %H:%M")
+    return format_dt_for_app(dt)
 
 
 def _point_to_dict(point: Point) -> dict:
@@ -304,10 +315,10 @@ def accept_route(
         route.status = "process"
         route.accepted_at = datetime.now(timezone.utc)
         db.add(route)
-        notify_route_assigned(
+        notify_route_accepted_by_driver(
             db,
             route=route,
-            assigned_user=current_user,
+            driver_user=current_user,
             actor_user=current_user,
         )
         db.commit()
@@ -401,6 +412,56 @@ def _refresh_route_status_if_completed(db: Session, route: Route) -> bool:
         db.add(route)
         return True
     return False
+
+
+def _downgrade_route_from_success_if_needed(db: Session, route: Route) -> None:
+    if route.status != "success":
+        return
+    point_statuses = db.scalars(select(Point.status).where(Point.route_id == route.id)).all()
+    if not point_statuses:
+        return
+    if all(status_value in COMPLETED_POINT_STATUSES for status_value in point_statuses):
+        return
+    route.status = "process"
+    db.add(route)
+
+
+@router.post("/v1/mobile/points/{point_id}/status:revert")
+def revert_point_status_endpoint(
+    point_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_driver),
+) -> dict:
+    point = db.get(Point, point_id)
+    if point is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Point not found")
+    route = db.get(Route, point.route_id)
+    if route is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
+    if route.assigned_user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Point is not available for current user")
+    if route.status not in {"new", "process", "success"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Route status does not allow changes")
+    if point.status not in POINT_STATUS_REVERSE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot revert this point status")
+
+    previous = POINT_STATUS_REVERSE[point.status]
+    for column_name in STATUS_CLEAR_WHEN_REVERTING_FROM.get(point.status, ()):
+        setattr(point, column_name, None)
+    point.status = previous
+    db.add(point)
+
+    _downgrade_route_from_success_if_needed(db, route)
+    notify_point_status_reverted(
+        db,
+        route=route,
+        point=point,
+        actor_user=current_user,
+        previous_status=previous,
+    )
+    db.commit()
+    db.refresh(route)
+    return {"route": _route_snapshot(db, route)}
 
 
 @router.post("/v1/mobile/events:batch")
