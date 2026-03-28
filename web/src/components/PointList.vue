@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import { canRevertPointStatus, mapsSearchUrl, nextStatus, nextStatusLabel, statusLabel } from "../status";
+import {
+  canRevertPointStatus,
+  isPointDone,
+  mapsSearchUrl,
+  nextStatus,
+  nextStatusLabel,
+  statusLabel
+} from "../status";
 import type { PointDto } from "../types";
 
 const props = defineProps<{
@@ -17,7 +24,14 @@ const emit = defineEmits<{
 
 const sortedPoints = computed(() => props.points.slice());
 
+const firstIncompletePointId = computed(
+  () => props.points.find((point) => !isPointDone(point.status))?.id ?? null
+);
+
 function canAdvance(point: PointDto): boolean {
+  if (firstIncompletePointId.value !== point.id) {
+    return false;
+  }
   return nextStatus(point.status) !== null;
 }
 
@@ -27,7 +41,11 @@ function nextLabel(point: PointDto): string {
 }
 
 function showRevert(point: PointDto): boolean {
-  return props.routeStatus === "process" && canRevertPointStatus(point.status);
+  return (
+    firstIncompletePointId.value === point.id &&
+    props.routeStatus === "process" &&
+    canRevertPointStatus(point.status)
+  );
 }
 </script>
 

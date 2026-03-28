@@ -22,6 +22,8 @@ class MobileSettings:
     vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "").strip()
     vapid_claim_email: str = os.getenv("VAPID_CLAIM_EMAIL", "mailto:admin@localhost").strip()
 
+    mobile_upload_root: str = os.getenv("MOBILE_UPLOAD_ROOT", "data/mobile_point_uploads")
+
     bootstrap_demo_user: bool = _as_bool(os.getenv("BOOTSTRAP_DEMO_USER"), default=False)
     demo_login: str = os.getenv("DEMO_LOGIN", "driver")
     demo_password: str = os.getenv("DEMO_PASSWORD", "driver123")

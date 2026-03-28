@@ -148,6 +148,39 @@ class Point(Base):
     route_links: Mapped[list[RoutePoint]] = relationship(back_populates="point")
     events: Mapped[list[RouteEvent]] = relationship(back_populates="point")
     notifications: Mapped[list[Notification]] = relationship(back_populates="point")
+    document_images: Mapped[list["PointDocumentImage"]] = relationship(
+        back_populates="point",
+        cascade="all, delete-orphan",
+    )
+
+
+class PointDocumentImage(Base):
+    __tablename__ = "point_document_images"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    point_id: Mapped[int] = mapped_column(
+        ForeignKey("points.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    route_id: Mapped[str] = mapped_column(
+        ForeignKey("routes.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    uploaded_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    storage_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    point: Mapped[Point] = relationship(back_populates="document_images")
 
 
 class RoutePoint(Base):

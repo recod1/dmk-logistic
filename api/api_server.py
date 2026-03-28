@@ -19,6 +19,7 @@ from mobile_api.router import router as mobile_router
 from mobile_api.admin_router import router as admin_users_router
 from mobile_api.admin_routes_router import router as admin_mobile_routes_router
 from mobile_api.notifications_router import router as notifications_router
+from mobile_api.point_documents_router import router as point_documents_router
 from mobile_api.bootstrap import ensure_demo_user
 from mobile_api.db import SessionLocal
 
@@ -250,6 +251,7 @@ app.include_router(mobile_router)
 app.include_router(admin_users_router)
 app.include_router(admin_mobile_routes_router)
 app.include_router(notifications_router)
+app.include_router(point_documents_router)
 
 if __name__ == "__main__":
     import uvicorn

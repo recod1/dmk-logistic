@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Literal
 
@@ -11,7 +12,7 @@ from sqlalchemy.orm import Session
 from mobile_api.auth import create_access_token, get_current_driver, verify_password
 from mobile_api.db import get_db
 from mobile_api.driver_trip_rules import DriverRouteState, can_accept_route, pick_active_route
-from mobile_api.models import Point, Route, RouteEvent, RoutePoint, User
+from mobile_api.models import Point, PointDocumentImage, Route, RouteEvent, RoutePoint, User
 from mobile_api.route_notification_logic import (
     notify_point_status_changed,
     notify_point_status_reverted,
@@ -72,6 +73,7 @@ class BatchEventPayload(BaseModel):
     to_status: Literal["process", "registration", "load", "docs", "success"]
     odometer: str | None = Field(default=None, max_length=128)
     coordinates: dict | None = None
+    document_file_ids: list[int] | None = Field(default=None, max_length=32)
 
 
 class BatchEventsRequest(BaseModel):
@@ -93,7 +95,7 @@ def _format_datetime_ru(dt: datetime | None) -> str | None:
     return format_dt_for_app(dt)
 
 
-def _point_to_dict(point: Point) -> dict:
+def _point_to_dict(point: Point, docs_meta: list[dict] | None = None) -> dict:
     return {
         "id": point.id,
         "route_id": point.route_id,
@@ -124,6 +126,7 @@ def _point_to_dict(point: Point) -> dict:
         "docs_coordinates": {"lat": point.docs_lat, "lng": point.docs_lng},
         "odometer": point.odometer,
         "coordinates": {"lat": point.lat, "lng": point.lng},
+        "docs_images": docs_meta or [],
     }
 
 
@@ -141,6 +144,16 @@ def _get_ordered_points(db: Session, route_id: str) -> list[Point]:
 
 def _route_snapshot(db: Session, route: Route) -> dict:
     points = _get_ordered_points(db, route.id)
+    point_ids = [p.id for p in points]
+    by_point: dict[int, list[PointDocumentImage]] = defaultdict(list)
+    if point_ids:
+        imgs = db.scalars(
+            select(PointDocumentImage)
+            .where(PointDocumentImage.point_id.in_(point_ids))
+            .order_by(PointDocumentImage.id.asc())
+        ).all()
+        for img in imgs:
+            by_point[img.point_id].append(img)
     return {
         "id": route.id,
         "status": route.status,
@@ -151,7 +164,13 @@ def _route_snapshot(db: Session, route: Route) -> dict:
         "trailer_number": route.trailer_number,
         "created_at": route.created_at.isoformat() if route.created_at else None,
         "accepted_at": route.accepted_at.isoformat() if route.accepted_at else None,
-        "points": [_point_to_dict(p) for p in points],
+        "points": [
+            _point_to_dict(
+                p,
+                [{"id": x.id, "content_type": x.content_type} for x in by_point.get(p.id, [])],
+            )
+            for p in points
+        ],
     }
 
 
@@ -326,6 +345,27 @@ def accept_route(
         db.refresh(route)
 
     return {"route": _route_snapshot(db, route)}
+
+
+def _validate_document_ids_for_docs(
+    db: Session, *, point: Point, user_id: int, file_ids: list[int] | None
+) -> str | None:
+    ids = list(file_ids or [])
+    if not ids:
+        return "Для статуса «Забрал документы» необходимо загрузить хотя бы одно фото"
+    if len(ids) > 32:
+        return "Слишком много файлов документов"
+    uniq = sorted({int(x) for x in ids})
+    rows = db.scalars(
+        select(PointDocumentImage).where(
+            PointDocumentImage.id.in_(uniq),
+            PointDocumentImage.point_id == point.id,
+            PointDocumentImage.uploaded_by_user_id == user_id,
+        )
+    ).all()
+    if len(rows) != len(uniq):
+        return "Некорректные вложения документов"
+    return None
 
 
 def _try_apply_point_status(point: Point, to_status: str, occurred_at_client: datetime) -> tuple[bool, str | None]:
@@ -557,6 +597,43 @@ def batch_events(
 
         server_received_at = datetime.now(timezone.utc)
         target_status = _normalize_target_status(event.to_status)
+
+        doc_err: str | None = None
+        if target_status == "docs":
+            doc_err = _validate_document_ids_for_docs(
+                db,
+                point=point,
+                user_id=current_user.id,
+                file_ids=event.document_file_ids,
+            )
+
+        if doc_err:
+            stored_event = RouteEvent(
+                route_id=route.id,
+                point_id=event.point_id,
+                user_id=current_user.id,
+                device_id=payload.device_id,
+                client_event_id=event.client_event_id,
+                occurred_at_client=_as_utc(event.occurred_at_client),
+                to_status=target_status,
+                applied=False,
+                error=doc_err,
+                server_received_at=server_received_at,
+            )
+            db.add(stored_event)
+            results.append(
+                {
+                    "client_event_id": event.client_event_id,
+                    "point_id": event.point_id,
+                    "to_status": target_status,
+                    "applied": False,
+                    "duplicate": False,
+                    "error": doc_err,
+                    "server_received_at": server_received_at.isoformat(),
+                }
+            )
+            continue
+
         applied, error = _try_apply_point_status(point, target_status, event.occurred_at_client)
         stored_event = RouteEvent(
             route_id=route.id,

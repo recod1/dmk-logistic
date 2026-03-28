@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 
+import PointDocThumbs from "./PointDocThumbs.vue";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, RouteWorkflowStatus } from "../types";
 
 type PointForm = {
@@ -14,6 +15,7 @@ const props = defineProps<{
   route: AdminRoute;
   drivers: DriverOption[];
   loading: boolean;
+  authToken: string;
 }>();
 
 const emit = defineEmits<{
@@ -322,6 +324,11 @@ function removeRoute(): void {
             </tbody>
           </table>
           </div>
+          <PointDocThumbs
+            v-if="authToken && point.docs_images?.length"
+            :token="authToken"
+            :images="point.docs_images"
+          />
         </article>
       </section>
 

@@ -61,6 +61,7 @@ export interface PointDto {
     lat: number | null;
     lng: number | null;
   } | null;
+  docs_images?: Array<{ id: number; content_type: string }>;
 }
 
 export interface RouteDto {
@@ -90,6 +91,8 @@ export interface EventPayload {
     lat?: number | null;
     lng?: number | null;
   } | null;
+  document_file_ids?: number[];
+  document_local_keys?: string[];
 }
 
 export interface BatchResultItem {
@@ -235,6 +238,7 @@ export interface AdminRoute {
         lat: number | null;
         lng: number | null;
       } | null;
+      docs_images?: Array<{ id: number; content_type: string }>;
     }
   > | null;
 }

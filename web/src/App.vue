@@ -5,6 +5,7 @@ import AdminRouteDetailsView from "./components/AdminRouteDetailsView.vue";
 import AdminRoutesView from "./components/AdminRoutesView.vue";
 import AdminUsersView from "./components/AdminUsersView.vue";
 import DriverHomeView from "./components/DriverHomeView.vue";
+import DocsUploadDialog from "./components/DocsUploadDialog.vue";
 import DriverRouteDetailsView from "./components/DriverRouteDetailsView.vue";
 import DriverRoutesView from "./components/DriverRoutesView.vue";
 import LoginView from "./components/LoginView.vue";
@@ -36,17 +37,22 @@ import {
   sendEventsBatch,
   subscribeWebPush,
   updateAdminRoute,
-  updateAdminUser
+  updateAdminUser,
+  uploadPointDocuments
 } from "./api";
 import {
   addOutboxEvent,
   getOutboxEvents,
+  getPendingDocBlob,
   getPointOverlays,
   loadActiveRoute,
   removeOutboxByClientEventIds,
+  removePendingDocBlobs,
   removePointOverlays,
   saveActiveRoute,
-  savePointOverlay
+  savePendingDocBlob,
+  savePointOverlay,
+  updateOutboxEventByClientId
 } from "./db";
 import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
 import { isAdminRole, isRouteManagerRole } from "./roles";
@@ -114,6 +120,8 @@ const statusConfirm = ref<{
   nextLabel: string;
   datetimeLocal: string;
 } | null>(null);
+const docsUpload = ref<{ pointId: number; occurredAtIso: string } | null>(null);
+const docsUploading = ref(false);
 
 let syncIntervalId: number | null = null;
 let notificationsWs: WebSocket | null = null;
@@ -574,21 +582,70 @@ async function syncOutboxInBackground(): Promise<void> {
     return;
   }
   const deviceId = getDeviceId();
-  const outbox = await getOutboxEvents(deviceId);
+  let outbox = await getOutboxEvents(deviceId);
   if (!outbox.length) {
     return;
   }
 
   syncing.value = true;
   try {
-    const events: EventPayload[] = outbox.map((event) => ({
-      client_event_id: event.client_event_id,
-      occurred_at_client: event.occurred_at_client,
-      point_id: event.point_id,
-      to_status: event.to_status,
-      odometer: null,
-      coordinates: null
-    }));
+    outbox = outbox.sort((a, b) => a.created_at.localeCompare(b.created_at));
+
+    for (const ev of outbox) {
+      if (ev.to_status !== "docs") {
+        continue;
+      }
+      const keys = ev.document_local_keys;
+      if (!keys?.length || ev.document_file_ids?.length) {
+        continue;
+      }
+      const blobs: Blob[] = [];
+      let missing = false;
+      for (const key of keys) {
+        const row = await getPendingDocBlob(key);
+        if (!row) {
+          missing = true;
+          break;
+        }
+        blobs.push(row.blob);
+      }
+      if (missing || blobs.length !== keys.length) {
+        continue;
+      }
+      try {
+        const { file_ids } = await uploadPointDocuments(authToken.value, ev.point_id, blobs);
+        await updateOutboxEventByClientId(ev.client_event_id, {
+          document_file_ids: file_ids,
+          document_local_keys: []
+        });
+        await removePendingDocBlobs(keys);
+      } catch (error) {
+        console.debug("[pwa-sync] point documents upload failed", error);
+      }
+    }
+
+    outbox = (await getOutboxEvents(deviceId)).sort((a, b) => a.created_at.localeCompare(b.created_at));
+    const docsBlocked = outbox.some(
+      (ev) => ev.to_status === "docs" && ev.document_local_keys?.length && !ev.document_file_ids?.length
+    );
+    if (docsBlocked) {
+      return;
+    }
+
+    const events: EventPayload[] = outbox.map((event) => {
+      const payload: EventPayload = {
+        client_event_id: event.client_event_id,
+        occurred_at_client: event.occurred_at_client,
+        point_id: event.point_id,
+        to_status: event.to_status,
+        odometer: null,
+        coordinates: null
+      };
+      if (event.document_file_ids?.length) {
+        payload.document_file_ids = event.document_file_ids;
+      }
+      return payload;
+    });
     const result = await sendEventsBatch(authToken.value, deviceId, events);
     const removable = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.client_event_id);
     await removeOutboxByClientEventIds(removable);
@@ -1059,13 +1116,71 @@ async function applyStatusConfirm(datetimeLocal: string): Promise<void> {
   }
   try {
     const iso = fromDatetimeLocalToIso(datetimeLocal);
+    const base =
+      currentSection.value === "driver_route_details" && selectedDriverRoute.value
+        ? selectedDriverRoute.value
+        : route.value;
+    const current = base?.points.find((point) => point.id === pending.pointId);
+    if (!current) {
+      return;
+    }
+    const to = nextStatus(current.status);
+    if (to === "docs") {
+      docsUpload.value = { pointId: pending.pointId, occurredAtIso: iso };
+      return;
+    }
     await markPointNext(pending.pointId, iso);
   } catch (error) {
     syncMessage.value = (error as Error).message;
   }
 }
 
-async function markPointNext(pointId: number, occurredAtOverride?: string): Promise<void> {
+function cancelDocsUpload(): void {
+  docsUpload.value = null;
+}
+
+async function applyDocsUpload(files: File[]): Promise<void> {
+  const ctx = docsUpload.value;
+  if (!ctx || !route.value || !authToken.value || !files.length) {
+    return;
+  }
+  docsUploading.value = true;
+  try {
+    if (navigator.onLine) {
+      const { file_ids } = await uploadPointDocuments(authToken.value, ctx.pointId, files);
+      docsUpload.value = null;
+      await markPointNext(ctx.pointId, ctx.occurredAtIso, { fileIds: file_ids });
+    } else {
+      const localKeys: string[] = [];
+      for (const file of files) {
+        const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        await savePendingDocBlob({
+          local_key: key,
+          point_id: ctx.pointId,
+          route_id: route.value.id,
+          blob: file,
+          content_type: file.type || "image/jpeg",
+          created_at: new Date().toISOString()
+        });
+        localKeys.push(key);
+      }
+      docsUpload.value = null;
+      await markPointNext(ctx.pointId, ctx.occurredAtIso, { localKeys });
+    }
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    docsUploading.value = false;
+  }
+}
+
+type DocsAttach = { fileIds: number[] } | { localKeys: string[] };
+
+async function markPointNext(
+  pointId: number,
+  occurredAtOverride?: string,
+  docsAttach?: DocsAttach
+): Promise<void> {
   if (!route.value || !isDriver.value) {
     return;
   }
@@ -1077,6 +1192,19 @@ async function markPointNext(pointId: number, occurredAtOverride?: string): Prom
   if (!toStatus) {
     return;
   }
+  if (toStatus === "docs") {
+    if (docsAttach && "fileIds" in docsAttach) {
+      if (!docsAttach.fileIds.length) {
+        return;
+      }
+    } else if (docsAttach && "localKeys" in docsAttach) {
+      if (!docsAttach.localKeys.length) {
+        return;
+      }
+    } else {
+      return;
+    }
+  }
 
   const occurredAt = occurredAtOverride ?? new Date().toISOString();
   const event: EventPayload = {
@@ -1087,6 +1215,13 @@ async function markPointNext(pointId: number, occurredAtOverride?: string): Prom
     odometer: null,
     coordinates: null
   };
+  if (toStatus === "docs" && docsAttach) {
+    if ("fileIds" in docsAttach) {
+      event.document_file_ids = docsAttach.fileIds;
+    } else {
+      event.document_local_keys = docsAttach.localKeys;
+    }
+  }
 
   current.status = toStatus;
   if (selectedDriverRoute.value?.id === route.value.id) {
@@ -1285,6 +1420,7 @@ onUnmounted(() => {
         :route="selectedAdminRoute"
         :drivers="routeDrivers"
         :loading="routesLoading"
+        :auth-token="authToken"
         @back="openAdminRouteList"
         @assign-driver="doAssignAdminRoute"
         @cancel-route="doCancelAdminRoute"
@@ -1379,6 +1515,13 @@ onUnmounted(() => {
       "
       @cancel="cancelStatusConfirm"
       @confirm="applyStatusConfirm($event)"
+    />
+    <DocsUploadDialog
+      v-if="isDriver && docsUpload"
+      :open="true"
+      :uploading="docsUploading"
+      @cancel="cancelDocsUpload"
+      @confirm="applyDocsUpload($event)"
     />
   </main>
 </template>

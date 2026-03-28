@@ -121,26 +121,26 @@ function showRevert(pointId: number): boolean {
         Принять рейс
       </button>
 
-      <template v-if="isAcceptedCurrentRoute">
-        <p v-if="firstIncompletePoint && nextStatus(firstIncompletePoint.status)" class="dock-hint">
+      <template v-if="isAcceptedCurrentRoute && firstIncompletePoint">
+        <p v-if="nextStatus(firstIncompletePoint.status)" class="dock-hint">
           Текущая точка: этап «{{ statusLabel(firstIncompletePoint.status) }}»
         </p>
-        <div v-for="point in route.points" :key="`act-${point.id}`" class="dock-actions">
+        <div class="dock-actions">
           <button
-            v-if="canAdvancePoint(point.id)"
+            v-if="canAdvancePoint(firstIncompletePoint.id)"
             type="button"
             class="primary wide"
             :disabled="syncing"
-            @click="emit('advancePoint', point.id)"
+            @click="emit('advancePoint', firstIncompletePoint.id)"
           >
-            {{ actionLabel(point.status) }}
+            {{ actionLabel(firstIncompletePoint.status) }}
           </button>
           <button
-            v-if="showRevert(point.id)"
+            v-if="showRevert(firstIncompletePoint.id)"
             type="button"
             class="ghost wide"
             :disabled="syncing"
-            @click="emit('revertPoint', point.id)"
+            @click="emit('revertPoint', firstIncompletePoint.id)"
           >
             Вернуть предыдущий статус
           </button>

@@ -104,6 +104,47 @@ export async function sendEventsBatch(
   });
 }
 
+export async function uploadPointDocuments(
+  token: string,
+  pointId: number,
+  blobs: Blob[]
+): Promise<{ file_ids: number[] }> {
+  const fd = new FormData();
+  blobs.forEach((b, i) => {
+    fd.append("files", b, `document-${i}.jpg`);
+  });
+  const url = `${API_BASE}/v1/mobile/points/${pointId}/documents`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: fd
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return response.json() as Promise<{ file_ids: number[] }>;
+}
+
+export async function fetchPointDocumentBlob(
+  token: string,
+  imageId: number
+): Promise<Blob> {
+  const url = `${API_BASE}/v1/point-documents/${imageId}/file`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return response.blob();
+}
+
 export async function listAdminUsers(token: string): Promise<AdminUser[]> {
   const data = await requestJson<AdminUsersListResponse>(`${API_BASE}/v1/admin/users`, {
     headers: {

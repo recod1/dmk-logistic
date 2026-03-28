@@ -14,6 +14,15 @@ export interface OutboxEvent extends EventPayload {
   created_at: string;
 }
 
+export interface PendingDocBlob {
+  local_key: string;
+  point_id: number;
+  route_id: string;
+  blob: Blob;
+  content_type: string;
+  created_at: string;
+}
+
 export interface PointStatusOverlay {
   id?: number;
   route_id: string;
@@ -27,6 +36,7 @@ const db = new Dexie("dmk-mobile-db") as Dexie & {
   activeRoute: EntityTable<ActiveRouteSnapshot, "key">;
   outbox: EntityTable<OutboxEvent, "id">;
   pointOverlay: EntityTable<PointStatusOverlay, "id">;
+  pendingDocBlobs: EntityTable<PendingDocBlob, "local_key">;
 };
 
 db.version(1).stores({
@@ -44,6 +54,13 @@ db.version(3).stores({
   activeRoute: "key",
   outbox: "++id,client_event_id,point_id,created_at",
   pointOverlay: "++id,route_id,point_id,[route_id+point_id],updated_at"
+});
+
+db.version(4).stores({
+  activeRoute: "key",
+  outbox: "++id,client_event_id,point_id,created_at",
+  pointOverlay: "++id,route_id,point_id,[route_id+point_id],updated_at",
+  pendingDocBlobs: "local_key,point_id,route_id,created_at"
 });
 
 function toPlainObject<T>(value: T): T {
@@ -115,6 +132,33 @@ export async function savePointOverlay(
 
 export async function getPointOverlays(routeId: string): Promise<PointStatusOverlay[]> {
   return db.pointOverlay.where("route_id").equals(routeId).sortBy("updated_at");
+}
+
+export async function savePendingDocBlob(row: PendingDocBlob): Promise<void> {
+  await db.pendingDocBlobs.put(row);
+}
+
+export async function getPendingDocBlob(localKey: string): Promise<PendingDocBlob | undefined> {
+  return db.pendingDocBlobs.get(localKey);
+}
+
+export async function removePendingDocBlobs(localKeys: string[]): Promise<void> {
+  if (!localKeys.length) {
+    return;
+  }
+  await db.pendingDocBlobs.bulkDelete(localKeys);
+}
+
+export async function updateOutboxEventByClientId(
+  clientEventId: string,
+  patch: Partial<Pick<OutboxEvent, "document_file_ids" | "document_local_keys">>
+): Promise<void> {
+  const row = await db.outbox.where("client_event_id").equals(clientEventId).first();
+  if (!row?.id) {
+    return;
+  }
+  const next: OutboxEvent = { ...row, ...patch };
+  await db.outbox.put(next);
 }
 
 export async function removePointOverlays(routeId: string, pointIds: number[]): Promise<void> {

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_route_manager
 from mobile_api.db import get_db
-from mobile_api.models import Notification, Point, Route, RouteEvent, RoutePoint, User
+from mobile_api.models import Notification, Point, PointDocumentImage, Route, RouteEvent, RoutePoint, User
 from mobile_api.route_notification_logic import (
     notify_route_assigned,
     notify_route_cancelled,
@@ -107,7 +107,13 @@ def _driver_out(user: User | None) -> dict | None:
     }
 
 
-def _point_out(point: Point, order_index: int) -> dict:
+def _point_out(db: Session, point: Point, order_index: int) -> dict:
+    docs_rows = db.scalars(
+        select(PointDocumentImage)
+        .where(PointDocumentImage.point_id == point.id)
+        .order_by(PointDocumentImage.id.asc())
+    ).all()
+    docs_images = [{"id": row.id, "content_type": row.content_type} for row in docs_rows]
     return {
         "id": point.id,
         "order_index": order_index,
@@ -138,6 +144,7 @@ def _point_out(point: Point, order_index: int) -> dict:
         "docs_coordinates": {"lat": point.docs_lat, "lng": point.docs_lng},
         "odometer": point.odometer,
         "coordinates": {"lat": point.lat, "lng": point.lng},
+        "docs_images": docs_images,
     }
 
 
@@ -161,7 +168,7 @@ def _route_out(db: Session, route: Route, include_points: bool = False) -> dict:
         "driver": _driver_out(driver),
         "created_by": _driver_out(creator),
         "points_count": points_count,
-        "points": [_point_out(point, idx) for idx, point in enumerate(points)] if include_points else None,
+        "points": [_point_out(db, point, idx) for idx, point in enumerate(points)] if include_points else None,
     }
 
 
@@ -557,7 +564,7 @@ def update_route_point(
     db.refresh(point)
     route_id = _route_id_by_point_id(db, point.id)
     order_index = _point_order_index(db, route_id, point.id) if route_id else 0
-    return _point_out(point, order_index)
+    return _point_out(db, point, order_index)
 
 
 @router.delete("/points/{point_id}", status_code=status.HTTP_204_NO_CONTENT)
