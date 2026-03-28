@@ -83,6 +83,7 @@ router = APIRouter(tags=["mobile-v1"])
 
 
 def _as_utc(dt: datetime) -> datetime:
+    """UTC instant; PWA шлёт occurred_at_client как ISO 8601 из Date.toISOString() (смещение устройства учтено на клиенте)."""
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)

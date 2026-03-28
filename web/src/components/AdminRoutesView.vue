@@ -206,7 +206,29 @@ onMounted(() => {
         </div>
       </div>
       <p v-if="error" class="error">{{ error }}</p>
-      <div class="table-wrap">
+
+      <div class="routes-cards" role="list">
+        <button
+          v-for="r in routes"
+          :key="r.id"
+          type="button"
+          class="route-card-mobile"
+          role="listitem"
+          @click="emit('selectRoute', r.id)"
+        >
+          <span class="card-line strong">{{ r.id }}</span>
+          <span class="card-line"
+            ><span class="lbl">Водитель:</span> {{ r.driver?.full_name || r.driver?.login || "—" }}</span
+          >
+          <span class="card-line"><span class="lbl">ТС:</span> {{ r.number_auto || "—" }}</span>
+          <span class="card-line"
+            ><span class="lbl">Статус:</span> {{ STATUS_LABELS[r.status] ?? r.status }}</span
+          >
+        </button>
+        <p v-if="!routes.length" class="empty cards-empty">Рейсы не найдены</p>
+      </div>
+
+      <div class="table-wrap table-wrap-desktop">
         <table>
           <thead>
             <tr>
@@ -345,6 +367,43 @@ onMounted(() => {
   display: flex;
   align-items: end;
 }
+.routes-cards {
+  display: none;
+  margin-top: 0.75rem;
+}
+.route-card-mobile {
+  display: grid;
+  gap: 0.28rem;
+  width: 100%;
+  text-align: left;
+  padding: 0.75rem 0.85rem;
+  border-radius: 12px;
+  border: 1px solid #243043;
+  background: rgba(2, 6, 23, 0.55);
+  color: #e2e8f0;
+  cursor: pointer;
+  font: inherit;
+}
+.route-card-mobile:active {
+  background: rgba(79, 70, 229, 0.18);
+}
+.card-line {
+  font-size: 0.9rem;
+  line-height: 1.35;
+  word-break: break-word;
+}
+.card-line.strong {
+  font-weight: 700;
+  color: #f8fafc;
+  font-size: 0.95rem;
+}
+.card-line .lbl {
+  color: #94a3b8;
+  margin-right: 0.25rem;
+}
+.cards-empty {
+  margin: 0.5rem 0 0;
+}
 .table-wrap {
   margin-top: 0.75rem;
   overflow-x: auto;
@@ -444,6 +503,20 @@ button {
   background: transparent;
   border: 1px solid #334155;
   color: #cbd5e1;
+}
+@media (max-width: 760px) {
+  .routes-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 0.55rem;
+  }
+  .table-wrap-desktop {
+    display: none;
+  }
+  .filters-card h2 {
+    font-size: 1rem;
+    line-height: 1.35;
+  }
 }
 @media (max-width: 640px) {
   .tabs {
