@@ -123,7 +123,13 @@ export async function uploadPointDocuments(
   });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `HTTP ${response.status}`);
+    if (response.status === 413) {
+      throw new Error(
+        "Сервер отклонил файл как слишком большой (413). Уже ужато на устройстве: попробуйте меньше фото за раз или обратитесь к администратору — на nginx нужен client_max_body_size."
+      );
+    }
+    const trimmed = text.length > 280 ? `${text.slice(0, 280)}…` : text;
+    throw new Error(trimmed || `HTTP ${response.status}`);
   }
   return response.json() as Promise<{ file_ids: number[] }>;
 }

@@ -48,20 +48,19 @@ function submit(): void {
     <article class="dialog" role="dialog" aria-modal="true">
       <h2 class="title">Фото документов</h2>
       <p class="desc">
-        Для этапа «Забрал документы» загрузите снимки документов (можно несколько). Без фото переход не будет отправлен
-        на сервер; в офлайне файлы сохранятся и отправятся при появлении сети.
+        Для этапа «Забрал документы» выберите снимки из галереи (можно несколько). Без фото переход не будет отправлен на
+        сервер; в офлайне файлы сохранятся и отправятся при появлении сети.
       </p>
       <input
         ref="inputRef"
         type="file"
         accept="image/*"
         multiple
-        capture="environment"
         class="hidden-input"
         @change="onFileChange"
       />
       <button type="button" class="secondary pick" :disabled="uploading" @click="triggerPick">
-        {{ picked.length ? `Выбрано файлов: ${picked.length}` : "Выбрать фото" }}
+        {{ picked.length ? `Выбрано файлов: ${picked.length}` : "Выбрать из галереи" }}
       </button>
       <ul v-if="picked.length" class="names">
         <li v-for="(f, i) in picked" :key="`${i}-${f.name}`">{{ f.name }}</li>

@@ -55,6 +55,7 @@ import {
   updateOutboxEventByClientId
 } from "./db";
 import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
+import { prepareDocumentImageBlobs, prepareDocumentImageFiles } from "./imageUploadPrep";
 import { isAdminRole, isRouteManagerRole } from "./roles";
 import { isPointDone, nextStatus, nextStatusLabel } from "./status";
 import type {
@@ -613,7 +614,8 @@ async function syncOutboxInBackground(): Promise<void> {
         continue;
       }
       try {
-        const { file_ids } = await uploadPointDocuments(authToken.value, ev.point_id, blobs);
+        const prepared = await prepareDocumentImageBlobs(blobs);
+        const { file_ids } = await uploadPointDocuments(authToken.value, ev.point_id, prepared);
         await updateOutboxEventByClientId(ev.client_event_id, {
           document_file_ids: file_ids,
           document_local_keys: []
@@ -1146,20 +1148,21 @@ async function applyDocsUpload(files: File[]): Promise<void> {
   }
   docsUploading.value = true;
   try {
+    const blobs = await prepareDocumentImageFiles(files);
     if (navigator.onLine) {
-      const { file_ids } = await uploadPointDocuments(authToken.value, ctx.pointId, files);
+      const { file_ids } = await uploadPointDocuments(authToken.value, ctx.pointId, blobs);
       docsUpload.value = null;
       await markPointNext(ctx.pointId, ctx.occurredAtIso, { fileIds: file_ids });
     } else {
       const localKeys: string[] = [];
-      for (const file of files) {
+      for (const blob of blobs) {
         const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
         await savePendingDocBlob({
           local_key: key,
           point_id: ctx.pointId,
           route_id: route.value.id,
-          blob: file,
-          content_type: file.type || "image/jpeg",
+          blob,
+          content_type: blob.type || "image/jpeg",
           created_at: new Date().toISOString()
         });
         localKeys.push(key);
