@@ -61,14 +61,19 @@ def _wialon_suffix(tz_short: str) -> str:
 async def _get_vehicle_data_for_status_change(route):
     """
     Получает данные ТС через Wialon: время, timezone, координаты, одометр.
+    Та же цепочка, что и в mobile_api / PWA: `vehicle_number_for_wialon` + `get_vehicle_location_data`.
     :return: dict с time_str, timezone_str, lat, lng, odometer или None при ошибке
     """
-    number_auto = (route.number_auto or "").strip()
-    if not number_auto:
+    from services.wialon_service import get_vehicle_location_data, vehicle_number_for_wialon
+
+    key = vehicle_number_for_wialon(
+        getattr(route, "number_auto", None),
+        getattr(route, "registration_number", None),
+    )
+    if not key:
         return None
     try:
-        from services.wialon_service import get_vehicle_location_data
-        return await asyncio.to_thread(get_vehicle_location_data, number_auto)
+        return await asyncio.to_thread(get_vehicle_location_data, key)
     except Exception:
         return None
 

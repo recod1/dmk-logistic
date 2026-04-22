@@ -4,12 +4,67 @@ import json
 import logging
 from datetime import datetime, timezone
 from typing import Optional, Tuple
+from urllib.parse import urlparse
 
 import requests
 
 from config.settings import settings
 
 logger = logging.getLogger(__name__)
+
+_WIALON_HTTP_HEADERS = {
+    "User-Agent": "dmk-logistic/1.0 (Wialon Remote API)",
+    "Accept": "application/json, text/javascript, */*;q=0.1",
+}
+
+
+def vehicle_number_for_wialon(*candidates: str | None) -> str:
+    """
+    Строка поиска юнита в Wialon: сначала number_auto, затем запасные поля (как в PWA / mobile_api).
+    Telegram-бот должен вызывать ту же функцию, чтобы логика совпадала.
+    """
+    for cand in candidates:
+        s = (cand or "").strip()
+        if s:
+            return s
+    return ""
+
+
+def _safe_url_for_log(response: requests.Response) -> str:
+    try:
+        p = urlparse(response.url)
+        return f"{p.scheme}://{p.netloc}{p.path}"
+    except Exception:
+        return "(url)"
+
+
+def _parse_wialon_ajax_json(response: requests.Response, step: str) -> dict | None:
+    """Wialon отвечает JSON; пустое тело/HTML даёт JSONDecodeError — логируем фактические данные."""
+    safe = _safe_url_for_log(response)
+    if response.status_code != 200:
+        logger.warning("Wialon %s: HTTP %s %s", step, response.status_code, safe)
+    raw = (response.text or "").strip()
+    if not raw:
+        logger.warning(
+            "Wialon %s: пустой ответ (status=%s, %s). Проверьте WIALON_BASE_URL и доступность хоста.",
+            step,
+            response.status_code,
+            safe,
+        )
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as e:
+        snippet = raw[:400].replace("\n", " ").replace("\r", "")
+        logger.warning(
+            "Wialon %s: не JSON (status=%s, %s): %s; начало ответа: %r",
+            step,
+            response.status_code,
+            safe,
+            e,
+            snippet,
+        )
+        return None
 
 # Флаг доступности Wialon (если токен не задан — не пытаемся подключаться)
 WIALON_ENABLED = bool(settings.WIALON_TOKEN and settings.WIALON_TOKEN.strip())
@@ -86,8 +141,15 @@ def get_vehicle_location_data(vehicle_number: str):
             "svc": "token/login",
             "params": json.dumps({"token": settings.WIALON_TOKEN}),
         }
-        login_resp = requests.get(f"{base_url}/wialon/ajax.html", params=login_params, timeout=10)
-        login_data = login_resp.json()
+        login_resp = requests.get(
+            f"{base_url}/wialon/ajax.html",
+            params=login_params,
+            timeout=15,
+            headers=_WIALON_HTTP_HEADERS,
+        )
+        login_data = _parse_wialon_ajax_json(login_resp, "token/login")
+        if not login_data:
+            return None
         sid = login_data.get("eid")
         if not sid:
             logger.warning("Wialon login failed: %s", login_data)
@@ -109,8 +171,15 @@ def get_vehicle_location_data(vehicle_number: str):
             }),
             "sid": sid,
         }
-        search_resp = requests.get(f"{base_url}/wialon/ajax.html", params=search_params, timeout=10)
-        search_data = search_resp.json()
+        search_resp = requests.get(
+            f"{base_url}/wialon/ajax.html",
+            params=search_params,
+            timeout=15,
+            headers=_WIALON_HTTP_HEADERS,
+        )
+        search_data = _parse_wialon_ajax_json(search_resp, "core/search_items")
+        if not search_data:
+            return None
         if "error" in search_data:
             logger.warning("Wialon search error: %s", search_data["error"])
             return None
@@ -133,8 +202,15 @@ def get_vehicle_location_data(vehicle_number: str):
                     "to": 10,
                 }),
             }
-            search_resp_nm = requests.get(f"{base_url}/wialon/ajax.html", params=search_params_nm, timeout=10)
-            search_data = search_resp_nm.json()
+            search_resp_nm = requests.get(
+                f"{base_url}/wialon/ajax.html",
+                params=search_params_nm,
+                timeout=15,
+                headers=_WIALON_HTTP_HEADERS,
+            )
+            search_data = _parse_wialon_ajax_json(search_resp_nm, "core/search_items(nm)")
+            if not search_data:
+                return None
             if "error" in search_data:
                 logger.warning("Wialon search (nm) error: %s", search_data["error"])
                 return None

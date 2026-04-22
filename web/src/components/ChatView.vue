@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, ref, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, watch } from "vue";
 
 export type ChatMessage = {
   id: number;
@@ -26,6 +26,8 @@ const emit = defineEmits<{
 
 const draft = ref("");
 const listRef = ref<HTMLElement | null>(null);
+const listInnerRef = ref<HTMLElement | null>(null);
+let resizeObserver: ResizeObserver | null = null;
 
 const canSubmit = computed(() => props.canSend && draft.value.trim().length > 0 && !props.loading);
 
@@ -38,17 +40,62 @@ function submit(): void {
 
 async function scrollToBottom(): Promise<void> {
   await nextTick();
+  await new Promise<void>((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => resolve());
+    });
+  });
   const el = listRef.value;
   if (!el) return;
   el.scrollTop = el.scrollHeight;
 }
 
 watch(
-  () => props.items.length,
+  () => props.items,
+  () => {
+    void scrollToBottom();
+  },
+  { deep: true }
+);
+
+watch(
+  () => props.loading,
+  (v) => {
+    if (!v) void scrollToBottom();
+  }
+);
+
+watch(
+  () => props.routeId,
   () => {
     void scrollToBottom();
   }
 );
+
+onMounted(() => {
+  void scrollToBottom();
+});
+
+watch(
+  () => listInnerRef.value,
+  (inner) => {
+    resizeObserver?.disconnect();
+    resizeObserver = null;
+    if (!inner || typeof ResizeObserver === "undefined") {
+      return;
+    }
+    resizeObserver = new ResizeObserver(() => {
+      void scrollToBottom();
+    });
+    resizeObserver.observe(inner);
+  },
+  { flush: "post" }
+);
+
+onUnmounted(() => {
+  resizeObserver?.disconnect();
+  resizeObserver = null;
+});
 </script>
 
 <template>
@@ -61,7 +108,7 @@ watch(
     <p v-if="error" class="error">{{ error }}</p>
 
     <div ref="listRef" class="list" role="log" aria-live="polite">
-      <div class="list-inner">
+      <div ref="listInnerRef" class="list-inner">
         <article
           v-for="m in items"
           :key="m.id"
@@ -143,9 +190,12 @@ watch(
 }
 
 .list-inner {
+  box-sizing: border-box;
+  min-height: 100%;
   padding: 0.5rem 0.65rem 0.75rem;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 0.2rem;
 }
 
@@ -294,7 +344,8 @@ watch(
 }
 
 .empty {
-  margin: 2rem 0;
+  margin: 0;
+  padding: 1rem 0;
   text-align: center;
   color: rgba(255, 255, 255, 0.38);
   font-size: 0.9rem;

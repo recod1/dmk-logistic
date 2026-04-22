@@ -22,7 +22,7 @@ from mobile_api.route_notification_logic import (
 )
 from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.roles import role_label_ru
-from services.wialon_service import WIALON_ENABLED, get_vehicle_location_data
+from services.wialon_service import WIALON_ENABLED, get_vehicle_location_data, vehicle_number_for_wialon
 
 
 logger = logging.getLogger(__name__)
@@ -448,15 +448,6 @@ def _telemetry_coords_ok(value: dict | None) -> bool:
     return not (float(lat_raw) == 0.0 and float(lng_raw) == 0.0)
 
 
-def _route_vehicle_number_for_wialon(route: Route) -> str:
-    """Номер ТС для Wialon: как в Telegram-боте — number_auto, иначе госномер из рейса."""
-    for cand in (route.number_auto, route.registration_number):
-        s = (cand or "").strip()
-        if s:
-            return s
-    return ""
-
-
 def _apply_point_telemetry(point: Point, status_value: str, odometer: str | None, coordinates: dict | None) -> None:
     odometer_value: str | None = None
     lat_value: float | None = None
@@ -716,7 +707,7 @@ def batch_events(
         if applied:
             odometer = event.odometer
             coordinates = event.coordinates
-            vehicle_no = _route_vehicle_number_for_wialon(route)
+            vehicle_no = vehicle_number_for_wialon(route.number_auto, route.registration_number)
             need_odom = not _telemetry_odometer_ok(odometer)
             need_coords = not _telemetry_coords_ok(coordinates)
             try:
@@ -753,9 +744,12 @@ def batch_events(
                     )
                     wialon = get_vehicle_location_data(vehicle_no)
                     if not wialon:
-                        logger.info(
-                            "mobile_events wialon: no data for vehicle_no=%r (not found / no position / API error)",
+                        logger.warning(
+                            "mobile_events wialon: NO DATA for vehicle_no=%r route_id=%s point_id=%s "
+                            "(WIALON_TOKEN/host, имя юнита в Wialon, последняя позиция)",
                             vehicle_no,
+                            route.id,
+                            point.id,
                         )
                     else:
                         if need_odom:
