@@ -147,6 +147,7 @@ let notificationsPingInterval: number | null = null;
 let chatWs: WebSocket | null = null;
 let chatWsReconnectTimer: number | null = null;
 let chatPingInterval: number | null = null;
+let chatPollInterval: number | null = null;
 
 const isAuthed = computed(() => Boolean(authToken.value));
 const isAdmin = computed(() => isAdminRole(authUser.value?.role_code || ""));
@@ -292,6 +293,26 @@ function closeChatSocket(): void {
     chatWs.close();
     chatWs = null;
   }
+}
+
+function stopChatPolling(): void {
+  if (chatPollInterval !== null) {
+    window.clearInterval(chatPollInterval);
+    chatPollInterval = null;
+  }
+}
+
+function startChatPolling(): void {
+  stopChatPolling();
+  // Fallback for environments where WS delivery is unreliable:
+  // periodically refresh chat while it's open.
+  chatPollInterval = window.setInterval(() => {
+    if (currentSection.value !== "chat" || !chatRouteId.value) {
+      stopChatPolling();
+      return;
+    }
+    void refreshChat();
+  }, 2500);
 }
 
 function scheduleChatReconnect(): void {
@@ -528,6 +549,7 @@ function clearAuth(): void {
   stopBackgroundSyncLoop();
   closeNotificationsSocket();
   closeChatSocket();
+  stopChatPolling();
   authUser.value = null;
   route.value = null;
   selectedDriverRoute.value = null;
@@ -1518,6 +1540,7 @@ async function openChatForRoute(routeId: string): Promise<void> {
   if (chatUnreadByRoute.value[routeId]) {
     chatUnreadByRoute.value = { ...chatUnreadByRoute.value, [routeId]: 0 };
   }
+  startChatPolling();
 }
 
 async function refreshChat(): Promise<void> {
@@ -1607,6 +1630,8 @@ onMounted(async () => {
 onUnmounted(() => {
   stopBackgroundSyncLoop();
   closeNotificationsSocket();
+  closeChatSocket();
+  stopChatPolling();
   window.removeEventListener("online", onOnline);
   window.removeEventListener("offline", onOffline);
   window.removeEventListener("mousedown", onDocumentClick);

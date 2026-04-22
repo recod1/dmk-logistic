@@ -94,7 +94,7 @@ watch(
 <style scoped>
 .chat-wrap {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.55rem;
   min-height: calc(100vh - 6rem);
 }
 .head-row {
@@ -104,6 +104,11 @@ watch(
   gap: 0.5rem;
   flex-wrap: wrap;
 }
+.head-row h1 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+}
 .list {
   flex: 1;
   min-height: 0;
@@ -111,10 +116,10 @@ watch(
   overflow: auto;
   display: grid;
   gap: 0.35rem;
-  border: 1px solid #243043;
-  border-radius: 12px;
-  background: rgba(2, 6, 23, 0.35);
-  padding: 0.55rem;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 0.35rem 0;
 }
 .msg {
   display: flex;
@@ -123,15 +128,14 @@ watch(
   justify-content: flex-end;
 }
 .bubble {
-  max-width: min(720px, 92%);
-  border: 1px solid #334155;
+  max-width: min(680px, 92%);
+  border: none;
   border-radius: 14px;
-  background: #0b1220;
-  padding: 0.4rem 0.55rem;
+  background: #0f172a;
+  padding: 0.45rem 0.65rem;
 }
 .msg.mine .bubble {
-  background: rgba(37, 99, 235, 0.16);
-  border-color: rgba(37, 99, 235, 0.35);
+  background: #2563eb;
 }
 .meta {
   display: flex;
@@ -141,19 +145,30 @@ watch(
 }
 .author {
   font-weight: 650;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
+  color: #c7d2fe;
+}
+.msg.mine .author {
+  display: none;
 }
 .time {
-  color: #94a3b8;
+  color: rgba(255, 255, 255, 0.75);
   font-size: 0.78rem;
   white-space: nowrap;
+}
+.msg.mine .time {
+  color: rgba(255, 255, 255, 0.85);
 }
 .text {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 0.92rem;
-  line-height: 1.35;
+  font-size: 0.95rem;
+  line-height: 1.32;
+  color: #f8fafc;
+}
+.msg.mine .text {
+  color: #fff;
 }
 .composer {
   position: sticky;
@@ -161,8 +176,9 @@ watch(
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0.45rem;
-  background: linear-gradient(180deg, transparent, #020617 35%);
-  padding: 0.65rem 0 0;
+  background: #020617;
+  padding: 0.55rem 0;
+  border-top: 1px solid #111827;
 }
 textarea {
   width: 100%;
@@ -170,7 +186,7 @@ textarea {
   border: 1px solid #334155;
   background: #0b1220;
   color: #fff;
-  padding: 0.5rem 0.65rem;
+  padding: 0.45rem 0.6rem;
   resize: none;
   max-height: 34vh;
   overflow: auto;
@@ -180,8 +196,8 @@ textarea {
   border-radius: 12px;
   background: #2563eb;
   color: #fff;
-  padding: 0.5rem 0.8rem;
-  height: 42px;
+  padding: 0.45rem 0.75rem;
+  height: 40px;
 }
 .ghost {
   width: auto;

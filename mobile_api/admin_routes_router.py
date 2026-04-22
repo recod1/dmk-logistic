@@ -48,7 +48,8 @@ class AdminRoutePointCreate(BaseModel):
 
 class AdminRouteCreatePayload(BaseModel):
     route_id: str = Field(min_length=1, max_length=64)
-    driver_user_id: int
+    driver_fio: str = Field(default="", max_length=255)
+    driver_user_id: int | None = None
     number_auto: str = ""
     temperature: str = ""
     dispatcher_contacts: str = ""
@@ -312,7 +313,16 @@ def create_route(
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Route id already exists")
 
-    driver = _ensure_driver(db, payload.driver_user_id)
+    driver: User | None = None
+    if payload.driver_user_id is not None:
+        driver = _ensure_driver(db, payload.driver_user_id)
+    else:
+        driver = _try_find_driver_by_fio(db, payload.driver_fio)
+        if driver is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Не удалось однозначно определить водителя по ФИО. Проверьте ФИО или выберите водителя вручную.",
+            )
     legacy_driver_tg_id = int(driver.legacy_tg_id) if (driver.legacy_tg_id or "").isdigit() else None
 
     route = Route(

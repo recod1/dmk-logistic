@@ -15,8 +15,6 @@ type PointForm = {
   place_point: string;
   date_point: string;
   point_time: string;
-  point_name: string;
-  point_contacts: string;
   point_note: string;
 };
 
@@ -33,7 +31,7 @@ const emit = defineEmits<{
   create: [
     payload: {
       route_id: string;
-      driver_user_id: number;
+      driver_fio: string;
       number_auto?: string;
       temperature?: string;
       dispatcher_contacts?: string;
@@ -95,8 +93,6 @@ function makeEmptyPoint(): PointForm {
     place_point: "",
     date_point: "",
     point_time: "",
-    point_name: "",
-    point_contacts: "",
     point_note: ""
   };
 }
@@ -106,8 +102,6 @@ function toPointPayload(points: PointForm[]): AdminRoutePointPayload[] {
     type_point: point.type_point || "loading",
     place_point: point.place_point.trim(),
     date_point: point.date_point.trim(),
-    point_name: point.point_name.trim(),
-    point_contacts: point.point_contacts.trim(),
     point_time: point.point_time.trim(),
     point_note: point.point_note.trim(),
     order_index: index
@@ -175,9 +169,14 @@ function submitCreate(): void {
   if (!createForm.route_id.trim() || !createForm.driver_user_id) {
     return;
   }
+  const driver = props.drivers.find((d) => d.id === createForm.driver_user_id) || null;
+  const driverFio = (driver?.full_name || driver?.login || "").trim();
+  if (!driverFio) {
+    return;
+  }
   emit("create", {
     route_id: createForm.route_id.trim(),
-    driver_user_id: createForm.driver_user_id,
+    driver_fio: driverFio,
     number_auto: createForm.number_auto.trim(),
     temperature: createForm.temperature.trim(),
     dispatcher_contacts: createForm.dispatcher_contacts.trim(),
@@ -377,14 +376,6 @@ onMounted(() => {
           <label>
             Адрес
             <input v-model="point.place_point" />
-          </label>
-          <label class="full">
-            Название
-            <input v-model="point.point_name" />
-          </label>
-          <label class="full">
-            Контакты
-            <input v-model="point.point_contacts" />
           </label>
           <label class="full">
             Примечание
