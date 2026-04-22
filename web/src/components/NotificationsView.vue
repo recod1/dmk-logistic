@@ -6,10 +6,13 @@ defineProps<{
   loading: boolean;
   error: string;
   unreadCount?: number;
+  canPush?: boolean;
+  pushHint?: string;
 }>();
 
 const emit = defineEmits<{
   refresh: [];
+  enablePush: [];
   markRead: [notificationId: number];
   markAllRead: [];
   openRoute: [routeId: string, notificationId: number];
@@ -46,10 +49,12 @@ function formatExtra(item: NotificationDto): string {
       <h1>Уведомления <span v-if="typeof unreadCount === 'number'" class="counter">({{ unreadCount }})</span></h1>
       <div class="head-actions">
         <button :disabled="loading" @click="emit('refresh')">Обновить</button>
+        <button v-if="canPush" :disabled="loading" @click="emit('enablePush')">Включить push</button>
         <button :disabled="loading || !items.some((item) => !item.is_read)" @click="emit('markAllRead')">Прочитать всё</button>
       </div>
     </div>
 
+    <p v-if="pushHint" class="hint">{{ pushHint }}</p>
     <p v-if="error" class="error">{{ error }}</p>
 
     <article v-if="!items.length && !loading" class="card empty-card">
@@ -139,6 +144,11 @@ p {
 }
 .error {
   color: #fca5a5;
+}
+.hint {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.9rem;
 }
 .empty-card {
   color: #94a3b8;

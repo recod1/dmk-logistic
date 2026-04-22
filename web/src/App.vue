@@ -162,6 +162,22 @@ const activeRouteSummary = computed(() => {
 });
 const hasAssignedRoutes = computed(() => driverAssignedRoutes.value.some((item) => item.status === "new"));
 const hasUnreadNotifications = computed(() => unreadNotificationsCount.value > 0);
+const pushIsSupported = computed(() => {
+  if (typeof window === "undefined") return false;
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+});
+const pushHint = computed(() => {
+  if (typeof window === "undefined" || !("Notification" in window)) {
+    return "";
+  }
+  if (Notification.permission === "denied") {
+    return "Уведомления заблокированы в браузере/Android. Разрешите уведомления для сайта и переоткройте приложение.";
+  }
+  if (useLegacyBrowserNotification.value) {
+    return "Push не активирован. Нажмите «Включить push» и разрешите уведомления.";
+  }
+  return "";
+});
 
 function updateUiNotificationIndicators(): void {
   if (typeof document !== "undefined") {
@@ -670,6 +686,13 @@ async function trySubscribeWebPush(): Promise<void> {
     return;
   }
   try {
+    if ("Notification" in window && Notification.permission === "default") {
+      const perm = await Notification.requestPermission();
+      if (perm !== "granted") {
+        useLegacyBrowserNotification.value = true;
+        return;
+      }
+    }
     const { public_key: publicKey } = await getVapidPublicKey(authToken.value);
     if (!publicKey || !("serviceWorker" in navigator) || !("PushManager" in window)) {
       useLegacyBrowserNotification.value = true;
@@ -1832,7 +1855,10 @@ onUnmounted(() => {
         :loading="notificationsLoading"
         :error="notificationsError"
         :unread-count="unreadNotificationsCount"
+        :can-push="pushIsSupported"
+        :push-hint="pushHint"
         @refresh="refreshNotifications"
+        @enable-push="trySubscribeWebPush"
         @mark-read="doMarkNotificationRead"
         @mark-all-read="doMarkAllNotificationsRead"
         @open-route="openRouteFromNotification"
