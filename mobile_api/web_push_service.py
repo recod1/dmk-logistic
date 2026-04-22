@@ -38,8 +38,16 @@ def _normalize_vapid_private_key(raw: str) -> str:
     except Exception:
         return raw
     try:
-        der = _base64url_decode(raw)
-        key = serialization.load_der_private_key(der, password=None)
+        decoded = _base64url_decode(raw)
+        # Some generators provide a "raw" 32-byte private key (scalar).
+        # Accept it to avoid PEM hassles in env vars.
+        if len(decoded) == 32:
+            from cryptography.hazmat.primitives.asymmetric import ec
+
+            private_value = int.from_bytes(decoded, byteorder="big", signed=False)
+            key = ec.derive_private_key(private_value, ec.SECP256R1())
+        else:
+            key = serialization.load_der_private_key(decoded, password=None)
         pem = key.private_bytes(
             encoding=serialization.Encoding.PEM,
             format=serialization.PrivateFormat.PKCS8,
