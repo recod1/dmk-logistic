@@ -35,6 +35,32 @@ def _base64_any_decode(s: str) -> bytes:
     return base64.b64decode((s + padding).encode("utf-8"))
 
 
+def _safe_b64_any_decode(s: str) -> bytes | None:
+    try:
+        return _base64_any_decode(s)
+    except Exception:
+        return None
+
+
+def _validate_subscription_keys(*, p256dh: str, auth: str) -> tuple[bool, str | None]:
+    """
+    WebPush subscription keys (per RFC8292/WebPush protocol) are base64url strings:
+    - p256dh: uncompressed P-256 public key, 65 bytes
+    - auth: 16 bytes
+    """
+    p = _safe_b64_any_decode(p256dh)
+    a = _safe_b64_any_decode(auth)
+    if p is None:
+        return False, "subscription key p256dh is not valid base64/base64url"
+    if a is None:
+        return False, "subscription key auth is not valid base64/base64url"
+    if len(p) != 65:
+        return False, f"subscription key p256dh decoded length is {len(p)} (expected 65)"
+    if len(a) != 16:
+        return False, f"subscription key auth decoded length is {len(a)} (expected 16)"
+    return True, None
+
+
 def _normalize_vapid_private_key(raw: str) -> str:
     """
     Accept either:
@@ -160,7 +186,25 @@ def send_web_push_to_users_sync(
     if not vapid_private_key:
         return [{"ok": False, "error": "Invalid VAPID private key"}]
 
+    # Validate VAPID key is parseable in this runtime.
+    try:
+        from cryptography.hazmat.primitives import serialization
+
+        serialization.load_pem_private_key(vapid_private_key.encode("utf-8"), password=None)
+    except Exception as exc:
+        return [{"ok": False, "error": f"Invalid VAPID private key (pem parse): {exc}"}]
+
     for sub_id, endpoint, p256dh, auth in subscriptions:
+        ok_keys, key_err = _validate_subscription_keys(p256dh=p256dh, auth=auth)
+        if not ok_keys:
+            results.append(
+                {
+                    "subscription_id": sub_id,
+                    "ok": False,
+                    "error": key_err,
+                }
+            )
+            continue
         try:
             resp = webpush(
                 subscription_info={"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}},
@@ -192,7 +236,7 @@ def send_web_push_to_users_sync(
                 }
             )
         except Exception as exc:
-            results.append({"subscription_id": sub_id, "ok": False, "error": str(exc)})
+            results.append({"subscription_id": sub_id, "ok": False, "error": str(exc), "exception_type": type(exc).__name__})
 
     return results
 

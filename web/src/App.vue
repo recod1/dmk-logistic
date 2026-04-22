@@ -166,15 +166,27 @@ const pushIsSupported = computed(() => {
   if (typeof window === "undefined") return false;
   return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 });
+const pushInProgress = ref(false);
+const pushLastError = ref("");
+const pushLastOkAt = ref<string | null>(null);
 const pushHint = computed(() => {
   if (typeof window === "undefined" || !("Notification" in window)) {
     return "";
+  }
+  if (pushInProgress.value) {
+    return "Включение push…";
+  }
+  if (pushLastError.value) {
+    return `Push не включен: ${pushLastError.value}`;
   }
   if (Notification.permission === "denied") {
     return "Уведомления заблокированы в браузере/Android. Разрешите уведомления для сайта и переоткройте приложение.";
   }
   if (useLegacyBrowserNotification.value) {
     return "Push не активирован. Нажмите «Включить push» и разрешите уведомления.";
+  }
+  if (pushLastOkAt.value) {
+    return `Push включен (${pushLastOkAt.value}).`;
   }
   return "";
 });
@@ -685,17 +697,21 @@ async function trySubscribeWebPush(): Promise<void> {
   if (!authToken.value || typeof window === "undefined") {
     return;
   }
+  pushInProgress.value = true;
+  pushLastError.value = "";
   try {
     if ("Notification" in window && Notification.permission === "default") {
       const perm = await Notification.requestPermission();
       if (perm !== "granted") {
         useLegacyBrowserNotification.value = true;
+        pushLastError.value = "не получено разрешение на уведомления";
         return;
       }
     }
     const { public_key: publicKey } = await getVapidPublicKey(authToken.value);
     if (!publicKey || !("serviceWorker" in navigator) || !("PushManager" in window)) {
       useLegacyBrowserNotification.value = true;
+      pushLastError.value = !publicKey ? "на сервере не настроен VAPID_PUBLIC_KEY" : "PushManager/serviceWorker недоступны";
       return;
     }
     useLegacyBrowserNotification.value = false;
@@ -714,8 +730,12 @@ async function trySubscribeWebPush(): Promise<void> {
       endpoint: json.endpoint,
       keys: { p256dh: key.p256dh, auth: key.auth }
     });
+    pushLastOkAt.value = new Date().toLocaleString();
   } catch {
     useLegacyBrowserNotification.value = true;
+    pushLastError.value = "ошибка подписки (проверьте HTTPS и настройки уведомлений браузера)";
+  } finally {
+    pushInProgress.value = false;
   }
 }
 
