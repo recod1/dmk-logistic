@@ -101,6 +101,73 @@ def send_web_push_to_users(
     threading.Thread(target=_run, daemon=True).start()
 
 
+def send_web_push_to_users_sync(
+    *,
+    subscriptions: list[tuple[int, str, str, str]],
+    title: str,
+    body: str,
+    notification_id: int | None = None,
+) -> list[dict[str, Any]]:
+    """
+    Synchronous sender for diagnostics. Returns per-subscription results.
+    """
+    results: list[dict[str, Any]] = []
+    if not mobile_settings.vapid_public_key or not mobile_settings.vapid_private_key:
+        return [{"ok": False, "error": "VAPID keys are not configured"}]
+    if not subscriptions:
+        return [{"ok": False, "error": "No subscriptions"}]
+
+    try:
+        from pywebpush import WebPushException, webpush
+    except ImportError:
+        return [{"ok": False, "error": "pywebpush not installed"}]
+
+    payload_obj: dict[str, Any] = {"title": title, "body": body}
+    if notification_id is not None:
+        payload_obj["notification_id"] = notification_id
+    data = json.dumps(payload_obj, ensure_ascii=False)
+    vapid_claims = {"sub": mobile_settings.vapid_claim_email}
+    vapid_private_key = _normalize_vapid_private_key(mobile_settings.vapid_private_key)
+    if not vapid_private_key:
+        return [{"ok": False, "error": "Invalid VAPID private key"}]
+
+    for sub_id, endpoint, p256dh, auth in subscriptions:
+        try:
+            resp = webpush(
+                subscription_info={"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}},
+                data=data,
+                vapid_private_key=vapid_private_key,
+                vapid_claims=vapid_claims,
+                ttl=86400,
+            )
+            status = getattr(resp, "status_code", None)
+            results.append({"subscription_id": sub_id, "ok": True, "status_code": status})
+        except WebPushException as exc:
+            status_code = exc.response.status_code if exc.response is not None else None
+            body_text = None
+            try:
+                body_text = exc.response.text if exc.response is not None else None
+            except Exception:
+                body_text = None
+            if status_code in {404, 410}:
+                with SessionLocal() as cleanup:
+                    cleanup.execute(delete(WebPushSubscription).where(WebPushSubscription.id == sub_id))
+                    cleanup.commit()
+            results.append(
+                {
+                    "subscription_id": sub_id,
+                    "ok": False,
+                    "status_code": status_code,
+                    "error": str(exc),
+                    "body": body_text,
+                }
+            )
+        except Exception as exc:
+            results.append({"subscription_id": sub_id, "ok": False, "error": str(exc)})
+
+    return results
+
+
 def collect_subscriptions_for_users(db: Session, user_ids: list[int]) -> list[tuple[int, int, str, str, str]]:
     """Returns (subscription_id, user_id, endpoint, p256dh, auth)."""
     if not user_ids:

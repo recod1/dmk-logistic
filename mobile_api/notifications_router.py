@@ -183,20 +183,21 @@ def push_test(
     if not mobile_settings.vapid_public_key or not mobile_settings.vapid_private_key:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="VAPID keys are not configured on server")
 
-    from mobile_api.web_push_service import collect_subscriptions_for_users, send_web_push_to_users
+    from mobile_api.web_push_service import collect_subscriptions_for_users, send_web_push_to_users_sync
 
     rows = collect_subscriptions_for_users(db, [int(current_user.id)])
     subs = [(sub_id, endpoint, p256dh, auth) for sub_id, _user_id, endpoint, p256dh, auth in rows]
     if not subs:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No push subscriptions for this user")
 
-    send_web_push_to_users(
+    results = send_web_push_to_users_sync(
         subscriptions=subs,
         title="ДМК (test)",
         body="Тестовое push-уведомление. Если вы это видите — Web Push работает.",
         notification_id=None,
     )
-    return {"ok": True, "subscriptions": len(subs)}
+    ok_count = len([r for r in results if r.get("ok")])
+    return {"ok": ok_count == len(subs), "subscriptions": len(subs), "ok_count": ok_count, "results": results}
 
 
 @router.get("/v1/mobile/notifications")
