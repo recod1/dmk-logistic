@@ -156,7 +156,6 @@ function showRevert(pointId: number): boolean {
                 {{ phone }}
               </a>
             </span>
-            <button class="copy" type="button" @click="copyToClipboard(route.dispatcher_contacts)">Копировать контакты</button>
           </span>
           <span v-else>—</span>
         </p>

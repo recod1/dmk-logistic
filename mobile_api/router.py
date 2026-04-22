@@ -21,6 +21,7 @@ from mobile_api.route_notification_logic import (
 )
 from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.roles import role_label_ru
+from services.wialon_service import get_vehicle_location_data
 
 
 POINT_STATUS_FLOW = {
@@ -686,7 +687,19 @@ def batch_events(
         )
         db.add(stored_event)
         if applied:
-            _apply_point_telemetry(point, target_status, event.odometer, event.coordinates)
+            odometer = event.odometer
+            coordinates = event.coordinates
+            # If client didn't send telemetry, try to fetch from Wialon (as in Telegram bot integration).
+            try:
+                if (odometer is None and not coordinates) and route.number_auto:
+                    wialon = get_vehicle_location_data(route.number_auto)
+                    if wialon:
+                        odometer = wialon.get("odometer") or odometer
+                        coordinates = {"lat": wialon.get("lat"), "lng": wialon.get("lng")}
+            except Exception:
+                pass
+
+            _apply_point_telemetry(point, target_status, odometer, coordinates)
             db.add(point)
             route_completed_now = _refresh_route_status_if_completed(db, route)
             notify_point_status_changed(

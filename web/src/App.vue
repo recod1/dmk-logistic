@@ -344,6 +344,9 @@ function connectChatSocket(): void {
             if (!exists) {
               chatMessages.value = [...chatMessages.value, item];
             }
+          } else if (authUser.value?.id && item.user_id !== authUser.value.id) {
+            const current = chatUnreadByRoute.value[item.route_id] ?? 0;
+            chatUnreadByRoute.value = { ...chatUnreadByRoute.value, [item.route_id]: current + 1 };
           }
         }
       } catch {
@@ -1738,8 +1741,8 @@ onUnmounted(() => {
         :loading="chatLoading"
         :error="chatError"
         :can-send="Boolean(isAuthed)"
+        :current-user-id="authUser?.id ?? null"
         @back="() => (currentSection = isDriver ? 'driver_route_details' : 'admin_route_details')"
-        @refresh="refreshChat"
         @send="sendChat"
       />
     </section>
