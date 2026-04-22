@@ -42,9 +42,12 @@ def _normalize_vapid_private_key(raw: str) -> str:
     - base64url PKCS8 DER (single-line, convenient for env/Portainer)
     and return PEM string for pywebpush.
     """
-    raw = (raw or "").strip()
+    raw = (raw or "").strip().strip('"').strip("'")
     if not raw:
         return ""
+    # Portainer/compose env often stores PEM as a single line with escaped newlines.
+    if "\\n" in raw or "\\r\\n" in raw:
+        raw = raw.replace("\\r\\n", "\n").replace("\\n", "\n")
     if "BEGIN" in raw:
         return raw
     try:
