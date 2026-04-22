@@ -716,6 +716,18 @@ async function trySubscribeWebPush(): Promise<void> {
     }
     useLegacyBrowserNotification.value = false;
     const registration = await navigator.serviceWorker.ready;
+
+    // If VAPID keys were rotated, browsers can keep an old subscription.
+    // Resubscribing with a different applicationServerKey may throw InvalidStateError.
+    try {
+      const existing = await registration.pushManager.getSubscription();
+      if (existing) {
+        await existing.unsubscribe();
+      }
+    } catch {
+      // ignore unsubscribe errors
+    }
+
     const sub = await registration.pushManager.subscribe({
       userVisibleOnly: true,
       applicationServerKey: urlBase64ToUint8Array(publicKey)
@@ -731,9 +743,12 @@ async function trySubscribeWebPush(): Promise<void> {
       keys: { p256dh: key.p256dh, auth: key.auth }
     });
     pushLastOkAt.value = new Date().toLocaleString();
-  } catch {
+  } catch (error) {
     useLegacyBrowserNotification.value = true;
-    pushLastError.value = "ошибка подписки (проверьте HTTPS и настройки уведомлений браузера)";
+    const err = error as { name?: string; message?: string };
+    const name = (err?.name || "Error").trim();
+    const msg = (err?.message || "").trim();
+    pushLastError.value = msg ? `${name}: ${msg}` : name;
   } finally {
     pushInProgress.value = false;
   }
