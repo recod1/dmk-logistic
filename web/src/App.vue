@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watchEffect } from "vue";
 
 import AdminRouteDetailsView from "./components/AdminRouteDetailsView.vue";
 import AdminRoutesView from "./components/AdminRoutesView.vue";
@@ -161,6 +161,34 @@ const activeRouteSummary = computed(() => {
 });
 const hasAssignedRoutes = computed(() => driverAssignedRoutes.value.some((item) => item.status === "new"));
 const hasUnreadNotifications = computed(() => unreadNotificationsCount.value > 0);
+
+function updateUiNotificationIndicators(): void {
+  if (typeof document !== "undefined") {
+    const base = currentPageTitle.value;
+    const unread = unreadNotificationsCount.value;
+    document.title = unread > 0 ? `(${unread}) ${base}` : base;
+  }
+
+  const unread = unreadNotificationsCount.value;
+  const nav = navigator as Navigator & {
+    setAppBadge?: (count?: number) => Promise<void>;
+    clearAppBadge?: () => Promise<void>;
+  };
+  if (typeof nav?.setAppBadge === "function" && typeof nav?.clearAppBadge === "function") {
+    if (unread > 0) {
+      void nav.setAppBadge(unread);
+    } else {
+      void nav.clearAppBadge();
+    }
+  }
+}
+
+watchEffect(() => {
+  // Keep tab title + badge in sync while app runs in browser / installed PWA.
+  void currentPageTitle.value;
+  void unreadNotificationsCount.value;
+  updateUiNotificationIndicators();
+});
 
 function isAuthError(error: unknown): boolean {
   if (error instanceof ApiError) {
