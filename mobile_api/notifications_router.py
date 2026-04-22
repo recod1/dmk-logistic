@@ -171,6 +171,34 @@ def push_subscribe(
     return {"ok": True}
 
 
+@router.post("/v1/notifications/push/test")
+def push_test(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Debug endpoint to verify that Web Push is configured and subscriptions are valid.
+    Sends a push to the current user (to all their subscriptions).
+    """
+    if not mobile_settings.vapid_public_key or not mobile_settings.vapid_private_key:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="VAPID keys are not configured on server")
+
+    from mobile_api.web_push_service import collect_subscriptions_for_users, send_web_push_to_users
+
+    rows = collect_subscriptions_for_users(db, [int(current_user.id)])
+    subs = [(sub_id, endpoint, p256dh, auth) for sub_id, _user_id, endpoint, p256dh, auth in rows]
+    if not subs:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No push subscriptions for this user")
+
+    send_web_push_to_users(
+        subscriptions=subs,
+        title="ДМК (test)",
+        body="Тестовое push-уведомление. Если вы это видите — Web Push работает.",
+        notification_id=None,
+    )
+    return {"ok": True, "subscriptions": len(subs)}
+
+
 @router.get("/v1/mobile/notifications")
 def list_notifications_mobile(
     limit: int = Query(default=50, ge=1, le=200),

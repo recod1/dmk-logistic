@@ -5,6 +5,8 @@ import logging
 import threading
 from typing import Any
 
+import base64
+
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
@@ -13,6 +15,39 @@ from mobile_api.models import WebPushSubscription
 from mobile_api.settings import mobile_settings
 
 logger = logging.getLogger(__name__)
+
+def _base64url_decode(s: str) -> bytes:
+    padding = "=" * ((4 - (len(s) % 4)) % 4)
+    return base64.urlsafe_b64decode((s + padding).encode("utf-8"))
+
+
+def _normalize_vapid_private_key(raw: str) -> str:
+    """
+    Accept either:
+    - PEM (-----BEGIN PRIVATE KEY----- ...)
+    - base64url PKCS8 DER (single-line, convenient for env/Portainer)
+    and return PEM string for pywebpush.
+    """
+    raw = (raw or "").strip()
+    if not raw:
+        return ""
+    if "BEGIN" in raw:
+        return raw
+    try:
+        from cryptography.hazmat.primitives import serialization
+    except Exception:
+        return raw
+    try:
+        der = _base64url_decode(raw)
+        key = serialization.load_der_private_key(der, password=None)
+        pem = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        )
+        return pem.decode("utf-8")
+    except Exception:
+        return raw
 
 
 def send_web_push_to_users(
@@ -41,6 +76,9 @@ def send_web_push_to_users(
         payload_obj["notification_id"] = notification_id
     data = json.dumps(payload_obj, ensure_ascii=False)
     vapid_claims = {"sub": mobile_settings.vapid_claim_email}
+    vapid_private_key = _normalize_vapid_private_key(mobile_settings.vapid_private_key)
+    if not vapid_private_key:
+        return
 
     def _run() -> None:
         for sub_id, endpoint, p256dh, auth in subscriptions:
@@ -48,7 +86,7 @@ def send_web_push_to_users(
                 webpush(
                     subscription_info={"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}},
                     data=data,
-                    vapid_private_key=mobile_settings.vapid_private_key,
+                    vapid_private_key=vapid_private_key,
                     vapid_claims=vapid_claims,
                     ttl=86400,
                 )
