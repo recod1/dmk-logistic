@@ -200,6 +200,54 @@ def push_test(
     return {"ok": ok_count == len(subs), "subscriptions": len(subs), "ok_count": ok_count, "results": results}
 
 
+@router.get("/v1/notifications/push/debug-config")
+def push_debug_config(
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Returns diagnostic info about VAPID env values as seen by the running container.
+    Does NOT return the full private key.
+    """
+    _ = current_user
+    raw_priv = mobile_settings.vapid_private_key or ""
+    raw_pub = mobile_settings.vapid_public_key or ""
+
+    info: dict = {
+        "vapid_public_key_set": bool(raw_pub.strip()),
+        "vapid_public_key_len": len(raw_pub.strip()),
+        "vapid_private_key_set": bool(raw_priv.strip()),
+        "vapid_private_key_len": len(raw_priv),
+        "vapid_private_key_has_begin": "BEGIN" in raw_priv,
+        "vapid_private_key_has_end": "END" in raw_priv,
+        "vapid_private_key_has_literal_backslash_n": "\\n" in raw_priv,
+        "vapid_private_key_newline_count": raw_priv.count("\n"),
+        "vapid_claim_email": mobile_settings.vapid_claim_email,
+    }
+
+    try:
+        from cryptography.hazmat.primitives import serialization
+
+        normalized = raw_priv.strip().strip('"').strip("'")
+        if "\\n" in normalized or "\\r\\n" in normalized:
+            normalized = normalized.replace("\\r\\n", "\n").replace("\\n", "\n")
+        if "BEGIN PRIVATE KEY" in normalized and "END PRIVATE KEY" in normalized and "\n" not in normalized:
+            normalized = normalized.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----\n")
+            normalized = normalized.replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
+
+        if "BEGIN" in normalized:
+            serialization.load_pem_private_key(normalized.encode("utf-8"), password=None)
+        else:
+            # raw base64/base64url (DER or 32-byte scalar) parsing happens in sender
+            # so here we only confirm it is decodable-ish
+            _ = normalized[:16]
+        info["private_key_parsed_by_cryptography"] = True
+    except Exception as exc:
+        info["private_key_parsed_by_cryptography"] = False
+        info["private_key_parse_error"] = str(exc)
+
+    return info
+
+
 @router.get("/v1/mobile/notifications")
 def list_notifications_mobile(
     limit: int = Query(default=50, ge=1, le=200),

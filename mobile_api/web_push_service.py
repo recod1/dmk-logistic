@@ -48,7 +48,11 @@ def _normalize_vapid_private_key(raw: str) -> str:
     # Portainer/compose env often stores PEM as a single line with escaped newlines.
     if "\\n" in raw or "\\r\\n" in raw:
         raw = raw.replace("\\r\\n", "\n").replace("\\n", "\n")
-    if "BEGIN" in raw:
+    if "BEGIN" in raw and "END" in raw:
+        # If PEM was pasted without newlines, re-wrap it.
+        if "\n" not in raw:
+            raw = raw.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----\n")
+            raw = raw.replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
         return raw
     try:
         from cryptography.hazmat.primitives import serialization
