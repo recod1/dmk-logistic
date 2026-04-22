@@ -21,6 +21,20 @@ def _base64url_decode(s: str) -> bytes:
     return base64.urlsafe_b64decode((s + padding).encode("utf-8"))
 
 
+def _base64_any_decode(s: str) -> bytes:
+    s = (s or "").strip()
+    if not s:
+        return b""
+    # First try base64url (common for env vars)
+    try:
+        return _base64url_decode(s)
+    except Exception:
+        pass
+    # Fallback to standard base64
+    padding = "=" * ((4 - (len(s) % 4)) % 4)
+    return base64.b64decode((s + padding).encode("utf-8"))
+
+
 def _normalize_vapid_private_key(raw: str) -> str:
     """
     Accept either:
@@ -38,7 +52,7 @@ def _normalize_vapid_private_key(raw: str) -> str:
     except Exception:
         return raw
     try:
-        decoded = _base64url_decode(raw)
+        decoded = _base64_any_decode(raw)
         # Some generators provide a "raw" 32-byte private key (scalar).
         # Accept it to avoid PEM hassles in env vars.
         if len(decoded) == 32:
@@ -55,7 +69,7 @@ def _normalize_vapid_private_key(raw: str) -> str:
         )
         return pem.decode("utf-8")
     except Exception:
-        return raw
+        return ""
 
 
 def send_web_push_to_users(
