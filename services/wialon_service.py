@@ -38,6 +38,21 @@ def _safe_url_for_log(response: requests.Response) -> str:
         return "(url)"
 
 
+def _wialon_ajax_url() -> str | None:
+    """
+    Полный URL для Wialon Remote API (JSON).
+    Веб-домен вида https://monitor.* часто отдаёт HTML-приложение на /wialon/ajax.html — тогда нужен WIALON_API_BASE_URL
+    с хоста вида https://bXXXX.hosting.wialon.com из админки хостинга.
+    """
+    api_base = ((settings.WIALON_API_BASE_URL or settings.WIALON_BASE_URL) or "").strip().rstrip("/")
+    if not api_base:
+        return None
+    path = (settings.WIALON_AJAX_PATH or "/wialon/ajax.html").strip()
+    if not path.startswith("/"):
+        path = "/" + path
+    return f"{api_base}{path}"
+
+
 def _parse_wialon_ajax_json(response: requests.Response, step: str) -> dict | None:
     """Wialon отвечает JSON; пустое тело/HTML даёт JSONDecodeError — логируем фактические данные."""
     safe = _safe_url_for_log(response)
@@ -56,13 +71,21 @@ def _parse_wialon_ajax_json(response: requests.Response, step: str) -> dict | No
         return json.loads(raw)
     except json.JSONDecodeError as e:
         snippet = raw[:400].replace("\n", " ").replace("\r", "")
+        low = snippet.strip().lower()
+        html_hint = ""
+        if low.startswith("<!doctype") or low.startswith("<html") or "<html" in low[:80]:
+            html_hint = (
+                " Ответ — HTML (веб-мониторинг), не Remote API: задайте WIALON_API_BASE_URL на хост API из "
+                "кабинета Wialon Hosting (например https://…hosting.wialon.com), не адрес браузерного «Монитор»."
+            )
         logger.warning(
-            "Wialon %s: не JSON (status=%s, %s): %s; начало ответа: %r",
+            "Wialon %s: не JSON (status=%s, %s): %s; начало ответа: %r%s",
             step,
             response.status_code,
             safe,
             e,
             snippet,
+            html_hint,
         )
         return None
 
@@ -132,8 +155,8 @@ def get_vehicle_location_data(vehicle_number: str):
     if not number:
         return None
 
-    base_url = (settings.WIALON_BASE_URL or "").rstrip("/")
-    if not base_url:
+    ajax_url = _wialon_ajax_url()
+    if not ajax_url:
         return None
 
     try:
@@ -142,7 +165,7 @@ def get_vehicle_location_data(vehicle_number: str):
             "params": json.dumps({"token": settings.WIALON_TOKEN}),
         }
         login_resp = requests.get(
-            f"{base_url}/wialon/ajax.html",
+            ajax_url,
             params=login_params,
             timeout=15,
             headers=_WIALON_HTTP_HEADERS,
@@ -172,7 +195,7 @@ def get_vehicle_location_data(vehicle_number: str):
             "sid": sid,
         }
         search_resp = requests.get(
-            f"{base_url}/wialon/ajax.html",
+            ajax_url,
             params=search_params,
             timeout=15,
             headers=_WIALON_HTTP_HEADERS,
@@ -203,7 +226,7 @@ def get_vehicle_location_data(vehicle_number: str):
                 }),
             }
             search_resp_nm = requests.get(
-                f"{base_url}/wialon/ajax.html",
+                ajax_url,
                 params=search_params_nm,
                 timeout=15,
                 headers=_WIALON_HTTP_HEADERS,

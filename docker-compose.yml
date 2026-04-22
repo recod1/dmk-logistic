@@ -33,6 +33,11 @@ services:
       DB_PATH: ${DB_PATH:-/app/db/olymp.db}
       API_KEY: ${API_KEY:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      TG_TOKEN: ${TG_TOKEN:-}
+      WIALON_TOKEN: ${WIALON_TOKEN:-}
+      WIALON_BASE_URL: ${WIALON_BASE_URL:-}
+      WIALON_API_BASE_URL: ${WIALON_API_BASE_URL:-}
+      WIALON_AJAX_PATH: ${WIALON_AJAX_PATH:-}
     depends_on:
       db:
         condition: service_healthy
