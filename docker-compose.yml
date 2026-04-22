@@ -35,9 +35,7 @@ services:
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       TG_TOKEN: ${TG_TOKEN:-}
       WIALON_TOKEN: ${WIALON_TOKEN:-}
-      WIALON_BASE_URL: ${WIALON_BASE_URL:-}
-      WIALON_API_BASE_URL: ${WIALON_API_BASE_URL:-}
-      WIALON_AJAX_PATH: ${WIALON_AJAX_PATH:-}
+      WIALON_BASE_URL: ${WIALON_BASE_URL:-http://w1.wialon.justgps.ru}
     depends_on:
       db:
         condition: service_healthy

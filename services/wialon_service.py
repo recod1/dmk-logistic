@@ -12,6 +12,9 @@ from config.settings import settings
 
 logger = logging.getLogger(__name__)
 
+# Стандартный endpoint Remote API Wialon (как в handlers / старой интеграции).
+_WIALON_AJAX_SUFFIX = "/wialon/ajax.html"
+
 _WIALON_HTTP_HEADERS = {
     "User-Agent": "dmk-logistic/1.0 (Wialon Remote API)",
     "Accept": "application/json, text/javascript, */*;q=0.1",
@@ -39,18 +42,11 @@ def _safe_url_for_log(response: requests.Response) -> str:
 
 
 def _wialon_ajax_url() -> str | None:
-    """
-    Полный URL для Wialon Remote API (JSON).
-    Веб-домен вида https://monitor.* часто отдаёт HTML-приложение на /wialon/ajax.html — тогда нужен WIALON_API_BASE_URL
-    с хоста вида https://bXXXX.hosting.wialon.com из админки хостинга.
-    """
-    api_base = ((settings.WIALON_API_BASE_URL or settings.WIALON_BASE_URL) or "").strip().rstrip("/")
+    """Полный URL для Wialon Remote API: только WIALON_BASE_URL + /wialon/ajax.html (как в Telegram-боте)."""
+    api_base = (settings.WIALON_BASE_URL or "").strip().rstrip("/")
     if not api_base:
         return None
-    path = (settings.WIALON_AJAX_PATH or "/wialon/ajax.html").strip()
-    if not path.startswith("/"):
-        path = "/" + path
-    return f"{api_base}{path}"
+    return f"{api_base}{_WIALON_AJAX_SUFFIX}"
 
 
 def _parse_wialon_ajax_json(response: requests.Response, step: str) -> dict | None:
@@ -75,8 +71,8 @@ def _parse_wialon_ajax_json(response: requests.Response, step: str) -> dict | No
         html_hint = ""
         if low.startswith("<!doctype") or low.startswith("<html") or "<html" in low[:80]:
             html_hint = (
-                " Ответ — HTML (веб-мониторинг), не Remote API: задайте WIALON_API_BASE_URL на хост API из "
-                "кабинета Wialon Hosting (например https://…hosting.wialon.com), не адрес браузерного «Монитор»."
+                " Ответ — HTML (веб-интерфейс), не JSON API: в WIALON_BASE_URL укажите хост Remote API "
+                "(тот же, что в рабочем боте, часто хост хостинга Wialon, не URL браузерного «Монитор»)."
             )
         logger.warning(
             "Wialon %s: не JSON (status=%s, %s): %s; начало ответа: %r%s",

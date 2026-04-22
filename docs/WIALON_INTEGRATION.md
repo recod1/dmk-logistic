@@ -12,7 +12,7 @@ WIALON_BASE_URL=http://w1.wialon.justgps.ru
 ```
 
 - `WIALON_TOKEN` — обязателен для работы интеграции. Без него используется московское время.
-- `WIALON_BASE_URL` — опционален, по умолчанию `http://w1.wialon.justgps.ru`.
+- `WIALON_BASE_URL` — опционален, по умолчанию `http://w1.wialon.justgps.ru`. Запросы идут на `{WIALON_BASE_URL}/wialon/ajax.html` (как в боте и в mobile_api).
 
 ## Поведение
 
@@ -28,7 +28,7 @@ WIALON_BASE_URL=http://w1.wialon.justgps.ru
 
 ## Поиск машины
 
-Поиск в Wialon выполняется по полю `sys_name` (название/номер ТС). Номер берётся из поля `number_auto` рейса.
+Поиск в Wialon выполняется по полю `sys_name` (название/номер ТС), при необходимости — по `nm`. Строка поиска: `number_auto`, иначе `registration_number` рейса.
 
 ## Зависимости
 

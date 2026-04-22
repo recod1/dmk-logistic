@@ -746,7 +746,7 @@ def batch_events(
                     if not wialon:
                         logger.warning(
                             "mobile_events wialon: NO DATA for vehicle_no=%r route_id=%s point_id=%s "
-                            "(токен, имя юнита, позиция; при HTML в логах Wialon — задайте WIALON_API_BASE_URL на хост API хостинга)",
+                            "(токен, имя юнита, позиция; при HTML в логах Wialon — проверьте WIALON_BASE_URL, хост должен быть Remote API)",
                             vehicle_no,
                             route.id,
                             point.id,
