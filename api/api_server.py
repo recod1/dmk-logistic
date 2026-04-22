@@ -38,6 +38,22 @@ API_KEY = os.getenv("API_KEY")
 def bootstrap_mobile_user():
     """Опционально создаёт демо-пользователя для нового mobile-стека."""
     try:
+        from services.wialon_service import wialon_runtime_diagnostics
+
+        wd = wialon_runtime_diagnostics()
+        logger.info(
+            "Wialon at startup: enabled=%s token_ok=%s resolved_base=%r ajax=%r "
+            "env_key_present=%s env_raw=%r | диагностика: GET /v1/mobile/debug/wialon?probe=1",
+            wd["wialon_enabled"],
+            wd["token_configured"],
+            wd.get("resolved_wialon_base_url"),
+            wd.get("computed_ajax_url"),
+            wd.get("process_env_has_WIALON_BASE_URL"),
+            wd.get("process_env_WIALON_BASE_URL_raw"),
+        )
+    except Exception as exc:
+        logger.warning("Wialon startup diagnostics skipped: %s", exc)
+    try:
         with SessionLocal() as db:
             ensure_demo_user(db)
     except Exception as exc:

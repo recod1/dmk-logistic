@@ -2,6 +2,7 @@
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 from urllib.parse import urlparse
@@ -91,6 +92,52 @@ WIALON_ENABLED = bool(settings.WIALON_TOKEN and settings.WIALON_TOKEN.strip())
 # Флаги для Wialon: 1 (базовые) + 256 (доп.свойства) + 1024 (позиция) + 2048 (водитель) + 4096 (датчики) + 8192 (счетчики) + 16384 (свойства датчиков)
 WIALON_FLAGS_FULL = 1 | 256 | 1024 | 2048 | 4096 | 8192 | 16384
 
+_first_vehicle_lookup_logged = False
+
+
+def wialon_runtime_diagnostics() -> dict:
+    """
+    Снимок того, как процесс реально видит Wialon (без токена в ответе).
+    Сравните с Portainer: если resolved_wialon_base_url = monitor, а в UI указали justgps — контейнер не получил новый env или не пересобран образ.
+    """
+    raw_env = os.environ.get("WIALON_BASE_URL")
+    return {
+        "wialon_enabled": WIALON_ENABLED,
+        "token_configured": bool((settings.WIALON_TOKEN or "").strip()),
+        "resolved_wialon_base_url": settings.WIALON_BASE_URL,
+        "computed_ajax_url": _wialon_ajax_url(),
+        "process_env_has_WIALON_BASE_URL": "WIALON_BASE_URL" in os.environ,
+        "process_env_WIALON_BASE_URL_raw": raw_env,
+        "hint": "Если resolved_wialon_base_url не тот, что в Portainer: перезапустите стек (Recreate) и проверьте env у сервиса api.",
+    }
+
+
+def wialon_probe_token_login() -> dict:
+    """Один запрос token/login: хост ответа и тип тела (диагностика HTML vs JSON)."""
+    ajax = _wialon_ajax_url()
+    if not ajax:
+        return {"skipped": True, "reason": "no ajax url"}
+    if not WIALON_ENABLED:
+        return {"skipped": True, "reason": "no token"}
+    try:
+        login_params = {
+            "svc": "token/login",
+            "params": json.dumps({"token": settings.WIALON_TOKEN}),
+        }
+        r = requests.get(ajax, params=login_params, timeout=15, headers=_WIALON_HTTP_HEADERS)
+        text = (r.text or "").strip()
+        prefix = text[:240].replace("\n", " ")
+        return {
+            "http_status": r.status_code,
+            "response_url_host": urlparse(r.url).netloc,
+            "response_url_path": urlparse(r.url).path,
+            "content_type": r.headers.get("Content-Type", ""),
+            "body_starts_with_brace": text.startswith("{"),
+            "body_prefix": prefix,
+        }
+    except requests.RequestException as e:
+        return {"error": str(e)}
+
 
 def _format_odometer(unit: dict) -> Optional[str]:
     """Извлекает значение одометра из unit (cnm или prp)."""
@@ -146,6 +193,14 @@ def get_vehicle_location_data(vehicle_number: str):
     """
     if not WIALON_ENABLED:
         return None
+
+    global _first_vehicle_lookup_logged
+    if not _first_vehicle_lookup_logged:
+        _first_vehicle_lookup_logged = True
+        logger.info(
+            "Wialon: первый запрос get_vehicle_location_data, ajax_url=%s (см. также GET /v1/mobile/debug/wialon)",
+            _wialon_ajax_url(),
+        )
 
     number = (vehicle_number or "").strip()
     if not number:

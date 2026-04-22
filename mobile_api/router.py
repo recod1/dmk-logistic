@@ -5,12 +5,12 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Literal
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import case, select
 from sqlalchemy.orm import Session
 
-from mobile_api.auth import create_access_token, get_current_driver, verify_password
+from mobile_api.auth import create_access_token, get_current_driver, get_current_user, verify_password
 from mobile_api.db import get_db
 from mobile_api.driver_trip_rules import DriverRouteState, can_accept_route, pick_active_route
 from mobile_api.models import Point, PointDocumentImage, Route, RouteEvent, RoutePoint, User
@@ -22,7 +22,13 @@ from mobile_api.route_notification_logic import (
 )
 from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.roles import role_label_ru
-from services.wialon_service import WIALON_ENABLED, get_vehicle_location_data, vehicle_number_for_wialon
+from services.wialon_service import (
+    WIALON_ENABLED,
+    get_vehicle_location_data,
+    vehicle_number_for_wialon,
+    wialon_probe_token_login,
+    wialon_runtime_diagnostics,
+)
 
 
 logger = logging.getLogger(__name__)
@@ -815,4 +821,20 @@ def batch_events(
         "received": len(payload.events),
         "server_received_at": datetime.now(timezone.utc).isoformat(),
     }
+
+
+@router.get("/v1/mobile/debug/wialon")
+def wialon_debug_endpoint(
+    probe: bool = Query(default=False, description="Сделать один token/login и вернуть тип ответа"),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Диагностика Wialon в **этом** процессе: что в `settings`, что в `os.environ`, какой итоговый ajax URL.
+    С любым JWT (водитель/логист/админ). Токен Wialon в ответ не включается.
+    """
+    _ = current_user
+    out: dict = {"diagnostics": wialon_runtime_diagnostics()}
+    if probe:
+        out["probe_token_login"] = wialon_probe_token_login()
+    return out
 
