@@ -143,6 +143,7 @@ let syncIntervalId: number | null = null;
 let notificationsWs: WebSocket | null = null;
 let notificationsWsReconnectTimer: number | null = null;
 let notificationsPingInterval: number | null = null;
+let notificationsPollInterval: number | null = null;
 
 let chatWs: WebSocket | null = null;
 let chatWsReconnectTimer: number | null = null;
@@ -306,6 +307,26 @@ function closeNotificationsSocket(): void {
     notificationsWs.close();
     notificationsWs = null;
   }
+}
+
+function stopNotificationsPolling(): void {
+  if (notificationsPollInterval !== null) {
+    window.clearInterval(notificationsPollInterval);
+    notificationsPollInterval = null;
+  }
+}
+
+function startNotificationsPolling(): void {
+  stopNotificationsPolling();
+  // Fallback for environments where WS delivery is unreliable:
+  // periodically refresh notifications while the app is running.
+  notificationsPollInterval = window.setInterval(() => {
+    if (!authToken.value) {
+      stopNotificationsPolling();
+      return;
+    }
+    void refreshNotifications();
+  }, 5000);
 }
 
 function closeChatSocket(): void {
@@ -576,6 +597,7 @@ function clearAuth(): void {
   clearNotificationsSocketTimers();
   stopBackgroundSyncLoop();
   closeNotificationsSocket();
+  stopNotificationsPolling();
   closeChatSocket();
   stopChatPolling();
   authUser.value = null;
@@ -756,6 +778,7 @@ function onOnline(): void {
     connectNotificationsSocket();
     void refreshNotifications();
     void trySubscribeWebPush();
+    startNotificationsPolling();
   }
   if (isDriver.value) {
     void syncOutboxInBackground();
@@ -768,6 +791,7 @@ function onOnline(): void {
 function onOffline(): void {
   syncMessage.value = "Офлайн: изменения сохраняются локально";
   closeNotificationsSocket();
+  stopNotificationsPolling();
 }
 
 async function syncOutboxInBackground(): Promise<void> {
@@ -1226,6 +1250,7 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
   }
   connectNotificationsSocket();
   connectChatSocket();
+  startNotificationsPolling();
   void trySubscribeWebPush();
   if (isAdminRole(user.role_code)) {
     currentSection.value = "admin_routes";
@@ -1658,6 +1683,7 @@ onMounted(async () => {
 onUnmounted(() => {
   stopBackgroundSyncLoop();
   closeNotificationsSocket();
+  stopNotificationsPolling();
   closeChatSocket();
   stopChatPolling();
   window.removeEventListener("online", onOnline);
