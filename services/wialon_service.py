@@ -51,15 +51,17 @@ def _wialon_hostname(url: str) -> str:
 
 def _wialon_get(ajax_entry: str, params: dict, step: str) -> requests.Response | None:
     """
-    GET без следования на чужой хост.
+    GET с ручной обработкой редиректов (allow_redirects=False).
 
-    У части хостингов (напр. w1.wialon.justgps.ru) стоит 302 на monitor.sputnik.vision.
-    requests по умолчанию следует редиректу без query svc/params → в ответе HTML «Монитор».
-    Разрешены только цепочки редиректов с тем же hostname (типично http→https).
+    Типичный кейс JustGPS/Sputnik: 302 с w1.* на корень https://monitor.* — при автоследовании
+    requests теряет query (svc, params) и приходит HTML. Один раз пересобираем URL как
+    {scheme}://{хост из Location}{/wialon/ajax.html} и повторяем с теми же params (как при «рабочем» боте).
+    Дальше разрешены только редиректы внутри того же hostname (http→https и т.п.).
     """
     current = ajax_entry
-    first_host = _wialon_hostname(current)
-    for hop in range(6):
+    cross_host_ajax_rebuilt = False
+    for hop in range(10):
+        cur_host = _wialon_hostname(current)
         r = requests.get(
             current,
             params=params,
@@ -74,19 +76,29 @@ def _wialon_get(ajax_entry: str, params: dict, step: str) -> requests.Response |
                 return None
             nxt = urljoin(r.url, loc)
             h_next = _wialon_hostname(nxt)
-            if h_next != first_host:
-                logger.warning(
-                    "Wialon %s: редирект на другой хост %s → %s (было %s). "
-                    "Следование отключено: иначе теряются svc/params и приходит HTML монитора. "
-                    "Нужен прямой JSON API от оператора (без редиректа на monitor.*).",
+            if h_next == cur_host:
+                current = nxt
+                continue
+            # Редирект на другой хост
+            if not cross_host_ajax_rebuilt:
+                pu = urlparse(nxt)
+                current = f"{pu.scheme}://{pu.netloc}{_WIALON_AJAX_SUFFIX}"
+                cross_host_ajax_rebuilt = True
+                logger.info(
+                    "Wialon %s: редирект %s → %s; повтор с теми же svc/params на %s",
                     step,
-                    first_host or current,
+                    cur_host or current,
                     h_next or nxt,
-                    _safe_url_for_log(r),
+                    current,
                 )
-                return None
-            current = nxt
-            continue
+                continue
+            logger.warning(
+                "Wialon %s: ещё один редирект на другой хост (%s → %s), прекращаем.",
+                step,
+                cur_host,
+                h_next,
+            )
+            return None
         return r
     logger.warning("Wialon %s: слишком длинная цепочка редиректов с %s", step, ajax_entry)
     return None
@@ -158,7 +170,7 @@ def wialon_runtime_diagnostics() -> dict:
         "computed_ajax_url": _wialon_ajax_url(),
         "process_env_has_WIALON_BASE_URL": "WIALON_BASE_URL" in os.environ,
         "process_env_WIALON_BASE_URL_raw": raw_env,
-        "hint": "Если base верный, а probe даёт monitor.* + HTML — у провайдера редирект API→монитор; нужен другой BASE без редиректа (см. лог «редирект на другой хост»).",
+        "hint": "При редиректе w1→monitor приложение один раз повторяет token/login на https://{хост из Location}/wialon/ajax.html с теми же svc/params. Если всё равно HTML — второй чужой редирект или сеть/прокси; см. логи Wialon.",
     }
 
 
@@ -177,8 +189,8 @@ def wialon_probe_token_login() -> dict:
         r = _wialon_get(ajax, login_params, "probe/token/login")
         if r is None:
             return {
-                "error": "blocked_cross_host_redirect",
-                "message": "Редирект на другой хост (см. stderr); запрос к API не выполнен.",
+                "error": "wialon_get_failed",
+                "message": "Нет ответа после редиректов (второй редирект на другой хост или обрыв цепочки); см. логи Wialon.",
             }
         text = (r.text or "").strip()
         prefix = text[:240].replace("\n", " ")
