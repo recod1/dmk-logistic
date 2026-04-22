@@ -2,7 +2,7 @@
 
 import json
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, Tuple
 
 import requests
@@ -117,6 +117,29 @@ def get_vehicle_location_data(vehicle_number: str):
 
         items = search_data.get("items") or []
         if not items:
+            # Доп. попытка по отображаемому имени объекта (как в части аккаунтов Wialon).
+            search_params_nm = {
+                **search_params,
+                "params": json.dumps({
+                    "spec": {
+                        "itemsType": "avl_unit",
+                        "propName": "nm",
+                        "propValueMask": f"*{number}*",
+                        "sortType": "nm",
+                    },
+                    "force": 1,
+                    "flags": WIALON_FLAGS_FULL,
+                    "from": 0,
+                    "to": 10,
+                }),
+            }
+            search_resp_nm = requests.get(f"{base_url}/wialon/ajax.html", params=search_params_nm, timeout=10)
+            search_data = search_resp_nm.json()
+            if "error" in search_data:
+                logger.warning("Wialon search (nm) error: %s", search_data["error"])
+                return None
+            items = search_data.get("items") or []
+        if not items:
             logger.info("Wialon: vehicle not found for number=%s", number)
             return None
 
@@ -132,15 +155,13 @@ def get_vehicle_location_data(vehicle_number: str):
             logger.info("Wialon: zero coords for vehicle %s", unit.get("nm", number))
             return None
 
-        tz_str = _get_timezone_from_coords(lat, lng)
-        if not tz_str:
-            return None
-
+        odometer = _format_odometer(unit)
+        # Координаты и одометр нужны даже если timezonefinder не смог определить пояс (океан и т.п.).
+        tz_str = _get_timezone_from_coords(lat, lng) or "UTC"
         time_str = _get_local_time_str(tz_str)
         if not time_str:
-            return None
+            time_str = datetime.now(timezone.utc).strftime("%d.%m.%Y %H:%M")
 
-        odometer = _format_odometer(unit)
         return {
             "time_str": time_str,
             "timezone_str": tz_str,

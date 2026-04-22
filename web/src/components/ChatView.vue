@@ -55,178 +55,248 @@ watch(
   <section class="chat-wrap">
     <header class="head-row">
       <button class="ghost" type="button" @click="emit('back')">← Назад</button>
-      <h1>Чат рейса {{ routeId }}</h1>
+      <h1 class="title">Чат рейса <span class="route-id">{{ routeId }}</span></h1>
     </header>
 
     <p v-if="error" class="error">{{ error }}</p>
 
-    <section ref="listRef" class="list">
-      <article
-        v-for="m in items"
-        :key="m.id"
-        class="msg"
-        :class="{ mine: Boolean(currentUserId) && m.user_id === currentUserId }"
-      >
-        <div class="bubble">
-          <div class="meta">
-            <strong class="author">{{ m.author_name }}</strong>
-            <span class="time">{{ new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</span>
+    <div ref="listRef" class="list" role="log" aria-live="polite">
+      <div class="list-inner">
+        <article
+          v-for="m in items"
+          :key="m.id"
+          class="msg"
+          :class="{ mine: Boolean(currentUserId) && m.user_id === currentUserId }"
+        >
+          <div class="bubble">
+            <strong v-if="!currentUserId || m.user_id !== currentUserId" class="author">{{ m.author_name }}</strong>
+            <p class="text">{{ m.text }}</p>
+            <div class="bubble-foot">
+              <span class="time">{{ new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }}</span>
+            </div>
           </div>
-          <p class="text">{{ m.text }}</p>
-        </div>
-      </article>
-      <p v-if="!items.length && !loading" class="empty">Сообщений пока нет.</p>
-    </section>
+        </article>
+        <p v-if="!items.length && !loading" class="empty">Сообщений пока нет.</p>
+      </div>
+    </div>
 
     <footer class="composer">
-      <textarea
-        v-model="draft"
-        rows="1"
-        placeholder="Сообщение…"
-        :disabled="!canSend"
-        @keydown.enter.exact.prevent="submit"
-      />
-      <button class="primary" type="button" :disabled="!canSubmit" @click="submit">Отправить</button>
+      <div class="composer-field">
+        <textarea
+          v-model="draft"
+          rows="1"
+          placeholder="Сообщение"
+          :disabled="!canSend"
+          @keydown.enter.exact.prevent="submit"
+        />
+      </div>
+      <button class="send-btn" type="button" :disabled="!canSubmit" title="Отправить" @click="submit">➤</button>
     </footer>
   </section>
 </template>
 
 <style scoped>
+/* Визуально ближе к Telegram (тёмная тема): фон чата, «хвостатые» пузыри, ширина ~75%. */
 .chat-wrap {
-  display: grid;
-  gap: 0.55rem;
-  min-height: calc(100vh - 6rem);
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  padding: 0 0.25rem;
+  max-width: 720px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  background: #0e1621;
+  color: #e7edf4;
 }
+
 .head-row {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 0.5rem;
-  flex-wrap: wrap;
+  padding: 0.5rem 0.65rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  background: #17212b;
 }
-.head-row h1 {
+
+.title {
   margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
+  flex: 1;
+  min-width: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
 }
+
+.route-id {
+  font-weight: 700;
+  color: #8eb2ea;
+}
+
 .list {
   flex: 1;
   min-height: 0;
-  max-height: calc(100vh - 14rem);
-  overflow: auto;
-  display: grid;
-  gap: 0.35rem;
-  border: none;
-  border-radius: 0;
-  background: transparent;
-  padding: 0.35rem 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  -webkit-overflow-scrolling: touch;
 }
+
+.list-inner {
+  padding: 0.5rem 0.65rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
 .msg {
   display: flex;
+  width: 100%;
 }
+
+.msg:not(.mine) {
+  justify-content: flex-start;
+}
+
 .msg.mine {
   justify-content: flex-end;
 }
+
 .bubble {
-  max-width: min(540px, 92%);
-  border: none;
-  border-radius: 14px;
-  background: #0f172a;
-  padding: 0.45rem 0.65rem;
+  max-width: min(340px, 78vw);
+  border-radius: 12px 12px 12px 4px;
+  padding: 0.35rem 0.55rem 0.28rem;
+  background: #182533;
+  box-shadow: 0 1px 0 rgba(0, 0, 0, 0.2);
 }
+
 .msg.mine .bubble {
-  background: #2563eb;
+  border-radius: 12px 12px 4px 12px;
+  background: #2b5278;
 }
-.meta {
-  display: flex;
-  gap: 0.45rem;
-  align-items: baseline;
-  justify-content: space-between;
-}
+
 .author {
-  font-weight: 650;
-  font-size: 0.82rem;
-  color: #c7d2fe;
-}
-.msg.mine .author {
-  display: none;
-}
-.time {
-  color: rgba(255, 255, 255, 0.75);
+  display: block;
   font-size: 0.78rem;
-  white-space: nowrap;
+  font-weight: 600;
+  color: #6ab3f7;
+  margin-bottom: 0.12rem;
+  line-height: 1.2;
 }
-.msg.mine .time {
-  color: rgba(255, 255, 255, 0.85);
-}
+
 .text {
   margin: 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 0.95rem;
-  line-height: 1.32;
-  color: #f8fafc;
+  font-size: 0.9375rem;
+  line-height: 1.38;
+  color: #e7edf4;
 }
-.msg.mine .text {
-  color: #fff;
+
+.bubble-foot {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 0.12rem;
 }
+
+.time {
+  font-size: 0.68rem;
+  line-height: 1;
+  color: rgba(255, 255, 255, 0.45);
+  user-select: none;
+}
+
+.msg.mine .time {
+  color: rgba(255, 255, 255, 0.55);
+}
+
 .composer {
-  position: sticky;
-  bottom: 0;
-  display: grid;
-  grid-template-columns: 1fr auto;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-end;
   gap: 0.45rem;
-  align-items: end;
-  background: #020617;
-  padding: 0.55rem 0;
-  border-top: 1px solid #111827;
+  padding: 0.5rem 0.65rem calc(0.55rem + env(safe-area-inset-bottom, 0));
+  background: #17212b;
+  border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
-textarea {
+
+.composer-field {
+  flex: 1;
+  min-width: 0;
+  border-radius: 22px;
+  background: #0e1621;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.composer textarea {
+  display: block;
   width: 100%;
   min-height: 40px;
-  border-radius: 12px;
-  border: 1px solid #334155;
-  background: #0b1220;
-  color: #fff;
-  padding: 0.45rem 0.6rem;
-  resize: none;
-  max-height: 34vh;
-  overflow: auto;
-  line-height: 1.25;
-}
-.primary {
+  max-height: 32vh;
   border: none;
-  border-radius: 12px;
-  background: #2563eb;
-  color: #fff;
-  padding: 0.45rem 0.75rem;
-  height: 40px;
-}
-.ghost {
-  width: auto;
-  border: 1px solid #334155;
-  border-radius: 10px;
+  border-radius: 22px;
   background: transparent;
-  color: #bfdbfe;
-  padding: 0.4rem 0.6rem;
+  color: #e7edf4;
+  padding: 0.55rem 0.85rem;
+  resize: none;
+  overflow-y: auto;
+  line-height: 1.35;
+  font-size: 0.95rem;
+  font-family: inherit;
 }
+
+.composer textarea:focus {
+  outline: none;
+}
+
+.composer textarea::placeholder {
+  color: rgba(255, 255, 255, 0.35);
+}
+
+.send-btn {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: #5288c1;
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.send-btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.ghost {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #8eb2ea;
+  padding: 0.42rem 0.55rem;
+  font-size: 0.88rem;
+}
+
 .error {
+  flex-shrink: 0;
   color: #fca5a5;
   margin: 0;
-}
-.empty {
-  margin: 0;
-  color: #94a3b8;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
+  background: rgba(127, 29, 29, 0.25);
 }
 
-@media (min-width: 900px) {
-  .chat-wrap {
-    max-width: 780px;
-    margin: 0 auto;
-    padding: 0;
-  }
+.empty {
+  margin: 2rem 0;
+  text-align: center;
+  color: rgba(255, 255, 255, 0.38);
+  font-size: 0.9rem;
 }
 </style>
-

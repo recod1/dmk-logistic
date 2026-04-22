@@ -430,6 +430,30 @@ def _normalize_target_status(to_status: str) -> str:
     return to_status
 
 
+def _telemetry_odometer_ok(value: str | None) -> bool:
+    if value is None:
+        return False
+    return bool(str(value).strip())
+
+
+def _telemetry_coords_ok(value: dict | None) -> bool:
+    if not value or not isinstance(value, dict):
+        return False
+    lat_raw, lng_raw = value.get("lat"), value.get("lng")
+    if not isinstance(lat_raw, (int, float)) or not isinstance(lng_raw, (int, float)):
+        return False
+    return not (float(lat_raw) == 0.0 and float(lng_raw) == 0.0)
+
+
+def _route_vehicle_number_for_wialon(route: Route) -> str:
+    """Номер ТС для Wialon: как в Telegram-боте — number_auto, иначе госномер из рейса."""
+    for cand in (route.number_auto, route.registration_number):
+        s = (cand or "").strip()
+        if s:
+            return s
+    return ""
+
+
 def _apply_point_telemetry(point: Point, status_value: str, odometer: str | None, coordinates: dict | None) -> None:
     odometer_value: str | None = None
     lat_value: float | None = None
@@ -689,13 +713,18 @@ def batch_events(
         if applied:
             odometer = event.odometer
             coordinates = event.coordinates
-            # If client didn't send telemetry, try to fetch from Wialon (as in Telegram bot integration).
+            vehicle_no = _route_vehicle_number_for_wialon(route)
             try:
-                if (odometer is None and not coordinates) and route.number_auto:
-                    wialon = get_vehicle_location_data(route.number_auto)
+                if vehicle_no and (
+                    not _telemetry_odometer_ok(odometer)
+                    or not _telemetry_coords_ok(coordinates)
+                ):
+                    wialon = get_vehicle_location_data(vehicle_no)
                     if wialon:
-                        odometer = wialon.get("odometer") or odometer
-                        coordinates = {"lat": wialon.get("lat"), "lng": wialon.get("lng")}
+                        if not _telemetry_odometer_ok(odometer):
+                            odometer = wialon.get("odometer") or odometer
+                        if not _telemetry_coords_ok(coordinates):
+                            coordinates = {"lat": wialon.get("lat"), "lng": wialon.get("lng")}
             except Exception:
                 pass
 

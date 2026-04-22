@@ -1769,7 +1769,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="container">
+  <main class="container" :class="{ 'container--chat': isAuthed && currentSection === 'chat' }">
     <header class="topbar">
       <div class="topbar-side">
         <button v-if="isAuthed" class="icon-btn bell-btn" @click="openNotifications">
@@ -1957,6 +1957,29 @@ onUnmounted(() => {
   color: #f9fafb;
   font-family: Inter, system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
   overflow-x: hidden;
+}
+.container.container--chat {
+  max-width: none;
+  margin: 0;
+  width: 100%;
+  min-height: 100dvh;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  box-sizing: border-box;
+}
+.container.container--chat > .topbar {
+  flex-shrink: 0;
+  margin-bottom: 0;
+  padding: 0.85rem 1rem 0.65rem;
+}
+.container.container--chat > section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .topbar {
   display: grid;
