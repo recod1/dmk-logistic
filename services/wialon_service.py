@@ -5,7 +5,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from typing import Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import requests
 
@@ -42,6 +42,56 @@ def _safe_url_for_log(response: requests.Response) -> str:
         return "(url)"
 
 
+def _wialon_hostname(url: str) -> str:
+    try:
+        return (urlparse(url).hostname or "").lower()
+    except Exception:
+        return ""
+
+
+def _wialon_get(ajax_entry: str, params: dict, step: str) -> requests.Response | None:
+    """
+    GET без следования на чужой хост.
+
+    У части хостингов (напр. w1.wialon.justgps.ru) стоит 302 на monitor.sputnik.vision.
+    requests по умолчанию следует редиректу без query svc/params → в ответе HTML «Монитор».
+    Разрешены только цепочки редиректов с тем же hostname (типично http→https).
+    """
+    current = ajax_entry
+    first_host = _wialon_hostname(current)
+    for hop in range(6):
+        r = requests.get(
+            current,
+            params=params,
+            timeout=15,
+            headers=_WIALON_HTTP_HEADERS,
+            allow_redirects=False,
+        )
+        if r.status_code in (301, 302, 303, 307, 308):
+            loc = (r.headers.get("Location") or "").strip()
+            if not loc:
+                logger.warning("Wialon %s: HTTP %s без Location (%s)", step, r.status_code, _safe_url_for_log(r))
+                return None
+            nxt = urljoin(r.url, loc)
+            h_next = _wialon_hostname(nxt)
+            if h_next != first_host:
+                logger.warning(
+                    "Wialon %s: редирект на другой хост %s → %s (было %s). "
+                    "Следование отключено: иначе теряются svc/params и приходит HTML монитора. "
+                    "Нужен прямой JSON API от оператора (без редиректа на monitor.*).",
+                    step,
+                    first_host or current,
+                    h_next or nxt,
+                    _safe_url_for_log(r),
+                )
+                return None
+            current = nxt
+            continue
+        return r
+    logger.warning("Wialon %s: слишком длинная цепочка редиректов с %s", step, ajax_entry)
+    return None
+
+
 def _wialon_ajax_url() -> str | None:
     """Полный URL для Wialon Remote API: только WIALON_BASE_URL + /wialon/ajax.html (как в Telegram-боте)."""
     api_base = (settings.WIALON_BASE_URL or "").strip().rstrip("/")
@@ -72,8 +122,8 @@ def _parse_wialon_ajax_json(response: requests.Response, step: str) -> dict | No
         html_hint = ""
         if low.startswith("<!doctype") or low.startswith("<html") or "<html" in low[:80]:
             html_hint = (
-                " Ответ — HTML (веб-интерфейс), не JSON API: в WIALON_BASE_URL укажите хост Remote API "
-                "(тот же, что в рабочем боте, часто хост хостинга Wialon, не URL браузерного «Монитор»)."
+                " Ответ — HTML: часто это следствие редиректа w1.* → monitor.* (см. лог «редирект на другой хост»). "
+                "Нужен прямой хост JSON API без такого редиректа."
             )
         logger.warning(
             "Wialon %s: не JSON (status=%s, %s): %s; начало ответа: %r%s",
@@ -108,7 +158,7 @@ def wialon_runtime_diagnostics() -> dict:
         "computed_ajax_url": _wialon_ajax_url(),
         "process_env_has_WIALON_BASE_URL": "WIALON_BASE_URL" in os.environ,
         "process_env_WIALON_BASE_URL_raw": raw_env,
-        "hint": "Если resolved_wialon_base_url не тот, что в Portainer: перезапустите стек (Recreate) и проверьте env у сервиса api.",
+        "hint": "Если base верный, а probe даёт monitor.* + HTML — у провайдера редирект API→монитор; нужен другой BASE без редиректа (см. лог «редирект на другой хост»).",
     }
 
 
@@ -124,7 +174,12 @@ def wialon_probe_token_login() -> dict:
             "svc": "token/login",
             "params": json.dumps({"token": settings.WIALON_TOKEN}),
         }
-        r = requests.get(ajax, params=login_params, timeout=15, headers=_WIALON_HTTP_HEADERS)
+        r = _wialon_get(ajax, login_params, "probe/token/login")
+        if r is None:
+            return {
+                "error": "blocked_cross_host_redirect",
+                "message": "Редирект на другой хост (см. stderr); запрос к API не выполнен.",
+            }
         text = (r.text or "").strip()
         prefix = text[:240].replace("\n", " ")
         return {
@@ -215,12 +270,9 @@ def get_vehicle_location_data(vehicle_number: str):
             "svc": "token/login",
             "params": json.dumps({"token": settings.WIALON_TOKEN}),
         }
-        login_resp = requests.get(
-            ajax_url,
-            params=login_params,
-            timeout=15,
-            headers=_WIALON_HTTP_HEADERS,
-        )
+        login_resp = _wialon_get(ajax_url, login_params, "token/login")
+        if login_resp is None:
+            return None
         login_data = _parse_wialon_ajax_json(login_resp, "token/login")
         if not login_data:
             return None
@@ -245,12 +297,9 @@ def get_vehicle_location_data(vehicle_number: str):
             }),
             "sid": sid,
         }
-        search_resp = requests.get(
-            ajax_url,
-            params=search_params,
-            timeout=15,
-            headers=_WIALON_HTTP_HEADERS,
-        )
+        search_resp = _wialon_get(ajax_url, search_params, "core/search_items")
+        if search_resp is None:
+            return None
         search_data = _parse_wialon_ajax_json(search_resp, "core/search_items")
         if not search_data:
             return None
@@ -276,12 +325,9 @@ def get_vehicle_location_data(vehicle_number: str):
                     "to": 10,
                 }),
             }
-            search_resp_nm = requests.get(
-                ajax_url,
-                params=search_params_nm,
-                timeout=15,
-                headers=_WIALON_HTTP_HEADERS,
-            )
+            search_resp_nm = _wialon_get(ajax_url, search_params_nm, "core/search_items(nm)")
+            if search_resp_nm is None:
+                return None
             search_data = _parse_wialon_ajax_json(search_resp_nm, "core/search_items(nm)")
             if not search_data:
                 return None
