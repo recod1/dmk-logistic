@@ -138,6 +138,7 @@ const statusConfirm = ref<{
 } | null>(null);
 const docsUpload = ref<{ pointId: number; occurredAtIso: string; timeSource: "device" | "manual" } | null>(null);
 const docsUploading = ref(false);
+let docsUploadAbort: AbortController | null = null;
 
 let syncIntervalId: number | null = null;
 let notificationsWs: WebSocket | null = null;
@@ -1463,6 +1464,15 @@ async function applyStatusConfirm(datetimeLocal: string): Promise<void> {
 }
 
 function cancelDocsUpload(): void {
+  if (docsUploadAbort) {
+    try {
+      docsUploadAbort.abort();
+    } catch {
+      // ignore
+    }
+    docsUploadAbort = null;
+    docsUploading.value = false;
+  }
   docsUpload.value = null;
 }
 
@@ -1472,10 +1482,11 @@ async function applyDocsUpload(files: File[]): Promise<void> {
     return;
   }
   docsUploading.value = true;
+  docsUploadAbort = new AbortController();
   try {
     const blobs = await prepareDocumentImageFiles(files);
     if (navigator.onLine) {
-      const { file_ids } = await uploadPointDocuments(authToken.value, ctx.pointId, blobs);
+      const { file_ids } = await uploadPointDocuments(authToken.value, ctx.pointId, blobs, { signal: docsUploadAbort.signal });
       docsUpload.value = null;
       await markPointNext(ctx.pointId, ctx.occurredAtIso, { fileIds: file_ids }, { timeSource: ctx.timeSource });
     } else {
@@ -1496,9 +1507,15 @@ async function applyDocsUpload(files: File[]): Promise<void> {
       await markPointNext(ctx.pointId, ctx.occurredAtIso, { localKeys }, { timeSource: ctx.timeSource });
     }
   } catch (error) {
-    syncMessage.value = (error as Error).message;
+    const e = error as { name?: string; message?: string };
+    if (e?.name === "AbortError") {
+      syncMessage.value = "Загрузка документов отменена";
+    } else {
+      syncMessage.value = (error as Error).message;
+    }
   } finally {
     docsUploading.value = false;
+    docsUploadAbort = null;
   }
 }
 

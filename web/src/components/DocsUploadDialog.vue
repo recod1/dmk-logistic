@@ -66,7 +66,7 @@ function submit(): void {
         <li v-for="(f, i) in picked" :key="`${i}-${f.name}`">{{ f.name }}</li>
       </ul>
       <div class="actions">
-        <button type="button" class="secondary ghost" :disabled="uploading" @click="emit('cancel')">Отмена</button>
+        <button type="button" class="secondary ghost" @click="emit('cancel')">Отмена</button>
         <button type="button" class="primary" :disabled="!canSubmit" @click="submit">
           {{ uploading ? "Отправка…" : "Подтвердить" }}
         </button>

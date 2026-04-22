@@ -96,6 +96,8 @@ watch(
   display: grid;
   gap: 0.55rem;
   min-height: calc(100vh - 6rem);
+  width: 100%;
+  padding: 0 0.25rem;
 }
 .head-row {
   display: flex;
@@ -128,7 +130,7 @@ watch(
   justify-content: flex-end;
 }
 .bubble {
-  max-width: min(680px, 92%);
+  max-width: min(540px, 92%);
   border: none;
   border-radius: 14px;
   background: #0f172a;
@@ -176,12 +178,14 @@ watch(
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 0.45rem;
+  align-items: end;
   background: #020617;
   padding: 0.55rem 0;
   border-top: 1px solid #111827;
 }
 textarea {
   width: 100%;
+  min-height: 40px;
   border-radius: 12px;
   border: 1px solid #334155;
   background: #0b1220;
@@ -190,6 +194,7 @@ textarea {
   resize: none;
   max-height: 34vh;
   overflow: auto;
+  line-height: 1.25;
 }
 .primary {
   border: none;
@@ -218,8 +223,9 @@ textarea {
 
 @media (min-width: 900px) {
   .chat-wrap {
-    max-width: 980px;
+    max-width: 780px;
     margin: 0 auto;
+    padding: 0;
   }
 }
 </style>

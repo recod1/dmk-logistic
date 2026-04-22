@@ -131,7 +131,8 @@ export async function sendEventsBatch(
 export async function uploadPointDocuments(
   token: string,
   pointId: number,
-  blobs: Blob[]
+  blobs: Blob[],
+  opts?: { signal?: AbortSignal }
 ): Promise<{ file_ids: number[] }> {
   const fd = new FormData();
   blobs.forEach((b, i) => {
@@ -143,7 +144,8 @@ export async function uploadPointDocuments(
     headers: {
       Authorization: `Bearer ${token}`
     },
-    body: fd
+    body: fd,
+    signal: opts?.signal
   });
   if (!response.ok) {
     const text = await response.text();
