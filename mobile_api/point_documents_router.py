@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import logging
 import mimetypes
 import uuid
+from io import BytesIO
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -16,6 +18,8 @@ from mobile_api.roles import ADMIN_ACCESS_ROLES, ROUTE_MANAGER_ROLES, RoleCode, 
 from mobile_api.settings import mobile_settings
 
 router = APIRouter(tags=["point-documents"])
+
+logger = logging.getLogger(__name__)
 
 MAX_FILES_PER_UPLOAD = 20
 MAX_FILE_BYTES = 12 * 1024 * 1024
@@ -43,6 +47,29 @@ def _can_user_view_document(db: Session, user: User, row: PointDocumentImage) ->
     if role in ROUTE_MANAGER_ROLES or role in ADMIN_ACCESS_ROLES:
         return True
     return False
+
+
+def _thumb_filename_for(stored_name: str) -> str:
+    return f"t_{stored_name}"
+
+
+def _try_write_thumbnail_jpeg(full_path: Path, body: bytes) -> None:
+    """Сжатое превью рядом с оригиналом (надёжнее отображение в списках и слабых сетях)."""
+    try:
+        from PIL import Image
+    except ImportError:
+        logger.debug("Pillow not installed; skipping document thumbnail")
+        return
+    try:
+        im = Image.open(BytesIO(body))
+        im = im.convert("RGB")
+        im.thumbnail((512, 512), Image.Resampling.LANCZOS)
+        buf = BytesIO()
+        im.save(buf, format="JPEG", quality=85, optimize=True)
+        thumb_path = full_path.parent / _thumb_filename_for(full_path.name)
+        thumb_path.write_bytes(buf.getvalue())
+    except Exception as exc:
+        logger.warning("point document thumbnail failed: %s", exc)
 
 
 def _validate_image_content_type(content_type: str) -> str:
@@ -99,6 +126,7 @@ async def upload_point_documents(
         fname = f"{uuid.uuid4().hex}{ext}"
         full_path = sub / fname
         full_path.write_bytes(body)
+        _try_write_thumbnail_jpeg(full_path, body)
         rel = f"{point_id}/{fname}"
         row = PointDocumentImage(
             point_id=point.id,
@@ -119,6 +147,7 @@ async def upload_point_documents(
 @router.get("/v1/point-documents/{image_id}/file")
 def download_point_document(
     image_id: int,
+    thumb: bool = Query(default=False, description="Если true — отдать JPEG-превью при наличии, иначе полный файл"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> FileResponse:
@@ -137,8 +166,18 @@ def download_point_document(
     if not full_path.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on server")
 
+    serve_path = full_path
+    media_type = row.content_type or "application/octet-stream"
+    if thumb:
+        thumb_path = full_path.parent / _thumb_filename_for(full_path.name)
+        if thumb_path.is_file():
+            serve_path = thumb_path
+            media_type = "image/jpeg"
+
+    headers = {"Cache-Control": "private, max-age=86400"}
     return FileResponse(
-        path=str(full_path),
-        media_type=row.content_type or "application/octet-stream",
-        filename=full_path.name,
+        path=str(serve_path),
+        media_type=media_type,
+        filename=serve_path.name,
+        headers=headers,
     )

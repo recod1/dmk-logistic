@@ -7,12 +7,14 @@ defineProps<{
   error: string;
   unreadCount?: number;
   canPush?: boolean;
+  pushEnabled?: boolean;
   pushHint?: string;
 }>();
 
 const emit = defineEmits<{
   refresh: [];
   enablePush: [];
+  disablePush: [];
   markRead: [notificationId: number];
   markAllRead: [];
   openRoute: [routeId: string, notificationId: number];
@@ -49,7 +51,8 @@ function formatExtra(item: NotificationDto): string {
       <h1>Уведомления <span v-if="typeof unreadCount === 'number'" class="counter">({{ unreadCount }})</span></h1>
       <div class="head-actions">
         <button :disabled="loading" @click="emit('refresh')">Обновить</button>
-        <button v-if="canPush" :disabled="loading" @click="emit('enablePush')">Включить push</button>
+        <button v-if="canPush && !pushEnabled" :disabled="loading" @click="emit('enablePush')">Включить push</button>
+        <button v-if="canPush && pushEnabled" :disabled="loading" @click="emit('disablePush')">Выключить push</button>
         <button :disabled="loading || !items.some((item) => !item.is_read)" @click="emit('markAllRead')">Прочитать всё</button>
       </div>
     </div>

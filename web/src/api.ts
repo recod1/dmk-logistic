@@ -162,13 +162,17 @@ export async function uploadPointDocuments(
 
 export async function fetchPointDocumentBlob(
   token: string,
-  imageId: number
+  imageId: number,
+  opts?: { thumbnail?: boolean; signal?: AbortSignal }
 ): Promise<Blob> {
-  const url = `${API_BASE}/v1/point-documents/${imageId}/file`;
+  const qs = opts?.thumbnail ? "?thumb=1" : "";
+  const url = `${API_BASE}/v1/point-documents/${imageId}/file${qs}`;
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`
-    }
+    },
+    signal: opts?.signal,
+    cache: "default"
   });
   if (!response.ok) {
     const text = await response.text();
@@ -446,6 +450,19 @@ export async function subscribeWebPush(
     },
     body: JSON.stringify(payload)
   });
+}
+
+export async function clearWebPushSubscriptions(token: string): Promise<{ deleted: number }> {
+  const data = await requestJson<{ ok: boolean; deleted: number }>(
+    `${API_BASE}/v1/notifications/push/subscriptions:clear`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+  return { deleted: data.deleted ?? 0 };
 }
 
 export async function revertPointStatus(token: string, pointId: number): Promise<RouteDto> {

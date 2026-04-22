@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Literal
@@ -21,8 +22,10 @@ from mobile_api.route_notification_logic import (
 )
 from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.roles import role_label_ru
-from services.wialon_service import get_vehicle_location_data
+from services.wialon_service import WIALON_ENABLED, get_vehicle_location_data
 
+
+logger = logging.getLogger(__name__)
 
 POINT_STATUS_FLOW = {
     "new": "process",
@@ -714,19 +717,69 @@ def batch_events(
             odometer = event.odometer
             coordinates = event.coordinates
             vehicle_no = _route_vehicle_number_for_wialon(route)
+            need_odom = not _telemetry_odometer_ok(odometer)
+            need_coords = not _telemetry_coords_ok(coordinates)
             try:
-                if vehicle_no and (
-                    not _telemetry_odometer_ok(odometer)
-                    or not _telemetry_coords_ok(coordinates)
-                ):
+                if not WIALON_ENABLED:
+                    logger.info(
+                        "mobile_events wialon: skip (Wialon disabled / no token) route_id=%s point_id=%s -> %s",
+                        route.id,
+                        point.id,
+                        target_status,
+                    )
+                elif not vehicle_no:
+                    logger.info(
+                        "mobile_events wialon: skip (empty vehicle number) route_id=%s point_id=%s -> %s",
+                        route.id,
+                        point.id,
+                        target_status,
+                    )
+                elif not need_odom and not need_coords:
+                    logger.info(
+                        "mobile_events wialon: skip (telemetry from client) route_id=%s point_id=%s -> %s",
+                        route.id,
+                        point.id,
+                        target_status,
+                    )
+                else:
+                    logger.info(
+                        "mobile_events wialon: request route_id=%s point_id=%s -> %s vehicle_no=%r need_odom=%s need_coords=%s",
+                        route.id,
+                        point.id,
+                        target_status,
+                        vehicle_no,
+                        need_odom,
+                        need_coords,
+                    )
                     wialon = get_vehicle_location_data(vehicle_no)
-                    if wialon:
-                        if not _telemetry_odometer_ok(odometer):
+                    if not wialon:
+                        logger.info(
+                            "mobile_events wialon: no data for vehicle_no=%r (not found / no position / API error)",
+                            vehicle_no,
+                        )
+                    else:
+                        if need_odom:
                             odometer = wialon.get("odometer") or odometer
-                        if not _telemetry_coords_ok(coordinates):
+                        if need_coords:
                             coordinates = {"lat": wialon.get("lat"), "lng": wialon.get("lng")}
-            except Exception:
-                pass
+                        logger.info(
+                            "mobile_events wialon: merged route_id=%s point_id=%s -> %s lat=%s lng=%s odometer=%r",
+                            route.id,
+                            point.id,
+                            target_status,
+                            (coordinates or {}).get("lat") if isinstance(coordinates, dict) else None,
+                            (coordinates or {}).get("lng") if isinstance(coordinates, dict) else None,
+                            odometer,
+                        )
+            except Exception as exc:
+                logger.warning(
+                    "mobile_events wialon: error route_id=%s point_id=%s vehicle_no=%r: %s",
+                    route.id,
+                    point.id,
+                    vehicle_no,
+                    exc,
+                    exc_info=True,
+                )
 
             _apply_point_telemetry(point, target_status, odometer, coordinates)
             db.add(point)

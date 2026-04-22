@@ -43,6 +43,7 @@ import {
   sendEventsBatch,
   sendRouteChatMessage,
   subscribeWebPush,
+  clearWebPushSubscriptions,
   updateAdminRoute,
   updateAdminUser,
   uploadPointDocuments
@@ -170,27 +171,47 @@ const pushIsSupported = computed(() => {
 const pushInProgress = ref(false);
 const pushLastError = ref("");
 const pushLastOkAt = ref<string | null>(null);
+const webPushSubscribed = ref(false);
 const pushHint = computed(() => {
   if (typeof window === "undefined" || !("Notification" in window)) {
     return "";
   }
   if (pushInProgress.value) {
-    return "Включение push…";
-  }
-  if (pushLastError.value) {
-    return `Push не включен: ${pushLastError.value}`;
+    return "Сохранение подписки…";
   }
   if (Notification.permission === "denied") {
     return "Уведомления заблокированы в браузере/Android. Разрешите уведомления для сайта и переоткройте приложение.";
   }
-  if (useLegacyBrowserNotification.value) {
-    return "Push не активирован. Нажмите «Включить push» и разрешите уведомления.";
+  if (webPushSubscribed.value) {
+    return pushLastOkAt.value
+      ? `Push активен (подписка оформлена ${pushLastOkAt.value}). Нажмите «Выключить push», чтобы отписаться.`
+      : "Push активен. Нажмите «Выключить push», чтобы отписаться.";
   }
-  if (pushLastOkAt.value) {
-    return `Push включен (${pushLastOkAt.value}).`;
+  if (pushLastError.value) {
+    return `Push не включён: ${pushLastError.value}`;
+  }
+  if (useLegacyBrowserNotification.value) {
+    return "Нажмите «Включить push» и разрешите уведомления, чтобы получать события в фоне.";
   }
   return "";
 });
+
+async function refreshWebPushSubscriptionState(): Promise<void> {
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator) || !("PushManager" in window)) {
+    webPushSubscribed.value = false;
+    return;
+  }
+  try {
+    const registration = await navigator.serviceWorker.ready;
+    const sub = await registration.pushManager.getSubscription();
+    webPushSubscribed.value = Boolean(sub?.endpoint);
+    if (webPushSubscribed.value) {
+      useLegacyBrowserNotification.value = false;
+    }
+  } catch {
+    webPushSubscribed.value = false;
+  }
+}
 
 function updateUiNotificationIndicators(): void {
   if (typeof document !== "undefined") {
@@ -644,6 +665,10 @@ function clearAuth(): void {
   chatMessages.value = [];
   chatError.value = "";
   driverActiveRouteId.value = null;
+  webPushSubscribed.value = false;
+  pushLastOkAt.value = null;
+  pushLastError.value = "";
+  useLegacyBrowserNotification.value = true;
   currentSection.value = "driver_home";
   profileMenuOpen.value = false;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -744,6 +769,7 @@ async function trySubscribeWebPush(): Promise<void> {
       keys: { p256dh: key.p256dh, auth: key.auth }
     });
     pushLastOkAt.value = new Date().toLocaleString();
+    webPushSubscribed.value = true;
   } catch (error) {
     useLegacyBrowserNotification.value = true;
     const err = error as { name?: string; message?: string };
@@ -752,6 +778,36 @@ async function trySubscribeWebPush(): Promise<void> {
     pushLastError.value = msg ? `${name}: ${msg}` : name;
   } finally {
     pushInProgress.value = false;
+    void refreshWebPushSubscriptionState();
+  }
+}
+
+async function tryUnsubscribeWebPush(): Promise<void> {
+  if (!authToken.value || typeof window === "undefined") {
+    return;
+  }
+  pushInProgress.value = true;
+  pushLastError.value = "";
+  try {
+    if ("serviceWorker" in navigator && "PushManager" in window) {
+      const registration = await navigator.serviceWorker.ready;
+      const existing = await registration.pushManager.getSubscription();
+      if (existing) {
+        await existing.unsubscribe();
+      }
+    }
+    await clearWebPushSubscriptions(authToken.value);
+    useLegacyBrowserNotification.value = true;
+    webPushSubscribed.value = false;
+    pushLastOkAt.value = null;
+  } catch (error) {
+    const err = error as { name?: string; message?: string };
+    const name = (err?.name || "Error").trim();
+    const msg = (err?.message || "").trim();
+    pushLastError.value = msg ? `${name}: ${msg}` : name;
+  } finally {
+    pushInProgress.value = false;
+    void refreshWebPushSubscriptionState();
   }
 }
 
@@ -836,7 +892,7 @@ function onOnline(): void {
   if (authToken.value) {
     connectNotificationsSocket();
     void refreshNotifications();
-    void trySubscribeWebPush();
+    void refreshWebPushSubscriptionState();
     startNotificationsPolling();
   }
   if (isDriver.value) {
@@ -1304,13 +1360,10 @@ async function openActiveRouteFromHome(): Promise<void> {
 }
 
 async function bootstrapByRole(user: AuthUser): Promise<void> {
-  if (typeof window !== "undefined" && "Notification" in window && Notification.permission === "default") {
-    void Notification.requestPermission();
-  }
   connectNotificationsSocket();
   connectChatSocket();
   startNotificationsPolling();
-  void trySubscribeWebPush();
+  void refreshWebPushSubscriptionState();
   if (isAdminRole(user.role_code)) {
     currentSection.value = "admin_routes";
     await refreshAdminUsers();
@@ -1655,6 +1708,7 @@ function onDocumentClick(event: MouseEvent): void {
 function openNotifications(): void {
   profileMenuOpen.value = false;
   currentSection.value = "notifications";
+  void refreshWebPushSubscriptionState();
   void refreshNotifications();
 }
 
@@ -1908,9 +1962,11 @@ onUnmounted(() => {
         :error="notificationsError"
         :unread-count="unreadNotificationsCount"
         :can-push="pushIsSupported"
+        :push-enabled="webPushSubscribed"
         :push-hint="pushHint"
         @refresh="refreshNotifications"
         @enable-push="trySubscribeWebPush"
+        @disable-push="tryUnsubscribeWebPush"
         @mark-read="doMarkNotificationRead"
         @mark-all-read="doMarkAllNotificationsRead"
         @open-route="openRouteFromNotification"
