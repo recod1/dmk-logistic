@@ -23,6 +23,7 @@ const emit = defineEmits<{
   advancePoint: [pointId: number];
   revertPoint: [pointId: number];
   acceptRoute: [];
+  openChat: [routeId: string];
 }>();
 
 const firstIncompletePoint = computed(
@@ -32,6 +33,53 @@ const firstIncompletePoint = computed(
 const isAcceptedCurrentRoute = computed(
   () => props.route.status === "process" && props.route.id === props.activeRouteId
 );
+
+async function copyToClipboard(value: string): Promise<void> {
+  const text = value.trim();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.left = "-9999px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand("copy");
+      document.body.removeChild(ta);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+function splitPhones(raw: string): string[] {
+  const cleaned = raw.replace(/[()]/g, " ");
+  const tokens = cleaned
+    .split(/[\n,;]+/g)
+    .map((x) => x.trim())
+    .filter(Boolean);
+  const result: string[] = [];
+  for (const t of tokens) {
+    // keep digits/+ only
+    const num = t.replace(/[^+\d]/g, "");
+    if (num.length >= 5) {
+      result.push(num);
+    }
+  }
+  return Array.from(new Set(result));
+}
+
+const dispatcherPhones = computed(() => splitPhones(props.route.dispatcher_contacts || ""));
+
+function timeSourceLabel(value?: string | null): string {
+  if (value === "manual") return " (вручную)";
+  if (value === "device") return " (устройство)";
+  return "";
+}
 
 function actionLabel(status: string): string {
   if (status === "new") {
@@ -76,13 +124,46 @@ function showRevert(pointId: number): boolean {
     <div class="scroll-area">
       <article class="card">
         <p><strong>Статус рейса:</strong> {{ routeStatusLabel(route.status) }}</p>
-        <p><strong>ТС:</strong> {{ route.number_auto || "—" }}</p>
-        <p><strong>Прицеп:</strong> {{ route.trailer_number || "—" }}</p>
+        <p>
+          <strong>ТС:</strong>
+          <button v-if="route.number_auto" class="copy" type="button" @click="copyToClipboard(route.number_auto)">{{ route.number_auto }}</button>
+          <span v-else>—</span>
+        </p>
+        <p>
+          <strong>Прицеп:</strong>
+          <button
+            v-if="route.trailer_number"
+            class="copy"
+            type="button"
+            @click="copyToClipboard(route.trailer_number)"
+          >
+            {{ route.trailer_number }}
+          </button>
+          <span v-else>—</span>
+        </p>
         <p><strong>Темп.:</strong> {{ route.temperature || "—" }}</p>
-        <p><strong>Диспетчер:</strong> {{ route.dispatcher_contacts || "—" }}</p>
+        <p>
+          <strong>Диспетчер:</strong>
+          <span v-if="route.dispatcher_contacts">
+            <span class="contacts">
+              <a
+                v-for="phone in dispatcherPhones"
+                :key="phone"
+                class="tel"
+                :href="`tel:${phone}`"
+                @click.stop
+              >
+                {{ phone }}
+              </a>
+            </span>
+            <button class="copy" type="button" @click="copyToClipboard(route.dispatcher_contacts)">Копировать контакты</button>
+          </span>
+          <span v-else>—</span>
+        </p>
         <p v-if="!isAcceptedCurrentRoute && route.status === 'process'" class="note">
           Изменение статусов доступно только для принятого текущего рейса.
         </p>
+        <button class="ghost wide" type="button" @click="emit('openChat', route.id)">Открыть чат рейса</button>
       </article>
 
       <article class="card">
@@ -100,10 +181,18 @@ function showRevert(pointId: number): boolean {
             </p>
             <small>{{ point.date_point }} {{ point.point_time || "" }}</small>
             <div class="meta">
-              <span>Выезд: {{ point.departure_time || point.time_accepted || "—" }}</span>
-              <span>Регистрация: {{ point.registration_time || point.time_registration || "—" }}</span>
-              <span>Ворота: {{ point.gate_time || point.time_put_on_gate || "—" }}</span>
-              <span>Документы: {{ point.docs_time || point.time_docs || "—" }}</span>
+              <span>
+                Выезд: {{ point.departure_time || point.time_accepted || "—" }}{{ timeSourceLabel(point.departure_time_source) }}
+              </span>
+              <span>
+                Регистрация: {{ point.registration_time || point.time_registration || "—" }}{{ timeSourceLabel(point.registration_time_source) }}
+              </span>
+              <span>
+                Ворота: {{ point.gate_time || point.time_put_on_gate || "—" }}{{ timeSourceLabel(point.gate_time_source) }}
+              </span>
+              <span>
+                Документы: {{ point.docs_time || point.time_docs || "—" }}{{ timeSourceLabel(point.docs_time_source) }}
+              </span>
             </div>
           </div>
         </div>
@@ -267,5 +356,28 @@ small {
   margin: 0.35rem 0 0;
   color: #94a3b8;
   font-size: 0.88rem;
+}
+.copy {
+  width: auto;
+  border: 1px solid #334155;
+  border-radius: 10px;
+  background: transparent;
+  color: #bfdbfe;
+  padding: 0.25rem 0.5rem;
+  font: inherit;
+  text-align: left;
+}
+.contacts {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-right: 0.45rem;
+}
+.tel {
+  border: 1px solid #334155;
+  border-radius: 999px;
+  padding: 0.15rem 0.5rem;
+  color: #a7f3d0;
+  text-decoration: none;
 }
 </style>

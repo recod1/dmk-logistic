@@ -16,6 +16,7 @@ from mobile_api.route_notification_logic import (
     notify_route_completed,
     notify_route_deleted,
 )
+from mobile_api.onec_routes import parse_onec_message
 from mobile_api.roles import RoleCode, role_label_ru
 from mobile_api.time_formatting import format_dt_for_app
 
@@ -54,6 +55,11 @@ class AdminRouteCreatePayload(BaseModel):
     registration_number: str = ""
     trailer_number: str = ""
     points: list[AdminRoutePointCreate] = Field(default_factory=list, max_items=200)
+
+
+class AdminRouteCreateFromOnecPayload(BaseModel):
+    raw_text: str = Field(min_length=1, max_length=20000)
+    driver_user_id: int | None = None
 
 
 class AssignDriverPayload(BaseModel):
@@ -204,6 +210,23 @@ def _ensure_driver(db: Session, driver_user_id: int) -> User:
     return user
 
 
+def _try_find_driver_by_fio(db: Session, fio: str) -> User | None:
+    text = (fio or "").strip()
+    if not text:
+        return None
+    q = f"%{text.lower()}%"
+    rows = db.scalars(
+        select(User).where(
+            User.role_code == RoleCode.DRIVER.value,
+            User.is_active.is_(True),
+            func.coalesce(func.lower(User.full_name), "").like(q),
+        )
+    ).all()
+    if len(rows) == 1:
+        return rows[0]
+    return None
+
+
 def _apply_points_replace(db: Session, route: Route, points_in: list[AdminRoutePointCreate]) -> None:
     existing_ids = db.scalars(select(RoutePoint.point_id).where(RoutePoint.route_id == route.id)).all()
     if existing_ids:
@@ -316,6 +339,69 @@ def create_route(
         assigned_user=driver,
         actor_user=current_user,
     )
+    db.commit()
+    db.refresh(route)
+    return _route_out(db, route, include_points=True)
+
+
+@router.post("/onec", status_code=status.HTTP_201_CREATED)
+def create_route_from_onec(
+    payload: AdminRouteCreateFromOnecPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_route_manager),
+) -> dict:
+    parsed = parse_onec_message(payload.raw_text)
+    if not parsed.route_id:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Не найден номер рейса в тексте 1С")
+
+    existing = db.get(Route, parsed.route_id)
+    if existing is not None:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Route id already exists")
+
+    driver: User | None = None
+    if payload.driver_user_id is not None:
+        driver = _ensure_driver(db, payload.driver_user_id)
+    else:
+        driver = _try_find_driver_by_fio(db, parsed.driver_fio)
+        if driver is None:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Не удалось однозначно определить водителя по ФИО. Выберите водителя вручную.",
+            )
+
+    legacy_driver_tg_id = int(driver.legacy_tg_id) if (driver.legacy_tg_id or "").isdigit() else None
+    route = Route(
+        id=parsed.route_id,
+        legacy_driver_tg_id=legacy_driver_tg_id,
+        assigned_user_id=driver.id,
+        created_by_user_id=current_user.id,
+        status="new",
+        number_auto=(parsed.number_auto or "").strip(),
+        temperature=(parsed.temperature or "").strip(),
+        dispatcher_contacts=(parsed.dispatcher_contacts or "").strip(),
+        registration_number=(parsed.registration_number or "").strip(),
+        trailer_number=(parsed.trailer_number or "").strip(),
+    )
+    db.add(route)
+    db.flush()
+
+    if parsed.points:
+        points_payload = [
+            AdminRoutePointCreate(
+                type_point=p.type_point,
+                place_point=p.place_point,
+                date_point=p.date_point,
+                point_name="",
+                point_contacts="",
+                point_time="",
+                point_note="",
+                order_index=i,
+            )
+            for i, p in enumerate(parsed.points)
+        ]
+        _apply_points_replace(db, route, points_payload)
+
+    notify_route_assigned(db, route=route, assigned_user=driver, actor_user=current_user)
     db.commit()
     db.refresh(route)
     return _route_out(db, route, include_points=True)

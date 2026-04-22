@@ -16,7 +16,9 @@ class MobileSettings:
     )
     jwt_secret: str = os.getenv("JWT_SECRET", "change-me-in-production")
     jwt_algorithm: str = os.getenv("JWT_ALGORITHM", "HS256")
-    jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "10080"))
+    # Default to 30 days to avoid frequent session drops on mobile devices.
+    # Can be overridden per-environment via JWT_EXPIRE_MINUTES.
+    jwt_expire_minutes: int = int(os.getenv("JWT_EXPIRE_MINUTES", "43200"))
 
     vapid_public_key: str = os.getenv("VAPID_PUBLIC_KEY", "").strip()
     vapid_private_key: str = os.getenv("VAPID_PRIVATE_KEY", "").strip()

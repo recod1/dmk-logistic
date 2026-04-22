@@ -15,6 +15,9 @@ type PointForm = {
   place_point: string;
   date_point: string;
   point_time: string;
+  point_name: string;
+  point_contacts: string;
+  point_note: string;
 };
 
 const props = defineProps<{
@@ -22,6 +25,7 @@ const props = defineProps<{
   drivers: DriverOption[];
   loading: boolean;
   error: string;
+  unreadByRoute?: Record<string, number>;
 }>();
 
 const emit = defineEmits<{
@@ -38,6 +42,7 @@ const emit = defineEmits<{
       points: AdminRoutePointPayload[];
     }
   ];
+  createOnec: [payload: { raw_text: string; driver_user_id?: number | null }];
   selectRoute: [routeId: string];
 }>();
 
@@ -49,6 +54,7 @@ const statusTabs: Array<{ label: string; value: RouteWorkflowStatus }> = [
 ];
 
 const showCreate = ref(false);
+const showCreateOnec = ref(false);
 const filters = reactive({
   route_id: "",
   number_auto: "",
@@ -63,6 +69,10 @@ const selectedTabLabel = computed(() => {
 
 const filteredTitle = computed(() => `Рейсы (${selectedTabLabel.value}) — ${props.routes.length}`);
 
+function unreadCount(routeId: string): number {
+  return props.unreadByRoute?.[routeId] ?? 0;
+}
+
 const createForm = reactive({
   route_id: "",
   driver_user_id: 0,
@@ -74,12 +84,20 @@ const createForm = reactive({
   points: [] as PointForm[]
 });
 
+const onecForm = reactive({
+  raw_text: "",
+  driver_user_id: 0
+});
+
 function makeEmptyPoint(): PointForm {
   return {
     type_point: "loading",
     place_point: "",
     date_point: "",
-    point_time: ""
+    point_time: "",
+    point_name: "",
+    point_contacts: "",
+    point_note: ""
   };
 }
 
@@ -88,10 +106,10 @@ function toPointPayload(points: PointForm[]): AdminRoutePointPayload[] {
     type_point: point.type_point || "loading",
     place_point: point.place_point.trim(),
     date_point: point.date_point.trim(),
-    point_name: "",
-    point_contacts: "",
+    point_name: point.point_name.trim(),
+    point_contacts: point.point_contacts.trim(),
     point_time: point.point_time.trim(),
-    point_note: "",
+    point_note: point.point_note.trim(),
     order_index: index
   }));
 }
@@ -127,6 +145,7 @@ function doSearch(): void {
 
 function openCreate(): void {
   showCreate.value = true;
+  showCreateOnec.value = false;
   createForm.route_id = "";
   createForm.driver_user_id = props.drivers[0]?.id ?? 0;
   createForm.number_auto = "";
@@ -135,6 +154,13 @@ function openCreate(): void {
   createForm.registration_number = "";
   createForm.trailer_number = "";
   createForm.points = [];
+}
+
+function openCreateOnec(): void {
+  showCreateOnec.value = true;
+  showCreate.value = false;
+  onecForm.raw_text = "";
+  onecForm.driver_user_id = props.drivers[0]?.id ?? 0;
 }
 
 function addCreatePoint(): void {
@@ -162,6 +188,18 @@ function submitCreate(): void {
   showCreate.value = false;
 }
 
+function submitCreateOnec(): void {
+  const raw = onecForm.raw_text.trim();
+  if (!raw) {
+    return;
+  }
+  emit("createOnec", {
+    raw_text: raw,
+    driver_user_id: onecForm.driver_user_id || null
+  });
+  showCreateOnec.value = false;
+}
+
 onMounted(() => {
   doSearch();
 });
@@ -169,7 +207,12 @@ onMounted(() => {
 
 <template>
   <section class="admin-routes-page">
-    <button v-if="!showCreate" class="ghost create-toggle" :disabled="loading || !drivers.length" @click="openCreate">+ Создать рейс</button>
+    <div v-if="!showCreate && !showCreateOnec" class="create-toggles">
+      <button class="ghost create-toggle" :disabled="loading || !drivers.length" @click="openCreate">+ Создать рейс</button>
+      <button class="ghost create-toggle" :disabled="loading || !drivers.length" @click="openCreateOnec">
+        + Создать из 1С
+      </button>
+    </div>
 
     <section v-if="!showCreate" class="card">
       <h2>Выберите статус</h2>
@@ -216,7 +259,10 @@ onMounted(() => {
           role="listitem"
           @click="emit('selectRoute', r.id)"
         >
-          <span class="card-line strong">{{ r.id }}</span>
+          <span class="card-line strong">
+            {{ r.id }}
+            <span v-if="unreadCount(r.id) > 0" class="chat-dot" :title="`Новых сообщений: ${unreadCount(r.id)}`" />
+          </span>
           <span class="card-line"
             ><span class="lbl">Водитель:</span> {{ r.driver?.full_name || r.driver?.login || "—" }}</span
           >
@@ -240,7 +286,12 @@ onMounted(() => {
           </thead>
           <tbody>
             <tr v-for="route in routes" :key="route.id" @click="emit('selectRoute', route.id)">
-              <td>{{ route.id }}</td>
+              <td>
+                <span class="route-id">
+                  {{ route.id }}
+                  <span v-if="unreadCount(route.id) > 0" class="chat-dot" :title="`Новых сообщений: ${unreadCount(route.id)}`" />
+                </span>
+              </td>
               <td>{{ route.driver?.full_name || route.driver?.login || "—" }}</td>
               <td>{{ route.number_auto || "—" }}</td>
               <td>{{ STATUS_LABELS[route.status] ?? route.status }}</td>
@@ -250,6 +301,26 @@ onMounted(() => {
             </tr>
           </tbody>
         </table>
+      </div>
+    </section>
+
+    <section v-if="showCreateOnec" class="card create-card">
+      <h2>Создать рейс из 1С</h2>
+      <label>
+        Водитель (если в тексте не найден / не однозначно)
+        <select v-model.number="onecForm.driver_user_id">
+          <option v-for="driver in drivers" :key="driver.id" :value="driver.id">
+            {{ driver.full_name || driver.login }}
+          </option>
+        </select>
+      </label>
+      <label>
+        Текст 1С
+        <textarea v-model="onecForm.raw_text" rows="10" placeholder="Вставьте сообщение 1С целиком" />
+      </label>
+      <div class="actions">
+        <button class="primary" type="button" @click="submitCreateOnec">Создать</button>
+        <button class="ghost" type="button" @click="showCreateOnec = false">Отмена</button>
       </div>
     </section>
 
@@ -289,9 +360,6 @@ onMounted(() => {
           <input v-model="createForm.trailer_number" />
         </label>
       </div>
-      <div class="actions">
-          <button class="secondary" type="button" @click="addCreatePoint">Добавить точку</button>
-      </div>
       <article v-for="(point, idx) in createForm.points" :key="`new-${idx}`" class="point-card">
         <div class="point-top">
           <strong>Точка {{ idx + 1 }}</strong>
@@ -309,6 +377,18 @@ onMounted(() => {
             Адрес
             <input v-model="point.place_point" />
           </label>
+          <label class="full">
+            Название
+            <input v-model="point.point_name" />
+          </label>
+          <label class="full">
+            Контакты
+            <input v-model="point.point_contacts" />
+          </label>
+          <label class="full">
+            Примечание
+            <textarea v-model="point.point_note" rows="2" />
+          </label>
           <label>
             Дата
             <input v-model="point.date_point" type="date" />
@@ -320,6 +400,7 @@ onMounted(() => {
         </div>
       </article>
       <div class="actions">
+        <button class="secondary" type="button" @click="addCreatePoint">Добавить точку</button>
         <button class="primary" type="button" @click="submitCreate">Сохранить</button>
         <button class="ghost" type="button" @click="showCreate = false">Отмена</button>
       </div>
@@ -397,6 +478,20 @@ onMounted(() => {
   color: #f8fafc;
   font-size: 0.95rem;
 }
+.route-id {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+.chat-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+  vertical-align: middle;
+}
 .card-line .lbl {
   color: #94a3b8;
   margin-right: 0.25rem;
@@ -434,6 +529,11 @@ tbody tr:hover {
   color: #94a3b8;
 }
 .actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.create-toggles {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;

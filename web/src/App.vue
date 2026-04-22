@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref } from "vue";
 import AdminRouteDetailsView from "./components/AdminRouteDetailsView.vue";
 import AdminRoutesView from "./components/AdminRoutesView.vue";
 import AdminUsersView from "./components/AdminUsersView.vue";
+import ChatView from "./components/ChatView.vue";
 import DriverHomeView from "./components/DriverHomeView.vue";
 import DocsUploadDialog from "./components/DocsUploadDialog.vue";
 import DriverRouteDetailsView from "./components/DriverRouteDetailsView.vue";
@@ -12,9 +13,11 @@ import LoginView from "./components/LoginView.vue";
 import NotificationsView from "./components/NotificationsView.vue";
 import StatusConfirmDialog from "./components/StatusConfirmDialog.vue";
 import {
+  ApiError,
   acceptRoute,
   assignAdminRouteDriver,
   cancelAdminRoute,
+  createAdminRouteFromOnec,
   createAdminRoute,
   createAdminUser,
   deleteAdminRoute,
@@ -24,6 +27,7 @@ import {
   getDriverRoute,
   getUnreadNotificationsCount,
   getVapidPublicKey,
+  getChatUnreadSummary,
   listAdminRoutes,
   listAdminUsers,
   listDriverRoutes,
@@ -32,9 +36,12 @@ import {
   login as loginRequest,
   markAllNotificationsRead,
   markNotificationRead,
+  chatWebSocketUrl,
+  listRouteChatMessages,
   notificationsWebSocketUrl,
   revertPointStatus,
   sendEventsBatch,
+  sendRouteChatMessage,
   subscribeWebPush,
   updateAdminRoute,
   updateAdminUser,
@@ -78,6 +85,7 @@ type AppSection =
   | "driver_home"
   | "driver_routes"
   | "driver_route_details"
+  | "chat"
   | "notifications"
   | "admin_users"
   | "admin_routes"
@@ -114,20 +122,31 @@ const notifications = ref<NotificationDto[]>([]);
 const notificationsLoading = ref(false);
 const notificationsError = ref("");
 
+const chatRouteId = ref<string | null>(null);
+const chatMessages = ref<Array<{ id: number; route_id: string; user_id: number; author_name: string; text: string; created_at: string }>>([]);
+const chatLoading = ref(false);
+const chatError = ref("");
+const chatUnreadByRoute = ref<Record<string, number>>({});
+
 const driverActiveRouteId = ref<string | null>(null);
 const useLegacyBrowserNotification = ref(true);
 const statusConfirm = ref<{
   pointId: number;
   nextLabel: string;
   datetimeLocal: string;
+  initialDatetimeLocal: string;
 } | null>(null);
-const docsUpload = ref<{ pointId: number; occurredAtIso: string } | null>(null);
+const docsUpload = ref<{ pointId: number; occurredAtIso: string; timeSource: "device" | "manual" } | null>(null);
 const docsUploading = ref(false);
 
 let syncIntervalId: number | null = null;
 let notificationsWs: WebSocket | null = null;
 let notificationsWsReconnectTimer: number | null = null;
 let notificationsPingInterval: number | null = null;
+
+let chatWs: WebSocket | null = null;
+let chatWsReconnectTimer: number | null = null;
+let chatPingInterval: number | null = null;
 
 const isAuthed = computed(() => Boolean(authToken.value));
 const isAdmin = computed(() => isAdminRole(authUser.value?.role_code || ""));
@@ -141,6 +160,23 @@ const activeRouteSummary = computed(() => {
 });
 const hasAssignedRoutes = computed(() => driverAssignedRoutes.value.some((item) => item.status === "new"));
 const hasUnreadNotifications = computed(() => unreadNotificationsCount.value > 0);
+
+function isAuthError(error: unknown): boolean {
+  if (error instanceof ApiError) {
+    return error.status === 401;
+  }
+  const msg = (error as Error | null)?.message || "";
+  return msg.includes("Invalid access token") || msg.includes("invalid access token");
+}
+
+function handleAuthError(error: unknown, ctx: { userMessage?: string } = {}): boolean {
+  if (!isAuthError(error)) {
+    return false;
+  }
+  syncMessage.value = ctx.userMessage || "Сессия истекла. Пожалуйста, войдите заново.";
+  clearAuth();
+  return true;
+}
 
 const canAcceptSelectedDriverRoute = computed(() => {
   if (!isDriver.value || !selectedDriverRoute.value) {
@@ -240,6 +276,90 @@ function closeNotificationsSocket(): void {
   if (notificationsWs) {
     notificationsWs.close();
     notificationsWs = null;
+  }
+}
+
+function closeChatSocket(): void {
+  if (chatPingInterval !== null) {
+    window.clearInterval(chatPingInterval);
+    chatPingInterval = null;
+  }
+  if (chatWsReconnectTimer !== null) {
+    window.clearTimeout(chatWsReconnectTimer);
+    chatWsReconnectTimer = null;
+  }
+  if (chatWs) {
+    chatWs.close();
+    chatWs = null;
+  }
+}
+
+function scheduleChatReconnect(): void {
+  if (!authToken.value) {
+    return;
+  }
+  if (chatWsReconnectTimer !== null) {
+    return;
+  }
+  chatWsReconnectTimer = window.setTimeout(() => {
+    chatWsReconnectTimer = null;
+    connectChatSocket();
+  }, 2500);
+}
+
+function connectChatSocket(): void {
+  if (!authToken.value) {
+    return;
+  }
+  closeChatSocket();
+  try {
+    const ws = new WebSocket(chatWebSocketUrl(authToken.value));
+    chatWs = ws;
+    ws.onopen = () => {
+      if (chatPingInterval !== null) {
+        window.clearInterval(chatPingInterval);
+      }
+      chatPingInterval = window.setInterval(() => {
+        try {
+          ws.send("ping");
+        } catch {
+          // noop
+        }
+      }, 20000);
+    };
+    ws.onmessage = (event) => {
+      try {
+        const payload = JSON.parse(event.data) as { type?: string; item?: unknown };
+        if (payload.type === "chat_message_created" && payload.item) {
+          const item = payload.item as {
+            id: number;
+            route_id: string;
+            user_id: number;
+            author_name: string;
+            text: string;
+            created_at: string;
+          };
+          if (chatRouteId.value && item.route_id === chatRouteId.value) {
+            const exists = chatMessages.value.some((m) => m.id === item.id);
+            if (!exists) {
+              chatMessages.value = [...chatMessages.value, item];
+            }
+          }
+        }
+      } catch {
+        // ignore
+      }
+    };
+    ws.onclose = () => {
+      chatWs = null;
+      scheduleChatReconnect();
+    };
+    ws.onerror = () => {
+      chatWs = null;
+      scheduleChatReconnect();
+    };
+  } catch {
+    scheduleChatReconnect();
   }
 }
 
@@ -404,6 +524,7 @@ function clearAuth(): void {
   clearNotificationsSocketTimers();
   stopBackgroundSyncLoop();
   closeNotificationsSocket();
+  closeChatSocket();
   authUser.value = null;
   route.value = null;
   selectedDriverRoute.value = null;
@@ -415,6 +536,9 @@ function clearAuth(): void {
   selectedAdminRoute.value = null;
   notifications.value = [];
   unreadNotificationsCount.value = 0;
+  chatRouteId.value = null;
+  chatMessages.value = [];
+  chatError.value = "";
   driverActiveRouteId.value = null;
   currentSection.value = "driver_home";
   profileMenuOpen.value = false;
@@ -509,6 +633,18 @@ async function refreshDriverRoutes(): Promise<void> {
     driverHistoryRoutes.value = history.items;
     driverActiveRouteId.value = assigned.active_route_id ?? null;
 
+    try {
+      const routeIds = [...assigned.items.map((x) => x.id), ...history.items.map((x) => x.id)];
+      const unread = await getChatUnreadSummary(authToken.value, routeIds);
+      const map: Record<string, number> = {};
+      unread.forEach((row) => {
+        map[row.route_id] = row.unread_count;
+      });
+      chatUnreadByRoute.value = map;
+    } catch {
+      // ignore chat unread errors
+    }
+
     if (assigned.active_route_id) {
       if (!route.value || route.value.id !== assigned.active_route_id) {
         const activeRoute = await getDriverRoute(authToken.value, assigned.active_route_id);
@@ -520,6 +656,9 @@ async function refreshDriverRoutes(): Promise<void> {
       await saveActiveRoute(null);
     }
   } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы загрузить рейсы." })) {
+      return;
+    }
     syncMessage.value = `Ошибка загрузки рейсов: ${(error as Error).message}`;
   } finally {
     driverRoutesLoading.value = false;
@@ -536,6 +675,9 @@ async function refreshRoute(): Promise<void> {
     route.value = merged;
     await saveActiveRoute(merged);
   } catch (error) {
+    if (handleAuthError(error)) {
+      return;
+    }
     syncMessage.value = `Режим офлайн: ${(error as Error).message}`;
   }
 }
@@ -658,6 +800,9 @@ async function syncOutboxInBackground(): Promise<void> {
     await refreshRoute();
     await refreshDriverRoutes();
   } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы продолжить синхронизацию." })) {
+      return;
+    }
     console.debug("[pwa-sync] background sync failed", error);
   } finally {
     syncing.value = false;
@@ -673,6 +818,9 @@ async function refreshAdminUsers(): Promise<void> {
   try {
     adminUsers.value = await listAdminUsers(authToken.value);
   } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы загрузить пользователей." })) {
+      return;
+    }
     usersError.value = `Ошибка загрузки пользователей: ${(error as Error).message}`;
   } finally {
     usersLoading.value = false;
@@ -760,6 +908,19 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
     const effectiveFilters = filters ?? routeFilters.value;
     routeFilters.value = effectiveFilters;
     adminRoutes.value = await listAdminRoutes(authToken.value, effectiveFilters);
+
+    try {
+      const routeIds = adminRoutes.value.map((x) => x.id);
+      const unread = await getChatUnreadSummary(authToken.value, routeIds);
+      const map: Record<string, number> = {};
+      unread.forEach((row) => {
+        map[row.route_id] = row.unread_count;
+      });
+      chatUnreadByRoute.value = map;
+    } catch {
+      // ignore chat unread errors
+    }
+
     if (selectedAdminRoute.value) {
       const selected = adminRoutes.value.find((item) => item.id === selectedAdminRoute.value?.id);
       if (selected) {
@@ -770,6 +931,9 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
       }
     }
   } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы загрузить рейсы." })) {
+      return;
+    }
     routesError.value = `Ошибка загрузки рейсов: ${(error as Error).message}`;
   } finally {
     routesLoading.value = false;
@@ -784,6 +948,24 @@ async function doCreateAdminRoute(payload: AdminRouteCreatePayload): Promise<voi
   routesError.value = "";
   try {
     const routeCreated = await createAdminRoute(authToken.value, payload);
+    await refreshAdminRoutes(routeFilters.value);
+    selectedAdminRoute.value = await getAdminRoute(authToken.value, routeCreated.id);
+    currentSection.value = "admin_route_details";
+  } catch (error) {
+    routesError.value = `Ошибка создания рейса: ${(error as Error).message}`;
+  } finally {
+    routesLoading.value = false;
+  }
+}
+
+async function doCreateAdminRouteFromOnec(payload: { raw_text: string; driver_user_id?: number | null }): Promise<void> {
+  if (!authToken.value || !isRouteManager.value) {
+    return;
+  }
+  routesLoading.value = true;
+  routesError.value = "";
+  try {
+    const routeCreated = await createAdminRouteFromOnec(authToken.value, payload);
     await refreshAdminRoutes(routeFilters.value);
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeCreated.id);
     currentSection.value = "admin_route_details";
@@ -907,6 +1089,9 @@ async function refreshNotifications(): Promise<void> {
     notifications.value = latestNotifications;
     unreadNotificationsCount.value = await getUnreadNotificationsCount(authToken.value);
   } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы загрузить уведомления." })) {
+      return;
+    }
     notificationsError.value = `Ошибка загрузки уведомлений: ${(error as Error).message}`;
   } finally {
     notificationsLoading.value = false;
@@ -987,6 +1172,7 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
     void Notification.requestPermission();
   }
   connectNotificationsSocket();
+  connectChatSocket();
   void trySubscribeWebPush();
   if (isAdminRole(user.role_code)) {
     currentSection.value = "admin_routes";
@@ -1099,10 +1285,12 @@ function openStatusConfirm(pointId: number): void {
   if (!nextStatus(current.status)) {
     return;
   }
+  const initial = toDatetimeLocalValue(new Date());
   statusConfirm.value = {
     pointId,
     nextLabel: nextStatusLabel(current.status) || "",
-    datetimeLocal: toDatetimeLocalValue(new Date())
+    datetimeLocal: initial,
+    initialDatetimeLocal: initial
   };
 }
 
@@ -1118,6 +1306,7 @@ async function applyStatusConfirm(datetimeLocal: string): Promise<void> {
   }
   try {
     const iso = fromDatetimeLocalToIso(datetimeLocal);
+    const timeSource: "device" | "manual" = pending.initialDatetimeLocal === datetimeLocal ? "device" : "manual";
     const base =
       currentSection.value === "driver_route_details" && selectedDriverRoute.value
         ? selectedDriverRoute.value
@@ -1128,10 +1317,10 @@ async function applyStatusConfirm(datetimeLocal: string): Promise<void> {
     }
     const to = nextStatus(current.status);
     if (to === "docs") {
-      docsUpload.value = { pointId: pending.pointId, occurredAtIso: iso };
+      docsUpload.value = { pointId: pending.pointId, occurredAtIso: iso, timeSource };
       return;
     }
-    await markPointNext(pending.pointId, iso);
+    await markPointNext(pending.pointId, iso, undefined, { timeSource });
   } catch (error) {
     syncMessage.value = (error as Error).message;
   }
@@ -1152,7 +1341,7 @@ async function applyDocsUpload(files: File[]): Promise<void> {
     if (navigator.onLine) {
       const { file_ids } = await uploadPointDocuments(authToken.value, ctx.pointId, blobs);
       docsUpload.value = null;
-      await markPointNext(ctx.pointId, ctx.occurredAtIso, { fileIds: file_ids });
+      await markPointNext(ctx.pointId, ctx.occurredAtIso, { fileIds: file_ids }, { timeSource: ctx.timeSource });
     } else {
       const localKeys: string[] = [];
       for (const blob of blobs) {
@@ -1168,7 +1357,7 @@ async function applyDocsUpload(files: File[]): Promise<void> {
         localKeys.push(key);
       }
       docsUpload.value = null;
-      await markPointNext(ctx.pointId, ctx.occurredAtIso, { localKeys });
+      await markPointNext(ctx.pointId, ctx.occurredAtIso, { localKeys }, { timeSource: ctx.timeSource });
     }
   } catch (error) {
     syncMessage.value = (error as Error).message;
@@ -1182,7 +1371,8 @@ type DocsAttach = { fileIds: number[] } | { localKeys: string[] };
 async function markPointNext(
   pointId: number,
   occurredAtOverride?: string,
-  docsAttach?: DocsAttach
+  docsAttach?: DocsAttach,
+  options?: { timeSource?: "device" | "manual" }
 ): Promise<void> {
   if (!route.value || !isDriver.value) {
     return;
@@ -1215,6 +1405,7 @@ async function markPointNext(
     occurred_at_client: occurredAt,
     point_id: pointId,
     to_status: toStatus,
+    time_source: options?.timeSource ?? "device",
     odometer: null,
     coordinates: null
   };
@@ -1312,6 +1503,57 @@ function openNotifications(): void {
   profileMenuOpen.value = false;
   currentSection.value = "notifications";
   void refreshNotifications();
+}
+
+async function openChatForRoute(routeId: string): Promise<void> {
+  if (!authToken.value) {
+    return;
+  }
+  chatRouteId.value = routeId;
+  currentSection.value = "chat";
+  await refreshChat();
+  if (chatUnreadByRoute.value[routeId]) {
+    chatUnreadByRoute.value = { ...chatUnreadByRoute.value, [routeId]: 0 };
+  }
+}
+
+async function refreshChat(): Promise<void> {
+  if (!authToken.value || !chatRouteId.value) {
+    return;
+  }
+  chatLoading.value = true;
+  chatError.value = "";
+  try {
+    chatMessages.value = await listRouteChatMessages(authToken.value, chatRouteId.value);
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы открыть чат." })) {
+      return;
+    }
+    chatError.value = (error as Error).message;
+  } finally {
+    chatLoading.value = false;
+  }
+}
+
+async function sendChat(text: string): Promise<void> {
+  if (!authToken.value || !chatRouteId.value) {
+    return;
+  }
+  chatLoading.value = true;
+  try {
+    const created = await sendRouteChatMessage(authToken.value, chatRouteId.value, { text });
+    const exists = chatMessages.value.some((m) => m.id === created.id);
+    if (!exists) {
+      chatMessages.value = [...chatMessages.value, created];
+    }
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы отправить сообщение." })) {
+      return;
+    }
+    chatError.value = (error as Error).message;
+  } finally {
+    chatLoading.value = false;
+  }
 }
 
 function openDriverRoutes(): void {
@@ -1412,8 +1654,10 @@ onUnmounted(() => {
         :drivers="routeDrivers"
         :loading="routesLoading"
         :error="routesError"
+        :unread-by-route="chatUnreadByRoute"
         @refresh="refreshAdminRoutes"
         @create="doCreateAdminRoute"
+        @create-onec="doCreateAdminRouteFromOnec"
         @select-route="doSelectAdminRoute"
       />
     </section>
@@ -1429,6 +1673,7 @@ onUnmounted(() => {
         @cancel-route="doCancelAdminRoute"
         @delete-route="doDeleteAdminRoute"
         @update-route="doUpdateAdminRoute"
+        @open-chat="openChatForRoute"
       />
     </section>
 
@@ -1465,6 +1710,7 @@ onUnmounted(() => {
         :history="driverHistoryRoutes"
         :loading="driverRoutesLoading"
         :active-route-id="route?.id || null"
+        :unread-by-route="chatUnreadByRoute"
         @back="openDriverHome"
         @open-route="openDriverRouteDetails"
         @refresh="refreshDriverData"
@@ -1481,6 +1727,20 @@ onUnmounted(() => {
         @advance-point="openStatusConfirm"
         @revert-point="doRevertPoint"
         @accept-route="() => doAcceptRoute(selectedDriverRoute.id)"
+        @open-chat="openChatForRoute"
+      />
+    </section>
+
+    <section v-else-if="currentSection === 'chat' && chatRouteId">
+      <ChatView
+        :route-id="chatRouteId"
+        :items="chatMessages"
+        :loading="chatLoading"
+        :error="chatError"
+        :can-send="Boolean(isAuthed)"
+        @back="() => (currentSection = isDriver ? 'driver_route_details' : 'admin_route_details')"
+        @refresh="refreshChat"
+        @send="sendChat"
       />
     </section>
 

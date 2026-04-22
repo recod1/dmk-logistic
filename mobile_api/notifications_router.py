@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_user
 from mobile_api.db import SessionLocal, get_db
-from mobile_api.models import Notification, User, WebPushSubscription
+from mobile_api.models import Notification, Point, Route, User, WebPushSubscription
 from mobile_api.notifications_realtime import notifications_realtime_hub
 from mobile_api.settings import mobile_settings
 
@@ -32,6 +32,26 @@ def _list_notifications_impl(
         .order_by(Notification.created_at.desc(), Notification.id.desc())
         .limit(limit)
     ).all()
+
+    route_ids = sorted({str(item.route_id) for item in items if item.route_id})
+    point_ids = sorted({int(item.point_id) for item in items if item.point_id is not None})
+
+    routes_by_id: dict[str, Route] = {}
+    if route_ids:
+        routes = db.scalars(select(Route).where(Route.id.in_(route_ids))).all()
+        routes_by_id = {str(r.id): r for r in routes}
+
+    points_by_id: dict[int, Point] = {}
+    if point_ids:
+        points = db.scalars(select(Point).where(Point.id.in_(point_ids))).all()
+        points_by_id = {int(p.id): p for p in points}
+
+    driver_ids = sorted({int(r.assigned_user_id) for r in routes_by_id.values() if r and r.assigned_user_id})
+    drivers_by_id: dict[int, User] = {}
+    if driver_ids:
+        drivers = db.scalars(select(User).where(User.id.in_(driver_ids))).all()
+        drivers_by_id = {int(u.id): u for u in drivers}
+
     return {
         "items": [
             {
@@ -41,6 +61,34 @@ def _list_notifications_impl(
                 "message": item.message,
                 "route_id": item.route_id,
                 "point_id": item.point_id,
+                "driver_full_name": (
+                    (drivers_by_id.get(int(routes_by_id[str(item.route_id)].assigned_user_id)).full_name)  # type: ignore[arg-type]
+                    if item.route_id
+                    and str(item.route_id) in routes_by_id
+                    and routes_by_id[str(item.route_id)].assigned_user_id
+                    and int(routes_by_id[str(item.route_id)].assigned_user_id) in drivers_by_id
+                    else None
+                ),
+                "number_auto": (
+                    routes_by_id[str(item.route_id)].number_auto
+                    if item.route_id and str(item.route_id) in routes_by_id
+                    else None
+                ),
+                "trailer_number": (
+                    routes_by_id[str(item.route_id)].trailer_number
+                    if item.route_id and str(item.route_id) in routes_by_id
+                    else None
+                ),
+                "point_place_point": (
+                    points_by_id[int(item.point_id)].place_point
+                    if item.point_id is not None and int(item.point_id) in points_by_id
+                    else None
+                ),
+                "point_type_point": (
+                    points_by_id[int(item.point_id)].type_point
+                    if item.point_id is not None and int(item.point_id) in points_by_id
+                    else None
+                ),
                 "is_read": item.is_read,
                 "created_at": item.created_at.isoformat() if item.created_at else None,
             }

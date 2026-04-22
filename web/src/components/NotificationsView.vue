@@ -21,6 +21,23 @@ function openRouteFromItem(item: NotificationDto): void {
   }
   emit("openRoute", item.route_id, item.id);
 }
+
+function formatExtra(item: NotificationDto): string {
+  const parts: string[] = [];
+  const driver = (item.driver_full_name || "").trim();
+  if (driver) parts.push(`Водитель: ${driver}`);
+  const auto = (item.number_auto || "").trim();
+  if (auto) parts.push(`ТС: ${auto}`);
+  const trailer = (item.trailer_number || "").trim();
+  if (trailer) parts.push(`Прицеп: ${trailer}`);
+  const pointType = (item.point_type_point || "").trim();
+  const pointAddr = (item.point_place_point || "").trim();
+  if (pointType || pointAddr) {
+    const label = [pointType, pointAddr].filter(Boolean).join(" · ");
+    parts.push(`Точка: ${label}`);
+  }
+  return parts.join(" | ");
+}
 </script>
 
 <template>
@@ -50,6 +67,7 @@ function openRouteFromItem(item: NotificationDto): void {
         <div class="row-top">
           <strong>{{ item.message }}</strong>
         </div>
+        <p v-if="formatExtra(item)" class="extra">{{ formatExtra(item) }}</p>
         <div v-if="!item.is_read" class="meta">
           <button class="link-btn" @click.stop="emit('markRead', item.id)">Отметить прочитанным</button>
         </div>
@@ -108,6 +126,13 @@ p {
   color: #94a3b8;
   font-size: 0.9rem;
   align-items: center;
+}
+.extra {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.88rem;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 .counter {
   color: #fca5a5;

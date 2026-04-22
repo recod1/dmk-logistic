@@ -218,6 +218,7 @@ class RouteEvent(Base):
     client_event_id: Mapped[str] = mapped_column(String(128), nullable=False)
     occurred_at_client: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     to_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    time_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
     server_received_at: Mapped[datetime] = mapped_column(
@@ -266,6 +267,28 @@ class WebPushSubscription(Base):
     )
 
     user: Mapped[User] = relationship(back_populates="web_push_subscriptions")
+
+
+class RouteChatMessage(Base):
+    __tablename__ = "route_chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    route_id: Mapped[str] = mapped_column(ForeignKey("routes.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+
+
+class RouteChatRead(Base):
+    __tablename__ = "route_chat_reads"
+    __table_args__ = (UniqueConstraint("user_id", "route_id", name="uq_route_chat_reads_user_route"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    route_id: Mapped[str] = mapped_column(ForeignKey("routes.id", ondelete="CASCADE"), nullable=False, index=True)
+    last_read_message_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
 
 
 class Salary(Base):

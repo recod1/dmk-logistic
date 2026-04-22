@@ -34,6 +34,7 @@ const emit = defineEmits<{
       points?: AdminRoutePointPayload[];
     }
   ];
+  openChat: [routeId: string];
 }>();
 
 const showReassign = ref(false);
@@ -65,7 +66,9 @@ function routeStatusWithCurrentPoint(route: AdminRoute): string {
   if (!current) {
     return base;
   }
-  return `${base} · Точка #${current.id}`;
+  const address = (current.place_point || "").trim();
+  const stage = pointStatusLabel(current.status);
+  return `${base} · ${stage}${address ? ` · ${address}` : ""}`;
 }
 
 function pointTypeLabel(value: string): string {
@@ -210,6 +213,9 @@ function removeRoute(): void {
         <p><strong>Температура:</strong> {{ route.temperature || "—" }}</p>
         <p><strong>Контакты диспетчера:</strong> {{ route.dispatcher_contacts || "—" }}</p>
         <p><strong>N регистрации:</strong> {{ route.registration_number || "—" }}</p>
+      </div>
+      <div class="actions">
+        <button class="secondary" type="button" @click="emit('openChat', route.id)">Открыть чат рейса</button>
       </div>
 
       <section v-if="showEdit" class="edit-card">

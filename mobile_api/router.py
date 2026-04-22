@@ -71,6 +71,7 @@ class BatchEventPayload(BaseModel):
     occurred_at_client: datetime
     point_id: int
     to_status: Literal["process", "registration", "load", "docs", "success"]
+    time_source: Literal["device", "manual"] | None = None
     odometer: str | None = Field(default=None, max_length=128)
     coordinates: dict | None = None
     document_file_ids: list[int] | None = Field(default=None, max_length=32)
@@ -95,7 +96,12 @@ def _format_datetime_ru(dt: datetime | None) -> str | None:
     return format_dt_for_app(dt)
 
 
-def _point_to_dict(point: Point, docs_meta: list[dict] | None = None) -> dict:
+def _point_to_dict(
+    point: Point,
+    docs_meta: list[dict] | None = None,
+    time_sources: dict[str, str] | None = None,
+) -> dict:
+    sources = time_sources or {}
     return {
         "id": point.id,
         "route_id": point.route_id,
@@ -113,15 +119,19 @@ def _point_to_dict(point: Point, docs_meta: list[dict] | None = None) -> dict:
         "time_docs": _format_datetime_ru(point.time_docs),
         "time_departure": _format_datetime_ru(point.time_departure),
         "departure_time": _format_datetime_ru(point.departure_time),
+        "departure_time_source": sources.get("process"),
         "departure_odometer": point.departure_odometer,
         "departure_coordinates": {"lat": point.departure_lat, "lng": point.departure_lng},
         "registration_time": _format_datetime_ru(point.registration_time),
+        "registration_time_source": sources.get("registration"),
         "registration_odometer": point.registration_odometer,
         "registration_coordinates": {"lat": point.registration_lat, "lng": point.registration_lng},
         "gate_time": _format_datetime_ru(point.gate_time),
+        "gate_time_source": sources.get("load"),
         "gate_odometer": point.gate_odometer,
         "gate_coordinates": {"lat": point.gate_lat, "lng": point.gate_lng},
         "docs_time": _format_datetime_ru(point.docs_time),
+        "docs_time_source": sources.get("docs"),
         "docs_odometer": point.docs_odometer,
         "docs_coordinates": {"lat": point.docs_lat, "lng": point.docs_lng},
         "odometer": point.odometer,
@@ -154,6 +164,29 @@ def _route_snapshot(db: Session, route: Route) -> dict:
         ).all()
         for img in imgs:
             by_point[img.point_id].append(img)
+
+    sources_by_point: dict[int, dict[str, str]] = defaultdict(dict)
+    if point_ids:
+        # Track latest time source for each point + status (process/registration/load/docs).
+        # We rely on server_received_at as a monotonic-ish "latest applied" ordering.
+        rows = db.scalars(
+            select(RouteEvent)
+            .where(
+                RouteEvent.point_id.in_(point_ids),
+                RouteEvent.applied.is_(True),
+                RouteEvent.time_source.isnot(None),
+            )
+            .order_by(RouteEvent.server_received_at.desc(), RouteEvent.id.desc())
+        ).all()
+        for ev in rows:
+            if ev.point_id is None or not ev.to_status:
+                continue
+            if ev.to_status not in {"process", "registration", "load", "docs"}:
+                continue
+            if ev.to_status in sources_by_point[int(ev.point_id)]:
+                continue
+            if ev.time_source:
+                sources_by_point[int(ev.point_id)][str(ev.to_status)] = str(ev.time_source)
     return {
         "id": route.id,
         "status": route.status,
@@ -168,6 +201,7 @@ def _route_snapshot(db: Session, route: Route) -> dict:
             _point_to_dict(
                 p,
                 [{"id": x.id, "content_type": x.content_type} for x in by_point.get(p.id, [])],
+                sources_by_point.get(int(p.id), {}),
             )
             for p in points
         ],
@@ -577,6 +611,7 @@ def batch_events(
                 client_event_id=event.client_event_id,
                 occurred_at_client=_as_utc(event.occurred_at_client),
                 to_status=event.to_status,
+                time_source=event.time_source,
                 applied=False,
                 error="Point is not available for current user",
                 server_received_at=server_received_at,
@@ -616,6 +651,7 @@ def batch_events(
                 client_event_id=event.client_event_id,
                 occurred_at_client=_as_utc(event.occurred_at_client),
                 to_status=target_status,
+                time_source=event.time_source,
                 applied=False,
                 error=doc_err,
                 server_received_at=server_received_at,
@@ -643,6 +679,7 @@ def batch_events(
             client_event_id=event.client_event_id,
             occurred_at_client=_as_utc(event.occurred_at_client),
             to_status=target_status,
+            time_source=event.time_source,
             applied=applied,
             error=error,
             server_received_at=server_received_at,

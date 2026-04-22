@@ -33,24 +33,28 @@ export interface PointDto {
   time_docs: string | null;
   time_departure: string | null;
   departure_time?: string | null;
+  departure_time_source?: "device" | "manual" | null;
   departure_odometer?: string | null;
   departure_coordinates?: {
     lat: number | null;
     lng: number | null;
   } | null;
   registration_time?: string | null;
+  registration_time_source?: "device" | "manual" | null;
   registration_odometer?: string | null;
   registration_coordinates?: {
     lat: number | null;
     lng: number | null;
   } | null;
   gate_time?: string | null;
+  gate_time_source?: "device" | "manual" | null;
   gate_odometer?: string | null;
   gate_coordinates?: {
     lat: number | null;
     lng: number | null;
   } | null;
   docs_time?: string | null;
+  docs_time_source?: "device" | "manual" | null;
   docs_odometer?: string | null;
   docs_coordinates?: {
     lat: number | null;
@@ -86,6 +90,7 @@ export interface EventPayload {
   occurred_at_client: string;
   point_id: number;
   to_status: Exclude<PointStatus, "new">;
+  time_source?: "device" | "manual" | null;
   odometer?: string | null;
   coordinates?: {
     lat?: number | null;
@@ -266,6 +271,11 @@ export interface NotificationDto {
   message: string;
   route_id: string | null;
   point_id: number | null;
+  driver_full_name?: string | null;
+  number_auto?: string | null;
+  trailer_number?: string | null;
+  point_place_point?: string | null;
+  point_type_point?: string | null;
   is_read: boolean;
   created_at: string;
 }

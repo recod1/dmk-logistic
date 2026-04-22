@@ -133,7 +133,7 @@ function removeUser(user: AdminUser): void {
 
     <p v-if="error" class="error">{{ error }}</p>
 
-    <div class="table-wrap">
+    <div v-if="!creating && !editableUser" class="table-wrap">
       <table>
         <thead>
           <tr>

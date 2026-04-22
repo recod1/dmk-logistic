@@ -65,7 +65,10 @@ export function canRevertPointStatus(status: PointStatus): boolean {
 }
 
 export function mapsSearchUrl(address: string): string {
-  const q = encodeURIComponent(address.trim());
-  return `https://www.google.com/maps/search/?api=1&query=${q}`;
+  const trimmed = address.trim();
+  const q = encodeURIComponent(trimmed);
+  // geo: opens a "choose maps app" dialog on most Android devices (instead of forcing Google Maps).
+  // Use query form to allow geocoding by address.
+  return `geo:0,0?q=${q}`;
 }
 

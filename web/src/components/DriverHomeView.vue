@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import { canRevertPointStatus, isPointDone, mapsSearchUrl, routeStatusLabel, statusLabel } from "../status";
+import { isPointDone, mapsSearchUrl, routeStatusLabel, statusLabel } from "../status";
 import type { DriverRouteListItem, RouteDto } from "../types";
 
 const props = defineProps<{
@@ -17,7 +17,6 @@ const emit = defineEmits<{
   openActiveRoute: [];
   acceptActiveRoute: [];
   advanceActivePoint: [];
-  revertActivePoint: [pointId: number];
 }>();
 
 const activePoint = computed(() =>
@@ -89,15 +88,6 @@ const canAdvance = computed(() => {
       <template v-else>
         <button class="primary" :disabled="!canAdvance || syncing" @click.stop="emit('advanceActivePoint')">
           {{ actionLabel }}
-        </button>
-        <button
-          v-if="activePoint && canRevertPointStatus(activePoint.status)"
-          type="button"
-          class="revert"
-          :disabled="syncing"
-          @click.stop="emit('revertActivePoint', activePoint.id)"
-        >
-          Вернуть предыдущий статус
         </button>
       </template>
       <button class="secondary" @click.stop="emit('openActiveRoute')">Открыть всю информацию о рейсе</button>
@@ -173,13 +163,6 @@ const canAdvance = computed(() => {
   border-radius: 10px;
   background: transparent;
   color: #bfdbfe;
-  padding: 0.5rem 0.75rem;
-}
-.revert {
-  border: 1px solid #78350f;
-  border-radius: 10px;
-  background: #451a03;
-  color: #fed7aa;
   padding: 0.5rem 0.75rem;
 }
 .hint {

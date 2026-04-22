@@ -20,6 +20,20 @@ import type {
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
+export class ApiError extends Error {
+  status: number;
+  bodyText: string;
+  detail: string | null;
+
+  constructor(message: string, opts: { status: number; bodyText: string; detail?: string | null }) {
+    super(message);
+    this.name = "ApiError";
+    this.status = opts.status;
+    this.bodyText = opts.bodyText;
+    this.detail = opts.detail ?? null;
+  }
+}
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...init,
@@ -30,8 +44,18 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   });
 
   if (!response.ok) {
-    const body = await response.text();
-    throw new Error(body || `HTTP ${response.status}`);
+    const bodyText = await response.text();
+    let detail: string | null = null;
+    try {
+      const parsed = JSON.parse(bodyText) as { detail?: unknown };
+      if (typeof parsed?.detail === "string") {
+        detail = parsed.detail;
+      }
+    } catch {
+      // ignore non-json body
+    }
+    const message = detail || bodyText || `HTTP ${response.status}`;
+    throw new ApiError(message, { status: response.status, bodyText, detail });
   }
   return response.json() as Promise<T>;
 }
@@ -259,6 +283,19 @@ export async function createAdminRoute(token: string, payload: AdminRouteCreateP
   });
 }
 
+export async function createAdminRouteFromOnec(
+  token: string,
+  payload: { raw_text: string; driver_user_id?: number | null }
+): Promise<AdminRoute> {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/onec`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function assignAdminRouteDriver(token: string, routeId: string, driverUserId: number): Promise<AdminRoute> {
   return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${routeId}/assign`, {
     method: "POST",
@@ -429,4 +466,68 @@ export function notificationsWebSocketUrl(token: string): string {
   const wsUrl = new URL(`${wsProtocol}//${base.host}${wsPath}`);
   wsUrl.searchParams.set("token", token);
   return wsUrl.toString();
+}
+
+export async function listRouteChatMessages(
+  token: string,
+  routeId: string
+): Promise<
+  Array<{
+    id: number;
+    route_id: string;
+    user_id: number;
+    author_name: string;
+    text: string;
+    created_at: string;
+  }>
+> {
+  const data = await requestJson<{
+    items: Array<{ id: number; route_id: string; user_id: number; author_name: string; text: string; created_at: string }>;
+  }>(`${API_BASE}/v1/chat/routes/${encodeURIComponent(routeId)}/messages`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.items;
+}
+
+export async function sendRouteChatMessage(
+  token: string,
+  routeId: string,
+  payload: { text: string }
+): Promise<{ id: number; route_id: string; user_id: number; author_name: string; text: string; created_at: string }> {
+  return requestJson<{ id: number; route_id: string; user_id: number; author_name: string; text: string; created_at: string }>(
+    `${API_BASE}/v1/chat/routes/${encodeURIComponent(routeId)}/messages`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    }
+  );
+}
+
+export function chatWebSocketUrl(token: string): string {
+  const base = new URL(API_BASE, window.location.origin);
+  const wsProtocol = base.protocol === "https:" ? "wss:" : "ws:";
+  const normalizedApiPath = base.pathname.replace(/\/$/, "");
+  const wsPath = normalizedApiPath.endsWith("/v1") ? `${normalizedApiPath}/chat/ws` : `${normalizedApiPath}/v1/chat/ws`;
+  const wsUrl = new URL(`${wsProtocol}//${base.host}${wsPath}`);
+  wsUrl.searchParams.set("token", token);
+  return wsUrl.toString();
+}
+
+export async function getChatUnreadSummary(
+  token: string,
+  routeIds: string[]
+): Promise<Array<{ route_id: string; unread_count: number }>> {
+  const data = await requestJson<{ items: Array<{ route_id: string; unread_count: number }> }>(`${API_BASE}/v1/chat/unread-summary`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: JSON.stringify({ route_ids: routeIds })
+  });
+  return data.items;
 }

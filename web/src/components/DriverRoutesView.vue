@@ -6,6 +6,7 @@ const props = defineProps<{
   history: DriverRouteListItem[];
   loading: boolean;
   activeRouteId: string | null;
+  unreadByRoute?: Record<string, number>;
 }>();
 
 const emit = defineEmits<{
@@ -27,6 +28,10 @@ function routeStatusLabel(status: string): string {
 function isActiveRoute(routeId: string): boolean {
   return props.activeRouteId === routeId;
 }
+
+function unreadCount(routeId: string): number {
+  return props.unreadByRoute?.[routeId] ?? 0;
+}
 </script>
 
 <template>
@@ -42,7 +47,10 @@ function isActiveRoute(routeId: string): boolean {
       <div class="list">
         <button v-for="item in assigned" :key="item.id" class="route-card" @click="emit('openRoute', item.id)">
           <div class="row">
-            <strong>#{{ item.id }}</strong>
+            <div class="row-left">
+              <strong>#{{ item.id }}</strong>
+              <span v-if="unreadCount(item.id) > 0" class="chat-dot" :title="`Новых сообщений: ${unreadCount(item.id)}`" />
+            </div>
             <span class="chip" :class="{ active: item.id === activeRouteId }">{{ routeStatusLabel(item.status) }}</span>
           </div>
           <small>ТС: {{ item.number_auto || "—" }}</small>
@@ -59,7 +67,10 @@ function isActiveRoute(routeId: string): boolean {
       <div class="list">
         <button v-for="item in history" :key="item.id" class="route-card" @click="emit('openRoute', item.id)">
           <div class="row">
-            <strong>#{{ item.id }}</strong>
+            <div class="row-left">
+              <strong>#{{ item.id }}</strong>
+              <span v-if="unreadCount(item.id) > 0" class="chat-dot" :title="`Новых сообщений: ${unreadCount(item.id)}`" />
+            </div>
             <span class="chip">{{ routeStatusLabel(item.status) }}</span>
           </div>
           <small>ТС: {{ item.number_auto || "—" }}</small>
@@ -101,6 +112,20 @@ function isActiveRoute(routeId: string): boolean {
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+}
+.row-left {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+.chat-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #22c55e;
+  box-shadow: 0 0 0 3px rgba(34, 197, 94, 0.18);
+  flex: 0 0 auto;
 }
 .chip {
   border-radius: 999px;
