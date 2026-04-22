@@ -6,6 +6,8 @@ import threading
 from typing import Any
 
 import base64
+import os
+import tempfile
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
@@ -131,17 +133,24 @@ def send_web_push_to_users(
         payload_obj["notification_id"] = notification_id
     data = json.dumps(payload_obj, ensure_ascii=False)
     vapid_claims = {"sub": mobile_settings.vapid_claim_email}
-    vapid_private_key = _normalize_vapid_private_key(mobile_settings.vapid_private_key)
-    if not vapid_private_key:
+    vapid_private_pem = _normalize_vapid_private_key(mobile_settings.vapid_private_key)
+    if not vapid_private_pem:
         return
 
     def _run() -> None:
+        tmp_path = None
         for sub_id, endpoint, p256dh, auth in subscriptions:
             try:
+                # Some pywebpush versions expect a PEM *file path*, not PEM contents.
+                # Use a temp file to avoid format ambiguity.
+                if tmp_path is None:
+                    with tempfile.NamedTemporaryFile("w", delete=False, prefix="dmk-vapid-", suffix=".pem") as f:
+                        f.write(vapid_private_pem)
+                        tmp_path = f.name
                 webpush(
                     subscription_info={"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}},
                     data=data,
-                    vapid_private_key=vapid_private_key,
+                    vapid_private_key=tmp_path,
                     vapid_claims=vapid_claims,
                     ttl=86400,
                 )
@@ -152,6 +161,16 @@ def send_web_push_to_users(
                         cleanup.commit()
                 else:
                     logger.debug("Web Push failed for subscription %s: %s", sub_id, exc)
+            finally:
+                # Keep temp key file for the duration of the thread loop only.
+                # It is safe to remove at the end; best-effort cleanup.
+                pass
+
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
     threading.Thread(target=_run, daemon=True).start()
 
@@ -182,61 +201,75 @@ def send_web_push_to_users_sync(
         payload_obj["notification_id"] = notification_id
     data = json.dumps(payload_obj, ensure_ascii=False)
     vapid_claims = {"sub": mobile_settings.vapid_claim_email}
-    vapid_private_key = _normalize_vapid_private_key(mobile_settings.vapid_private_key)
-    if not vapid_private_key:
+    vapid_private_pem = _normalize_vapid_private_key(mobile_settings.vapid_private_key)
+    if not vapid_private_pem:
         return [{"ok": False, "error": "Invalid VAPID private key"}]
 
     # Validate VAPID key is parseable in this runtime.
     try:
         from cryptography.hazmat.primitives import serialization
 
-        serialization.load_pem_private_key(vapid_private_key.encode("utf-8"), password=None)
+        serialization.load_pem_private_key(vapid_private_pem.encode("utf-8"), password=None)
     except Exception as exc:
         return [{"ok": False, "error": f"Invalid VAPID private key (pem parse): {exc}"}]
 
-    for sub_id, endpoint, p256dh, auth in subscriptions:
-        ok_keys, key_err = _validate_subscription_keys(p256dh=p256dh, auth=auth)
-        if not ok_keys:
-            results.append(
-                {
-                    "subscription_id": sub_id,
-                    "ok": False,
-                    "error": key_err,
-                }
-            )
-            continue
-        try:
-            resp = webpush(
-                subscription_info={"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}},
-                data=data,
-                vapid_private_key=vapid_private_key,
-                vapid_claims=vapid_claims,
-                ttl=86400,
-            )
-            status = getattr(resp, "status_code", None)
-            results.append({"subscription_id": sub_id, "ok": True, "status_code": status})
-        except WebPushException as exc:
-            status_code = exc.response.status_code if exc.response is not None else None
-            body_text = None
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile("w", delete=False, prefix="dmk-vapid-", suffix=".pem") as f:
+            f.write(vapid_private_pem)
+            tmp_path = f.name
+
+        for sub_id, endpoint, p256dh, auth in subscriptions:
+            ok_keys, key_err = _validate_subscription_keys(p256dh=p256dh, auth=auth)
+            if not ok_keys:
+                results.append(
+                    {
+                        "subscription_id": sub_id,
+                        "ok": False,
+                        "error": key_err,
+                    }
+                )
+                continue
             try:
-                body_text = exc.response.text if exc.response is not None else None
-            except Exception:
+                resp = webpush(
+                    subscription_info={"endpoint": endpoint, "keys": {"p256dh": p256dh, "auth": auth}},
+                    data=data,
+                    vapid_private_key=tmp_path,
+                    vapid_claims=vapid_claims,
+                    ttl=86400,
+                )
+                status = getattr(resp, "status_code", None)
+                results.append({"subscription_id": sub_id, "ok": True, "status_code": status})
+            except WebPushException as exc:
+                status_code = exc.response.status_code if exc.response is not None else None
                 body_text = None
-            if status_code in {404, 410}:
-                with SessionLocal() as cleanup:
-                    cleanup.execute(delete(WebPushSubscription).where(WebPushSubscription.id == sub_id))
-                    cleanup.commit()
-            results.append(
-                {
-                    "subscription_id": sub_id,
-                    "ok": False,
-                    "status_code": status_code,
-                    "error": str(exc),
-                    "body": body_text,
-                }
-            )
-        except Exception as exc:
-            results.append({"subscription_id": sub_id, "ok": False, "error": str(exc), "exception_type": type(exc).__name__})
+                try:
+                    body_text = exc.response.text if exc.response is not None else None
+                except Exception:
+                    body_text = None
+                if status_code in {404, 410}:
+                    with SessionLocal() as cleanup:
+                        cleanup.execute(delete(WebPushSubscription).where(WebPushSubscription.id == sub_id))
+                        cleanup.commit()
+                results.append(
+                    {
+                        "subscription_id": sub_id,
+                        "ok": False,
+                        "status_code": status_code,
+                        "error": str(exc),
+                        "body": body_text,
+                    }
+                )
+            except Exception as exc:
+                results.append(
+                    {"subscription_id": sub_id, "ok": False, "error": str(exc), "exception_type": type(exc).__name__}
+                )
+    finally:
+        if tmp_path:
+            try:
+                os.unlink(tmp_path)
+            except Exception:
+                pass
 
     return results
 
