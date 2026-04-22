@@ -171,6 +171,24 @@ def push_subscribe(
     return {"ok": True}
 
 
+@router.post("/v1/notifications/push/subscriptions:clear")
+def push_clear_subscriptions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Clears all push subscriptions for current user.
+    Useful after VAPID key rotation (old subscriptions become invalid).
+    """
+    deleted = (
+        db.query(WebPushSubscription)
+        .filter(WebPushSubscription.user_id == current_user.id)
+        .delete(synchronize_session=False)
+    )
+    db.commit()
+    return {"ok": True, "deleted": int(deleted)}
+
+
 @router.post("/v1/notifications/push/test")
 def push_test(
     db: Session = Depends(get_db),
@@ -225,7 +243,9 @@ def push_debug_config(
     }
 
     try:
+        import base64
         from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
 
         normalized = raw_priv.strip().strip('"').strip("'")
         if "\\n" in normalized or "\\r\\n" in normalized:
@@ -235,12 +255,26 @@ def push_debug_config(
             normalized = normalized.replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
 
         if "BEGIN" in normalized:
-            serialization.load_pem_private_key(normalized.encode("utf-8"), password=None)
+            key = serialization.load_pem_private_key(normalized.encode("utf-8"), password=None)
         else:
             # raw base64/base64url (DER or 32-byte scalar) parsing happens in sender
             # so here we only confirm it is decodable-ish
             _ = normalized[:16]
         info["private_key_parsed_by_cryptography"] = True
+
+        # Best-effort: verify that VAPID_PUBLIC_KEY matches the private key (common misconfig).
+        try:
+            if isinstance(key, ec.EllipticCurvePrivateKey):
+                pub = key.public_key().public_bytes(
+                    encoding=serialization.Encoding.X962,
+                    format=serialization.PublicFormat.UncompressedPoint,
+                )
+                computed_pub = base64.urlsafe_b64encode(pub).decode("utf-8").rstrip("=")
+                info["computed_public_key_len"] = len(computed_pub)
+                info["public_key_matches_private"] = computed_pub.strip() == raw_pub.strip()
+        except Exception as exc2:
+            info["public_key_matches_private"] = False
+            info["public_key_match_error"] = str(exc2)
     except Exception as exc:
         info["private_key_parsed_by_cryptography"] = False
         info["private_key_parse_error"] = str(exc)
