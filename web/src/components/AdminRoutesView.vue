@@ -208,8 +208,8 @@ onMounted(() => {
 <template>
   <section class="admin-routes-page">
     <div v-if="!showCreate && !showCreateOnec" class="create-toggles">
-      <button class="ghost create-toggle" :disabled="loading || !drivers.length" @click="openCreate">+ Создать рейс</button>
-      <button class="ghost create-toggle" :disabled="loading || !drivers.length" @click="openCreateOnec">
+      <button class="ghost create-toggle" :disabled="loading" @click="openCreate">+ Создать рейс</button>
+      <button class="ghost create-toggle" :disabled="loading" @click="openCreateOnec">
         + Создать из 1С
       </button>
     </div>
@@ -309,6 +309,7 @@ onMounted(() => {
       <label>
         Водитель (если в тексте не найден / не однозначно)
         <select v-model.number="onecForm.driver_user_id">
+          <option :value="0">Авто (по ФИО из текста) / не выбран</option>
           <option v-for="driver in drivers" :key="driver.id" :value="driver.id">
             {{ driver.full_name || driver.login }}
           </option>
