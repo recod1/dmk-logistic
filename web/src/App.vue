@@ -225,11 +225,15 @@ function updateUiNotificationIndicators(): void {
     setAppBadge?: (count?: number) => Promise<void>;
     clearAppBadge?: () => Promise<void>;
   };
-  if (typeof nav?.setAppBadge === "function" && typeof nav?.clearAppBadge === "function") {
+  // iOS Safari/PWA can expose setAppBadge without clearAppBadge (version-dependent).
+  // Prefer clearAppBadge when available; otherwise fall back to setAppBadge(0).
+  if (typeof nav?.setAppBadge === "function") {
     if (unread > 0) {
       void nav.setAppBadge(unread);
-    } else {
+    } else if (typeof nav?.clearAppBadge === "function") {
       void nav.clearAppBadge();
+    } else {
+      void nav.setAppBadge(0);
     }
   }
 }
