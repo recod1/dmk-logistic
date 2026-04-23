@@ -75,6 +75,16 @@ function splitPhones(raw: string): string[] {
 
 const dispatcherPhones = computed(() => splitPhones(props.route.dispatcher_contacts || ""));
 
+const logisticsContacts = [
+  { name: "Гуля", phoneRaw: "+7 (916) 842-01-12" },
+  { name: "Александр", phoneRaw: "+7 (989) 150-51-42" },
+  { name: "Зураб", phoneRaw: "+7 (985) 046-84-82" }
+] as const;
+
+function phoneToTel(phoneRaw: string): string {
+  return phoneRaw.replace(/[^+\d]/g, "");
+}
+
 function timeSourceLabel(value?: string | null): string {
   if (value === "manual") return " (вручную)";
   if (value === "device") return " (устройство)";
@@ -158,6 +168,21 @@ function showRevert(pointId: number): boolean {
             </span>
           </span>
           <span v-else>—</span>
+        </p>
+        <p>
+          <strong>Контакты логистов:</strong>
+          <span class="contacts">
+            <a
+              v-for="c in logisticsContacts"
+              :key="c.phoneRaw"
+              class="tel tel-contact"
+              :href="`tel:${phoneToTel(c.phoneRaw)}`"
+              @click.stop
+            >
+              <span class="tel-name">{{ c.name }}</span>
+              <span class="tel-phone">{{ c.phoneRaw }}</span>
+            </a>
+          </span>
         </p>
         <p v-if="!isAcceptedCurrentRoute && route.status === 'process'" class="note">
           Изменение статусов доступно только для принятого текущего рейса.
@@ -378,5 +403,18 @@ small {
   padding: 0.15rem 0.5rem;
   color: #a7f3d0;
   text-decoration: none;
+}
+.tel-contact {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  color: #d1fae5;
+}
+.tel-name {
+  color: #86efac;
+  font-weight: 600;
+}
+.tel-phone {
+  color: #a7f3d0;
 }
 </style>

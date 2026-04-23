@@ -41,7 +41,8 @@ class PointStatus(str, Enum):
 class Settings:
     TG_TOKEN: str = os.getenv("TG_TOKEN", "")
     DB_PATH: str = os.getenv("DB_PATH", "./db/olymp.db")
-    WIALON_TOKEN: str = os.getenv("WIALON_TOKEN", "")
+    # strip: в .env/Portainer часто лишний перевод строки или пробел → INVALID_AUTH_TOKEN
+    WIALON_TOKEN: str = (os.getenv("WIALON_TOKEN") or "").strip()
     # Базовый URL Wialon Remote API (как в боте): запросы идут на {WIALON_BASE_URL}/wialon/ajax.html
     # Пустая строка из Docker не должна отключать дефолт — используем «or».
     WIALON_BASE_URL: str = (os.getenv("WIALON_BASE_URL") or "http://w1.wialon.justgps.ru").strip()

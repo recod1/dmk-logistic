@@ -71,6 +71,10 @@ function unreadCount(routeId: string): number {
   return props.unreadByRoute?.[routeId] ?? 0;
 }
 
+function upperOnly(value: string): string {
+  return (value || "").toUpperCase();
+}
+
 const createForm = reactive({
   route_id: "",
   driver_user_id: 0,
@@ -241,7 +245,13 @@ onMounted(() => {
         </label>
         <label>
           ТС
-          <input v-model="filters.number_auto" placeholder="А123ВС777" />
+          <input
+            v-model="filters.number_auto"
+            class="upper"
+            autocapitalize="characters"
+            placeholder="А123ВС777"
+            @input="(e) => (filters.number_auto = upperOnly((e.target as HTMLInputElement).value))"
+          />
         </label>
         <div class="apply-wrap">
           <button class="secondary" type="button" :disabled="loading" @click="doSearch">Применить</button>
@@ -341,7 +351,12 @@ onMounted(() => {
         </label>
         <label>
           Номер авто
-          <input v-model="createForm.number_auto" />
+          <input
+            v-model="createForm.number_auto"
+            class="upper"
+            autocapitalize="characters"
+            @input="(e) => (createForm.number_auto = upperOnly((e.target as HTMLInputElement).value))"
+          />
         </label>
         <label>
           Температура
@@ -357,7 +372,12 @@ onMounted(() => {
         </label>
         <label>
           Номер прицепа
-          <input v-model="createForm.trailer_number" />
+          <input
+            v-model="createForm.trailer_number"
+            class="upper"
+            autocapitalize="characters"
+            @input="(e) => (createForm.trailer_number = upperOnly((e.target as HTMLInputElement).value))"
+          />
         </label>
       </div>
       <article v-for="(point, idx) in createForm.points" :key="`new-${idx}`" class="point-card">
@@ -572,6 +592,9 @@ textarea {
   background: #0b1220;
   color: #fff;
   padding: 0.5rem 0.62rem;
+}
+.upper {
+  text-transform: uppercase;
 }
 button {
   border: none;

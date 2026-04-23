@@ -60,6 +60,10 @@ function statusLabel(status: RouteWorkflowStatus): string {
   return labels[status] ?? status;
 }
 
+function upperOnly(value: string): string {
+  return (value || "").toUpperCase();
+}
+
 function routeStatusWithCurrentPoint(route: AdminRoute): string {
   const base = statusLabel(route.status);
   const current = (route.points || []).find((point) => point.status !== "docs" && point.status !== "success");
@@ -223,7 +227,12 @@ function removeRoute(): void {
         <div class="edit-grid">
           <label>
             Номер авто
-            <input v-model="editForm.number_auto" />
+            <input
+              v-model="editForm.number_auto"
+              class="upper"
+              autocapitalize="characters"
+              @input="(e) => (editForm.number_auto = upperOnly((e.target as HTMLInputElement).value))"
+            />
           </label>
           <label>
             Температура
@@ -239,7 +248,12 @@ function removeRoute(): void {
           </label>
           <label>
             Номер прицепа
-            <input v-model="editForm.trailer_number" />
+            <input
+              v-model="editForm.trailer_number"
+              class="upper"
+              autocapitalize="characters"
+              @input="(e) => (editForm.trailer_number = upperOnly((e.target as HTMLInputElement).value))"
+            />
           </label>
         </div>
         <div class="actions">
@@ -505,6 +519,9 @@ textarea {
   background: #0b1220;
   color: #fff;
   padding: 0.5rem 0.62rem;
+}
+.upper {
+  text-transform: uppercase;
 }
 button {
   border: none;

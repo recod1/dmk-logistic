@@ -256,10 +256,13 @@ function removeUser(user: AdminUser): void {
 .actions {
   display: flex;
   gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 .table-wrap {
   display: grid;
   gap: 0.6rem;
+  overflow-x: auto;
 }
 table {
   width: 100%;
@@ -275,6 +278,13 @@ td {
 .row-actions {
   display: flex;
   gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.row-actions button {
+  max-width: 100%;
+}
+td.row-actions {
+  white-space: normal;
 }
 .danger {
   background: #7f1d1d;
@@ -309,6 +319,9 @@ select {
 }
 
 @media (max-width: 760px) {
+  .actions {
+    width: 100%;
+  }
   .table-wrap {
     border: 0;
     background: transparent;
