@@ -28,6 +28,29 @@ const draft = ref("");
 const listRef = ref<HTMLElement | null>(null);
 const listInnerRef = ref<HTMLElement | null>(null);
 let resizeObserver: ResizeObserver | null = null;
+const emojiOpen = ref(false);
+const EMOJIS = [
+  "👍",
+  "👎",
+  "✅",
+  "❌",
+  "⚠️",
+  "🚚",
+  "📍",
+  "📞",
+  "⏱️",
+  "🧾",
+  "📸",
+  "🗺️",
+  "😊",
+  "😂",
+  "🙏",
+  "🔥",
+  "💪",
+  "💬",
+  "❗",
+  "❓"
+] as const;
 
 const canSubmit = computed(() => props.canSend && draft.value.trim().length > 0 && !props.loading);
 
@@ -36,6 +59,24 @@ function submit(): void {
   if (!text) return;
   emit("send", text);
   draft.value = "";
+}
+
+function toggleEmoji(): void {
+  emojiOpen.value = !emojiOpen.value;
+}
+
+function pickEmoji(emoji: string): void {
+  if (!props.canSend || props.loading) {
+    return;
+  }
+  const trimmed = draft.value.trim();
+  if (!trimmed) {
+    emit("send", emoji);
+    draft.value = "";
+    emojiOpen.value = false;
+    return;
+  }
+  draft.value = `${draft.value}${emoji}`;
 }
 
 async function scrollToBottom(): Promise<void> {
@@ -69,6 +110,13 @@ watch(
   () => props.routeId,
   () => {
     void scrollToBottom();
+  }
+);
+
+watch(
+  () => props.routeId,
+  () => {
+    emojiOpen.value = false;
   }
 );
 
@@ -128,6 +176,18 @@ onUnmounted(() => {
     </div>
 
     <footer class="composer">
+      <div v-if="emojiOpen" class="emoji-panel" role="list">
+        <button
+          v-for="e in EMOJIS"
+          :key="e"
+          class="emoji-btn"
+          type="button"
+          :disabled="!canSend || loading"
+          @click="pickEmoji(e)"
+        >
+          {{ e }}
+        </button>
+      </div>
       <div class="composer-field">
         <textarea
           v-model="draft"
@@ -137,6 +197,7 @@ onUnmounted(() => {
           @keydown.enter.exact.prevent="submit"
         />
       </div>
+      <button class="emoji-toggle" type="button" :disabled="!canSend" title="Эмодзи" @click="toggleEmoji">🙂</button>
       <button class="send-btn" type="button" :disabled="!canSubmit" title="Отправить" @click="submit">➤</button>
     </footer>
   </section>
@@ -263,11 +324,34 @@ onUnmounted(() => {
 .composer {
   flex-shrink: 0;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-end;
   gap: 0.45rem;
   padding: 0.5rem 0.65rem calc(0.55rem + env(safe-area-inset-bottom, 0));
   background: #17212b;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.emoji-panel {
+  width: 100%;
+  display: grid;
+  grid-template-columns: repeat(10, minmax(0, 1fr));
+  gap: 0.25rem;
+  padding: 0.35rem 0;
+}
+
+.emoji-btn {
+  border: none;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-size: 1.15rem;
+  line-height: 1;
+  padding: 0.35rem 0;
+}
+
+.emoji-btn:disabled {
+  opacity: 0.5;
 }
 
 .composer-field {
@@ -276,6 +360,27 @@ onUnmounted(() => {
   border-radius: 22px;
   background: #0e1621;
   border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.emoji-toggle {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.emoji-toggle:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
 }
 
 .composer textarea {
@@ -322,6 +427,12 @@ onUnmounted(() => {
 .send-btn:disabled {
   opacity: 0.38;
   cursor: not-allowed;
+}
+
+@media (max-width: 420px) {
+  .emoji-panel {
+    grid-template-columns: repeat(8, minmax(0, 1fr));
+  }
 }
 
 .ghost {
