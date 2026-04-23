@@ -254,12 +254,21 @@ def push_debug_config(
             normalized = normalized.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----\n")
             normalized = normalized.replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
 
+        key = None
         if "BEGIN" in normalized:
             key = serialization.load_pem_private_key(normalized.encode("utf-8"), password=None)
         else:
-            # raw base64/base64url (DER or 32-byte scalar) parsing happens in sender
-            # so here we only confirm it is decodable-ish
-            _ = normalized[:16]
+            # Try to parse base64/base64url value as DER (PKCS8) or raw 32-byte scalar.
+            padding = "=" * ((4 - (len(normalized) % 4)) % 4)
+            try:
+                decoded = base64.urlsafe_b64decode((normalized + padding).encode("utf-8"))
+            except Exception:
+                decoded = base64.b64decode((normalized + padding).encode("utf-8"))
+            if len(decoded) == 32:
+                private_value = int.from_bytes(decoded, byteorder="big", signed=False)
+                key = ec.derive_private_key(private_value, ec.SECP256R1())
+            else:
+                key = serialization.load_der_private_key(decoded, password=None)
         info["private_key_parsed_by_cryptography"] = True
 
         # Best-effort: verify that VAPID_PUBLIC_KEY matches the private key (common misconfig).
@@ -272,6 +281,8 @@ def push_debug_config(
                 computed_pub = base64.urlsafe_b64encode(pub).decode("utf-8").rstrip("=")
                 info["computed_public_key_len"] = len(computed_pub)
                 info["public_key_matches_private"] = computed_pub.strip() == raw_pub.strip()
+            else:
+                info["public_key_matches_private"] = False
         except Exception as exc2:
             info["public_key_matches_private"] = False
             info["public_key_match_error"] = str(exc2)
