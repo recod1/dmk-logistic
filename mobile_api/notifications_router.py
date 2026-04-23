@@ -218,6 +218,41 @@ def push_test(
     return {"ok": ok_count == len(subs), "subscriptions": len(subs), "ok_count": ok_count, "results": results}
 
 
+@router.get("/v1/notifications/push/subscriptions")
+def push_list_subscriptions(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """
+    Debug endpoint to see what push subscriptions are stored for the current user.
+    Useful to confirm that iOS (web.push.apple.com) subscription is created.
+    """
+    rows = db.scalars(
+        select(WebPushSubscription)
+        .where(WebPushSubscription.user_id == current_user.id)
+        .order_by(WebPushSubscription.created_at.desc(), WebPushSubscription.id.desc())
+    ).all()
+
+    items = []
+    for row in rows:
+        host = ""
+        try:
+            from urllib.parse import urlparse
+
+            host = urlparse(row.endpoint).netloc
+        except Exception:
+            host = ""
+        items.append(
+            {
+                "id": row.id,
+                "endpoint_host": host,
+                "endpoint_preview": (row.endpoint[:80] + "…") if len(row.endpoint) > 80 else row.endpoint,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+            }
+        )
+    return {"count": len(items), "items": items}
+
+
 @router.get("/v1/notifications/push/debug-config")
 def push_debug_config(
     current_user: User = Depends(get_current_user),
