@@ -530,7 +530,10 @@ function handleIncomingNotification(
   }
 
   if (syncDriverState && item.event_type === "route_deleted" && isDriver.value) {
-    if (!item.route_id || selectedDriverRoute.value?.id === item.route_id) {
+    // Only force-close the details view when we know which route was deleted
+    // and it matches the currently opened route. Some backends may emit route_deleted
+    // without route_id — in that case just refresh driver data without navigation.
+    if (item.route_id && selectedDriverRoute.value?.id === item.route_id) {
       selectedDriverRoute.value = null;
       if (currentSection.value === "driver_route_details") {
         currentSection.value = "driver_home";

@@ -217,7 +217,7 @@ onMounted(() => {
       </button>
     </div>
 
-    <section v-if="!showCreate" class="card">
+    <section v-if="!showCreate && !showCreateOnec" class="card">
       <h2>Выберите статус</h2>
       <div class="tabs">
         <button
@@ -232,7 +232,7 @@ onMounted(() => {
       </div>
     </section>
 
-    <section v-if="!showCreate" class="card filters-card">
+    <section v-if="!showCreate && !showCreateOnec" class="card filters-card">
       <h2>{{ filteredTitle }}</h2>
       <div class="filters-grid">
         <label>
