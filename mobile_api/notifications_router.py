@@ -214,8 +214,75 @@ def push_test(
         body="Тестовое push-уведомление. Если вы это видите — Web Push работает.",
         notification_id=None,
     )
+    # Extra diagnostics to detect multi-instance / mismatched VAPID keys behind LB.
+    try:
+        import os
+        import base64
+        from cryptography.hazmat.primitives import serialization
+        from cryptography.hazmat.primitives.asymmetric import ec
+
+        raw_priv = mobile_settings.vapid_private_key or ""
+        normalized = raw_priv.strip().strip('"').strip("'")
+        if "\\n" in normalized or "\\r\\n" in normalized:
+            normalized = normalized.replace("\\r\\n", "\n").replace("\\n", "\n")
+        if "BEGIN PRIVATE KEY" in normalized and "END PRIVATE KEY" in normalized and "\n" not in normalized:
+            normalized = normalized.replace("-----BEGIN PRIVATE KEY-----", "-----BEGIN PRIVATE KEY-----\n")
+            normalized = normalized.replace("-----END PRIVATE KEY-----", "\n-----END PRIVATE KEY-----")
+
+        key = None
+        if "BEGIN" in normalized:
+            key = serialization.load_pem_private_key(normalized.encode("utf-8"), password=None)
+        else:
+            padding = "=" * ((4 - (len(normalized) % 4)) % 4)
+            try:
+                decoded = base64.urlsafe_b64decode((normalized + padding).encode("utf-8"))
+            except Exception:
+                decoded = base64.b64decode((normalized + padding).encode("utf-8"))
+            if len(decoded) == 32:
+                private_value = int.from_bytes(decoded, byteorder="big", signed=False)
+                key = ec.derive_private_key(private_value, ec.SECP256R1())
+            else:
+                key = serialization.load_der_private_key(decoded, password=None)
+
+        computed_pub = None
+        if isinstance(key, ec.EllipticCurvePrivateKey):
+            pub = key.public_key().public_bytes(
+                encoding=serialization.Encoding.X962,
+                format=serialization.PublicFormat.UncompressedPoint,
+            )
+            computed_pub = base64.urlsafe_b64encode(pub).decode("utf-8").rstrip("=")
+
+        # annotate each result with endpoint host (helps spot Apple vs Mozilla/FCM)
+        try:
+            from urllib.parse import urlparse
+
+            by_id = {sub_id: urlparse(endpoint).netloc for sub_id, endpoint, _p, _a in subs}
+            for r in results:
+                sid = r.get("subscription_id")
+                if isinstance(sid, int) and sid in by_id:
+                    r["endpoint_host"] = by_id[sid]
+        except Exception:
+            pass
+
+        meta = {
+            "instance": os.getenv("HOSTNAME") or os.uname().nodename,
+            "vapid_public_key_len": len((mobile_settings.vapid_public_key or "").strip()),
+            "computed_public_key_len": len(computed_pub) if computed_pub else None,
+            "computed_public_key_preview": (
+                f"{computed_pub[:10]}…{computed_pub[-10:]}" if computed_pub and len(computed_pub) > 25 else computed_pub
+            ),
+            "claim_email": mobile_settings.vapid_claim_email,
+        }
+    except Exception:
+        meta = {"instance": None}
     ok_count = len([r for r in results if r.get("ok")])
-    return {"ok": ok_count == len(subs), "subscriptions": len(subs), "ok_count": ok_count, "results": results}
+    return {
+        "ok": ok_count == len(subs),
+        "subscriptions": len(subs),
+        "ok_count": ok_count,
+        "meta": meta,
+        "results": results,
+    }
 
 
 @router.get("/v1/notifications/push/subscriptions")
@@ -266,6 +333,7 @@ def push_debug_config(
     raw_pub = mobile_settings.vapid_public_key or ""
 
     info: dict = {
+        "instance": None,
         "vapid_public_key_set": bool(raw_pub.strip()),
         "vapid_public_key_len": len(raw_pub.strip()),
         "vapid_private_key_set": bool(raw_priv.strip()),
@@ -276,6 +344,12 @@ def push_debug_config(
         "vapid_private_key_newline_count": raw_priv.count("\n"),
         "vapid_claim_email": mobile_settings.vapid_claim_email,
     }
+    try:
+        import os
+
+        info["instance"] = os.getenv("HOSTNAME") or os.uname().nodename
+    except Exception:
+        info["instance"] = None
 
     try:
         import base64
