@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 
 import type { AdminChatRoomRow } from "../api";
 import { ROLE_OPTIONS, type RoleCode } from "../roles";
@@ -25,17 +25,24 @@ export type LogisticDriverRoomRow = {
   room: ChatRoomListItem;
 };
 
+type HubTab = "direct" | "group" | "broadcast" | "admin";
+
 const props = defineProps<{
   loading: boolean;
   error: string;
   rooms: ChatRoomListItem[];
   users: UserListItem[];
-  /** Логист: заранее созданные комнаты с каждым водителем */
   logisticDriverRooms?: LogisticDriverRoomRow[];
+  accountantDriverRooms?: LogisticDriverRoomRow[];
   isLogistic?: boolean;
+  isAccountant?: boolean;
+  isDriver?: boolean;
+  currentUserId?: number | null;
   isAdmin?: boolean;
   adminRooms?: AdminChatRoomRow[];
   adminRoomsLoading?: boolean;
+  /** Incremented after successful admin room mutation — clears create/edit forms */
+  adminChatTick?: number;
 }>();
 
 const emit = defineEmits<{
@@ -46,9 +53,11 @@ const emit = defineEmits<{
   "admin-broadcast": [payload: { title: string; message: string; role_codes: RoleCode[] }];
   "admin-delete-room": [roomId: number];
   "admin-refresh-rooms": [];
+  "admin-create-room": [payload: { title: string; system_key: string | null; member_user_ids: number[]; role_codes: string[] }];
+  "admin-patch-room": [payload: { roomId: number; title: string }];
 }>();
 
-const tab = ref<"direct" | "group">("direct");
+const tab = ref<HubTab>("direct");
 const userQuery = ref("");
 
 const broadcastTitle = ref("");
@@ -60,6 +69,20 @@ const broadcastRoles = ref<Record<RoleCode, boolean>>({
   admin: false,
   superadmin: false
 });
+
+const newRoomTitle = ref("");
+const newRoomSystemKey = ref("");
+const newRoomMemberIdsText = ref("");
+const newRoomRoles = ref<Record<RoleCode, boolean>>({
+  driver: false,
+  logistic: false,
+  accountant: false,
+  admin: false,
+  superadmin: false
+});
+
+const editingRoomId = ref<number | null>(null);
+const editingTitle = ref("");
 
 const filteredUsers = computed(() => {
   const q = userQuery.value.trim().toLowerCase();
@@ -73,10 +96,38 @@ const filteredUsers = computed(() => {
 const directRooms = computed(() => props.rooms.filter((r) => r.kind === "direct"));
 const groupRooms = computed(() => props.rooms.filter((r) => r.kind === "group"));
 
-const logisticDriverRoomIds = computed(() => new Set((props.logisticDriverRooms ?? []).map((x) => x.room.id)));
+const excludedGroupRoomIds = computed(() => {
+  const ids = new Set<number>();
+  (props.logisticDriverRooms ?? []).forEach((x) => ids.add(x.room.id));
+  (props.accountantDriverRooms ?? []).forEach((x) => ids.add(x.room.id));
+  return ids;
+});
 
-const groupRoomsWithoutLogisticDriverDupes = computed(() =>
-  groupRooms.value.filter((r) => !logisticDriverRoomIds.value.has(r.id))
+const driverPinnedKeys = computed(() => {
+  const uid = props.currentUserId;
+  if (!uid || !props.isDriver) return null;
+  return new Set([`sys:driver:${uid}:logistics`, `sys:driver:${uid}:accounting`]);
+});
+
+const driverLogisticsRoom = computed(() => {
+  const uid = props.currentUserId;
+  if (!uid || !props.isDriver) return null;
+  return props.rooms.find((r) => r.system_key === `sys:driver:${uid}:logistics`) ?? null;
+});
+
+const driverAccountingRoom = computed(() => {
+  const uid = props.currentUserId;
+  if (!uid || !props.isDriver) return null;
+  return props.rooms.find((r) => r.system_key === `sys:driver:${uid}:accounting`) ?? null;
+});
+
+const groupRoomsFiltered = computed(() =>
+  groupRooms.value.filter((r) => {
+    if (excludedGroupRoomIds.value.has(r.id)) return false;
+    const pin = driverPinnedKeys.value;
+    if (pin && r.system_key && pin.has(r.system_key)) return false;
+    return true;
+  })
 );
 
 function submitBroadcast(): void {
@@ -91,9 +142,67 @@ function submitBroadcast(): void {
   });
 }
 
+function parseMemberIds(raw: string): number[] {
+  const out: number[] = [];
+  for (const part of raw.split(/[\s,;]+/)) {
+    const n = parseInt(part.trim(), 10);
+    if (Number.isFinite(n) && n > 0) out.push(n);
+  }
+  return [...new Set(out)];
+}
+
+function submitCreateRoom(): void {
+  const title = newRoomTitle.value.trim();
+  if (!title) return;
+  const system_key = newRoomSystemKey.value.trim() || null;
+  const member_user_ids = parseMemberIds(newRoomMemberIdsText.value);
+  const role_codes = (Object.keys(newRoomRoles.value) as RoleCode[]).filter((k) => newRoomRoles.value[k]).map((k) => k);
+  emit("admin-create-room", { title, system_key, member_user_ids, role_codes });
+}
+
+function startEditRoom(r: AdminChatRoomRow): void {
+  editingRoomId.value = r.id;
+  editingTitle.value = r.title || "";
+}
+
+function cancelEditRoom(): void {
+  editingRoomId.value = null;
+  editingTitle.value = "";
+}
+
+function submitEditRoom(): void {
+  if (editingRoomId.value == null) return;
+  const title = editingTitle.value.trim();
+  if (!title) return;
+  emit("admin-patch-room", { roomId: editingRoomId.value, title });
+  cancelEditRoom();
+}
+
+function onTabSelect(next: HubTab): void {
+  if (!props.isAdmin && (next === "broadcast" || next === "admin")) {
+    return;
+  }
+  tab.value = next;
+}
+
 onMounted(() => {
   emit("refresh");
 });
+
+watch(
+  () => props.adminChatTick ?? 0,
+  (t, prev) => {
+    if (t > 0 && t !== prev) {
+      newRoomTitle.value = "";
+      newRoomSystemKey.value = "";
+      newRoomMemberIdsText.value = "";
+      (Object.keys(newRoomRoles.value) as RoleCode[]).forEach((k) => {
+        newRoomRoles.value[k] = false;
+      });
+      cancelEditRoom();
+    }
+  }
+);
 </script>
 
 <template>
@@ -107,8 +216,12 @@ onMounted(() => {
     <p v-if="error" class="error">{{ error }}</p>
 
     <div class="tabs">
-      <button class="tab" :class="{ active: tab === 'direct' }" type="button" @click="tab = 'direct'">Личные</button>
-      <button class="tab" :class="{ active: tab === 'group' }" type="button" @click="tab = 'group'">Групповые</button>
+      <button class="tab" :class="{ active: tab === 'direct' }" type="button" @click="onTabSelect('direct')">Личные</button>
+      <button class="tab" :class="{ active: tab === 'group' }" type="button" @click="onTabSelect('group')">Групповые</button>
+      <button v-if="isAdmin" class="tab" :class="{ active: tab === 'broadcast' }" type="button" @click="onTabSelect('broadcast')">
+        Рассылка
+      </button>
+      <button v-if="isAdmin" class="tab" :class="{ active: tab === 'admin' }" type="button" @click="onTabSelect('admin')">Комнаты</button>
     </div>
 
     <section v-if="tab === 'direct'" class="card">
@@ -140,10 +253,38 @@ onMounted(() => {
       </div>
     </section>
 
-    <section v-else class="card">
+    <section v-else-if="tab === 'group'" class="card">
+      <template v-if="isDriver && currentUserId">
+        <h2>Служба</h2>
+        <p class="hint">Один чат с логистами и один с бухгалтерией по всем рейсам и вопросам.</p>
+        <div class="rooms">
+          <button
+            v-if="driverLogisticsRoom"
+            type="button"
+            class="room"
+            @click="emit('openRoom', driverLogisticsRoom.id, driverLogisticsRoom.title || 'Логисты')"
+          >
+            <span class="room-title">{{ driverLogisticsRoom.title || "Логисты" }}</span>
+            <span v-if="(driverLogisticsRoom.unread_count ?? 0) > 0" class="dot" />
+          </button>
+          <button
+            v-if="driverAccountingRoom"
+            type="button"
+            class="room"
+            @click="emit('openRoom', driverAccountingRoom.id, driverAccountingRoom.title || 'Бухгалтерия')"
+          >
+            <span class="room-title">{{ driverAccountingRoom.title || "Бухгалтерия" }}</span>
+            <span v-if="(driverAccountingRoom.unread_count ?? 0) > 0" class="dot" />
+          </button>
+          <p v-if="!driverLogisticsRoom && !driverAccountingRoom" class="empty">
+            Чаты подключаются при загрузке. Нажмите «Обновить».
+          </p>
+        </div>
+      </template>
+
       <template v-if="isLogistic && (logisticDriverRooms?.length ?? 0) > 0">
-        <h2>Водители</h2>
-        <p class="hint">Отдельный чат с каждым водителем для координации рейсов.</p>
+        <h2>Водители (логисты)</h2>
+        <p class="hint">Отдельный диалог с каждым водителем; сообщения видны всем логистам и этому водителю.</p>
         <div class="rooms">
           <button
             v-for="row in logisticDriverRooms"
@@ -158,10 +299,27 @@ onMounted(() => {
         </div>
       </template>
 
-      <h2>Группы</h2>
-      <div class="rooms">
+      <template v-if="isAccountant && (accountantDriverRooms?.length ?? 0) > 0">
+        <h2>Водители (бухгалтерия)</h2>
+        <p class="hint">Отдельный диалог с каждым водителем; сообщения видны всем бухгалтерам и этому водителю.</p>
+        <div class="rooms">
+          <button
+            v-for="row in accountantDriverRooms"
+            :key="row.room.id"
+            type="button"
+            class="room"
+            @click="emit('openRoom', row.room.id, row.room.title)"
+          >
+            <span class="room-title">{{ row.room.title }}</span>
+            <span v-if="(row.room.unread_count ?? 0) > 0" class="dot" />
+          </button>
+        </div>
+      </template>
+
+      <h2 v-if="!isDriver || groupRoomsFiltered.length">Прочие группы</h2>
+      <div v-if="!isDriver || groupRoomsFiltered.length" class="rooms">
         <button
-          v-for="r in groupRoomsWithoutLogisticDriverDupes"
+          v-for="r in groupRoomsFiltered"
           :key="r.id"
           type="button"
           class="room"
@@ -170,44 +328,81 @@ onMounted(() => {
           <span class="room-title">{{ r.title }}</span>
           <span v-if="(r.unread_count ?? 0) > 0" class="dot" />
         </button>
-        <p v-if="!groupRoomsWithoutLogisticDriverDupes.length" class="empty">Других групповых чатов нет.</p>
+        <p v-if="!groupRoomsFiltered.length" class="empty">Других групповых чатов нет.</p>
       </div>
+    </section>
 
-      <template v-if="isAdmin">
-        <h2 class="subhead">Рассылка по ролям</h2>
-        <p class="hint">Пользователи выбранных ролей получат уведомление в приложении.</p>
-        <label class="field">
-          Заголовок
-          <input v-model="broadcastTitle" placeholder="Например: Важно" />
+    <section v-else-if="tab === 'broadcast' && isAdmin" class="card">
+      <h2>Рассылка по ролям</h2>
+      <p class="hint">Пользователи выбранных ролей получат уведомление в приложении.</p>
+      <label class="field">
+        Заголовок
+        <input v-model="broadcastTitle" placeholder="Например: Важно" />
+      </label>
+      <label class="field">
+        Текст
+        <textarea v-model="broadcastMessage" rows="3" placeholder="Текст уведомления" />
+      </label>
+      <div class="role-grid">
+        <label v-for="opt in ROLE_OPTIONS" :key="opt.role_code" class="check">
+          <input v-model="broadcastRoles[opt.role_code]" type="checkbox" />
+          {{ opt.role_label }}
         </label>
-        <label class="field">
-          Текст
-          <textarea v-model="broadcastMessage" rows="3" placeholder="Текст уведомления" />
-        </label>
-        <div class="role-grid">
-          <label v-for="opt in ROLE_OPTIONS" :key="opt.role_code" class="check">
-            <input v-model="broadcastRoles[opt.role_code]" type="checkbox" />
-            {{ opt.role_label }}
-          </label>
-        </div>
-        <button class="primary" type="button" @click="submitBroadcast">Отправить</button>
+      </div>
+      <button class="primary" type="button" @click="submitBroadcast">Отправить</button>
+    </section>
 
-        <h2 class="subhead">Все комнаты</h2>
-        <button class="ghost sm" type="button" :disabled="adminRoomsLoading" @click="emit('admin-refresh-rooms')">
-          Обновить список комнат
-        </button>
-        <div v-if="adminRooms?.length" class="admin-rooms">
-          <div v-for="r in adminRooms" :key="r.id" class="admin-row">
-            <div class="admin-row-main">
+    <section v-else-if="tab === 'admin' && isAdmin" class="card">
+      <h2>Создать групповую комнату</h2>
+      <p class="hint">Название обязательно. Участники — id пользователей через запятую. Роли — все пользователи с этой ролью видят чат.</p>
+      <label class="field">
+        Название
+        <input v-model="newRoomTitle" placeholder="Например: Общий склад" />
+      </label>
+      <label class="field">
+        Ключ системы (необязательно, уникально)
+        <input v-model="newRoomSystemKey" placeholder="my_room_key" />
+      </label>
+      <label class="field">
+        ID участников (через запятую)
+        <input v-model="newRoomMemberIdsText" placeholder="12, 34" />
+      </label>
+      <p class="hint">Роли в комнате</p>
+      <div class="role-grid">
+        <label v-for="opt in ROLE_OPTIONS" :key="'nr-' + opt.role_code" class="check">
+          <input v-model="newRoomRoles[opt.role_code]" type="checkbox" />
+          {{ opt.role_label }}
+        </label>
+      </div>
+      <button class="primary" type="button" @click="submitCreateRoom">Создать</button>
+
+      <h2 class="subhead">Все комнаты</h2>
+      <button class="ghost sm" type="button" :disabled="adminRoomsLoading" @click="emit('admin-refresh-rooms')">
+        Обновить список комнат
+      </button>
+      <div v-if="adminRooms?.length" class="admin-rooms">
+        <div v-for="r in adminRooms" :key="r.id" class="admin-row">
+          <div class="admin-row-main">
+            <template v-if="editingRoomId === r.id">
+              <input v-model="editingTitle" class="inline-input" />
+              <div class="edit-actions">
+                <button class="ghost sm" type="button" @click="submitEditRoom">Сохранить</button>
+                <button class="ghost sm" type="button" @click="cancelEditRoom">Отмена</button>
+              </div>
+            </template>
+            <template v-else>
               <span class="admin-title">{{ r.title || `Комната #${r.id}` }}</span>
               <span class="admin-meta">{{ r.kind }} · id {{ r.id }}</span>
               <span v-if="r.system_key" class="admin-meta">{{ r.system_key }}</span>
-            </div>
+            </template>
+          </div>
+          <div v-if="editingRoomId !== r.id" class="admin-actions">
+            <button class="ghost sm" type="button" @click="startEditRoom(r)">Изменить</button>
             <button class="danger sm" type="button" @click="emit('admin-delete-room', r.id)">Удалить</button>
           </div>
         </div>
-        <p v-else class="empty">Нет комнат или список ещё не загружен.</p>
-      </template>
+      </div>
+      <p v-else class="empty">Нет комнат или список ещё не загружен.</p>
     </section>
   </section>
 </template>
@@ -237,6 +432,7 @@ h2 {
 }
 .tabs {
   display: flex;
+  flex-wrap: wrap;
   gap: 0.5rem;
 }
 .tab {
@@ -309,6 +505,14 @@ input {
   background: #0b1220;
   color: #fff;
   padding: 0.5rem 0.62rem;
+}
+.inline-input {
+  margin-bottom: 0.35rem;
+}
+.edit-actions {
+  display: flex;
+  gap: 0.35rem;
+  flex-wrap: wrap;
 }
 .role-grid {
   display: flex;
@@ -406,6 +610,13 @@ input {
   display: grid;
   gap: 0.15rem;
   min-width: 0;
+  flex: 1;
+}
+.admin-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  flex-shrink: 0;
 }
 .admin-title {
   font-weight: 600;

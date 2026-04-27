@@ -48,6 +48,37 @@ def _is_logistic_role(user: User) -> bool:
         return False
 
 
+def _is_accountant_role(user: User) -> bool:
+    try:
+        return normalize_role_code(user.role_code) == RoleCode.ACCOUNTANT
+    except ValueError:
+        return False
+
+
+def _unread_for_room(db: Session, viewer_id: int, room_id: int) -> int:
+    read = db.scalar(select(ChatRead).where(ChatRead.user_id == viewer_id, ChatRead.room_id == room_id))
+    last_id = int(read.last_read_message_id or 0) if read else 0
+    return int(
+        db.scalar(
+            select(func.count())
+            .select_from(ChatMessage)
+            .where(
+                ChatMessage.room_id == room_id,
+                ChatMessage.id > last_id,
+                ChatMessage.user_id != viewer_id,
+            )
+        )
+        or 0
+    )
+
+
+def _driver_channel_room(db: Session, driver: User, channel: str) -> ChatRoom | None:
+    """Одна комната на водителя: sys:driver:{id}:logistics|accounting (водитель + роль в ChatRoomRoleMember)."""
+    ensure_driver_system_rooms(db, driver)
+    key = f"sys:driver:{int(driver.id)}:{channel}"
+    return db.scalar(select(ChatRoom).where(ChatRoom.system_key == key))
+
+
 def _spawn_publish_chat_room(recipients: list[int], item: dict) -> None:
     def _run() -> None:
         try:
@@ -118,35 +149,6 @@ def ensure_driver_system_rooms(db: Session, driver: User) -> None:
             db.commit()
         except IntegrityError:
             db.rollback()
-
-
-def ensure_logistic_driver_room(db: Session, logistic: User, driver: User) -> ChatRoom:
-    key = f"sys:logistic:{int(logistic.id)}:driver:{int(driver.id)}"
-    existing = db.scalar(select(ChatRoom).where(ChatRoom.system_key == key))
-    if existing is not None:
-        return existing
-    label = (driver.full_name or driver.login or "Водитель").strip()
-    if len(label) > 90:
-        label = label[:90] + "…"
-    title = f"Чат Логисты — {label}"
-    room = ChatRoom(kind="group", title=title, system_key=key, created_by_user_id=int(logistic.id))
-    db.add(room)
-    try:
-        db.flush()
-    except IntegrityError:
-        db.rollback()
-        again = db.scalar(select(ChatRoom).where(ChatRoom.system_key == key))
-        if again is None:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Could not create chat room",
-            ) from None
-        return again
-    db.add(ChatRoomMember(room_id=int(room.id), user_id=int(logistic.id)))
-    db.add(ChatRoomMember(room_id=int(room.id), user_id=int(driver.id)))
-    db.commit()
-    db.refresh(room)
-    return room
 
 
 def _assert_room_access(db: Session, user: User, room: ChatRoom) -> None:
@@ -331,11 +333,53 @@ def list_logistic_driver_rooms(
     for d in drivers:
         if int(d.id) == int(current_user.id):
             continue
-        room = ensure_logistic_driver_room(db, current_user, d)
+        room = _driver_channel_room(db, d, "logistics")
+        if room is None:
+            continue
+        label = (d.full_name or d.login or "Водитель").strip()
+        if len(label) > 90:
+            label = label[:90] + "…"
+        unread = _unread_for_room(db, int(current_user.id), int(room.id))
+        out = _room_out(db, room, current_user, {int(room.id): unread})
+        out["title"] = f"{label} · логисты"
         items.append(
             {
                 "driver": {"id": int(d.id), "full_name": d.full_name, "login": d.login},
-                "room": _room_out(db, room, current_user),
+                "room": out,
+            }
+        )
+    return {"items": items}
+
+
+@router.get("/v1/chats/accountant/driver-rooms")
+def list_accountant_driver_rooms(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    if not _is_accountant_role(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only for accountant role")
+    drivers = db.scalars(
+        select(User)
+        .where(User.is_active == True, User.role_code == RoleCode.DRIVER.value)  # noqa: E712
+        .order_by(func.lower(User.full_name), func.lower(User.login))
+    ).all()
+    items: list[dict] = []
+    for d in drivers:
+        if int(d.id) == int(current_user.id):
+            continue
+        room = _driver_channel_room(db, d, "accounting")
+        if room is None:
+            continue
+        label = (d.full_name or d.login or "Водитель").strip()
+        if len(label) > 90:
+            label = label[:90] + "…"
+        unread = _unread_for_room(db, int(current_user.id), int(room.id))
+        out = _room_out(db, room, current_user, {int(room.id): unread})
+        out["title"] = f"{label} · бухгалтерия"
+        items.append(
+            {
+                "driver": {"id": int(d.id), "full_name": d.full_name, "login": d.login},
+                "room": out,
             }
         )
     return {"items": items}

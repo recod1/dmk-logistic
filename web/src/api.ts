@@ -660,6 +660,23 @@ export async function listLogisticDriverChatRooms(
   return data.items;
 }
 
+export async function listAccountantDriverChatRooms(
+  token: string
+): Promise<
+  Array<{
+    driver: { id: number; full_name: string | null; login: string };
+    room: { id: number; kind: "direct" | "group"; title: string; system_key?: string | null; unread_count?: number };
+  }>
+> {
+  const data = await requestJson<{
+    items: Array<{
+      driver: { id: number; full_name: string | null; login: string };
+      room: { id: number; kind: "direct" | "group"; title: string; system_key?: string | null; unread_count?: number };
+    }>;
+  }>(`${API_BASE}/v1/chats/accountant/driver-rooms`, { headers: { Authorization: `Bearer ${token}` } });
+  return data.items;
+}
+
 export async function listChatRooms(
   token: string,
   kind?: "direct" | "group"
@@ -756,6 +773,30 @@ export async function listAdminChatRooms(token: string): Promise<AdminChatRoomRo
     headers: { Authorization: `Bearer ${token}` }
   });
   return data.items;
+}
+
+export async function adminCreateChatRoom(
+  token: string,
+  payload: { title: string; system_key?: string | null; member_user_ids: number[]; role_codes: string[] }
+): Promise<AdminChatRoomRow> {
+  return requestJson<AdminChatRoomRow>(`${API_BASE}/v1/admin/chats/rooms`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({
+      title: payload.title.trim(),
+      system_key: payload.system_key?.trim() || null,
+      member_user_ids: payload.member_user_ids,
+      role_codes: payload.role_codes
+    })
+  });
+}
+
+export async function adminPatchChatRoom(token: string, roomId: number, title: string): Promise<AdminChatRoomRow> {
+  return requestJson<AdminChatRoomRow>(`${API_BASE}/v1/admin/chats/rooms/${roomId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ title: title.trim() })
+  });
 }
 
 export async function adminDeleteChatRoom(token: string, roomId: number): Promise<void> {

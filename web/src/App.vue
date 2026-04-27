@@ -40,7 +40,10 @@ import {
   listChatRooms,
   listChatUsers,
   listLogisticDriverChatRooms,
+  listAccountantDriverChatRooms,
   listAdminChatRooms,
+  adminCreateChatRoom,
+  adminPatchChatRoom,
   adminDeleteChatRoom,
   adminBroadcastByRoles,
   openDirectChat,
@@ -216,6 +219,13 @@ const logisticDriverChatRooms = ref<
     room: { id: number; kind: "direct" | "group"; title: string; system_key?: string | null; unread_count?: number };
   }>
 >([]);
+const accountantDriverChatRooms = ref<
+  Array<{
+    driver: { id: number; full_name: string | null; login: string };
+    room: { id: number; kind: "direct" | "group"; title: string; system_key?: string | null; unread_count?: number };
+  }>
+>([]);
+const adminChatsHubTick = ref(0);
 const adminChatRoomsList = ref<
   Array<{
     id: number;
@@ -277,7 +287,23 @@ const logisticDriverChatRoomsDisplay = computed(() => {
   }));
 });
 
-const hasUnreadGenericChats = computed(() => chatsRoomsForDisplay.value.some((r) => (r.unread_count ?? 0) > 0));
+const accountantDriverChatRoomsDisplay = computed(() => {
+  const bump = roomUnreadBump.value;
+  return accountantDriverChatRooms.value.map((row) => ({
+    ...row,
+    room: {
+      ...row.room,
+      unread_count: (row.room.unread_count ?? 0) + (bump[row.room.id] ?? 0)
+    }
+  }));
+});
+
+const hasUnreadGenericChats = computed(() => {
+  if (chatsRoomsForDisplay.value.some((r) => (r.unread_count ?? 0) > 0)) return true;
+  if (logisticDriverChatRoomsDisplay.value.some((row) => (row.room.unread_count ?? 0) > 0)) return true;
+  if (accountantDriverChatRoomsDisplay.value.some((row) => (row.room.unread_count ?? 0) > 0)) return true;
+  return false;
+});
 
 const salaryChatItemsForChatView = computed(() => {
   const sid = salaryChatSalaryId.value;
@@ -911,6 +937,7 @@ function clearAuth(): void {
   useLegacyBrowserNotification.value = true;
   roomUnreadBump.value = {};
   logisticDriverChatRooms.value = [];
+  accountantDriverChatRooms.value = [];
   adminChatRoomsList.value = [];
   salaryListMine.value = [];
   salaryCurrentRecord.value = null;
@@ -2187,6 +2214,11 @@ async function refreshChatsHub(): Promise<void> {
     } else {
       logisticDriverChatRooms.value = [];
     }
+    if (authUser.value && isAccountantRole(authUser.value.role_code)) {
+      accountantDriverChatRooms.value = await listAccountantDriverChatRooms(authToken.value);
+    } else {
+      accountantDriverChatRooms.value = [];
+    }
     if (authUser.value && isAdminRole(authUser.value.role_code)) {
       adminChatRoomsLoading.value = true;
       try {
@@ -2248,9 +2280,44 @@ async function doAdminDeleteRoom(roomId: number): Promise<void> {
   try {
     await adminDeleteChatRoom(authToken.value, roomId);
     syncMessage.value = "Комната удалена";
+    adminChatsHubTick.value += 1;
     await refreshChatsHub();
   } catch (error) {
     syncMessage.value = `Не удалось удалить: ${(error as Error).message}`;
+  }
+}
+
+async function doAdminCreateRoom(payload: {
+  title: string;
+  system_key: string | null;
+  member_user_ids: number[];
+  role_codes: string[];
+}): Promise<void> {
+  if (!authToken.value) return;
+  try {
+    await adminCreateChatRoom(authToken.value, {
+      title: payload.title,
+      system_key: payload.system_key || undefined,
+      member_user_ids: payload.member_user_ids,
+      role_codes: payload.role_codes
+    });
+    syncMessage.value = "Комната создана";
+    adminChatsHubTick.value += 1;
+    await refreshChatsHub();
+  } catch (error) {
+    syncMessage.value = `Не удалось создать: ${(error as Error).message}`;
+  }
+}
+
+async function doAdminPatchRoom(payload: { roomId: number; title: string }): Promise<void> {
+  if (!authToken.value) return;
+  try {
+    await adminPatchChatRoom(authToken.value, payload.roomId, payload.title);
+    syncMessage.value = "Название обновлено";
+    adminChatsHubTick.value += 1;
+    await refreshChatsHub();
+  } catch (error) {
+    syncMessage.value = `Не удалось сохранить: ${(error as Error).message}`;
   }
 }
 
@@ -2923,10 +2990,15 @@ onUnmounted(() => {
         :loading="chatsLoading"
         :error="chatsError"
         :logistic-driver-rooms="logisticDriverChatRoomsDisplay"
+        :accountant-driver-rooms="accountantDriverChatRoomsDisplay"
         :is-logistic="isLogistic"
+        :is-accountant="isAccountant"
+        :is-driver="isDriver"
+        :current-user-id="authUser?.id ?? null"
         :is-admin="isAdmin"
         :admin-rooms="adminChatRoomsList"
         :admin-rooms-loading="adminChatRoomsLoading"
+        :admin-chat-tick="adminChatsHubTick"
         @back="() => (currentSection = isDriver ? 'driver_home' : isRouteManager ? 'admin_routes' : 'driver_home')"
         @refresh="refreshChatsHub"
         @open-room="(id, title) => openChatRoom(id, title)"
@@ -2934,6 +3006,8 @@ onUnmounted(() => {
         @admin-broadcast="doAdminBroadcast"
         @admin-delete-room="doAdminDeleteRoom"
         @admin-refresh-rooms="refreshAdminChatRoomsOnly"
+        @admin-create-room="doAdminCreateRoom"
+        @admin-patch-room="doAdminPatchRoom"
       />
     </section>
 
