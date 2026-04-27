@@ -62,6 +62,14 @@ def create_notification_for_users(
     realtime_payloads: list[tuple[int, dict[str, Any]]] = []
     for created in created_items:
         row: Notification = created["row"]
+        parsed_payload: dict[str, Any] | None = None
+        if row.payload_json:
+            try:
+                raw = json.loads(row.payload_json)
+                if isinstance(raw, dict):
+                    parsed_payload = raw
+            except (TypeError, ValueError, json.JSONDecodeError):
+                parsed_payload = None
         realtime_payloads.append(
             (
                 created["user_id"],
@@ -76,6 +84,7 @@ def create_notification_for_users(
                         "point_id": row.point_id,
                         "is_read": row.is_read,
                         "created_at": row.created_at.isoformat() if row.created_at else None,
+                        "payload": parsed_payload,
                     },
                 },
             )

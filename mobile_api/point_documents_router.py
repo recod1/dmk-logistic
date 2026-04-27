@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import os
 import uuid
 from io import BytesIO
 from pathlib import Path
@@ -43,7 +44,10 @@ def _can_user_view_document(db: Session, user: User, row: PointDocumentImage) ->
     except ValueError:
         return False
     if role == RoleCode.DRIVER:
-        return route.assigned_user_id == user.id
+        aid = route.assigned_user_id
+        if aid is None:
+            return False
+        return int(aid) == int(user.id)
     if role in ROUTE_MANAGER_ROLES or role in ADMIN_ACCESS_ROLES:
         return True
     return False
@@ -51,6 +55,34 @@ def _can_user_view_document(db: Session, user: User, row: PointDocumentImage) ->
 
 def _thumb_filename_for(stored_name: str) -> str:
     return f"t_{stored_name}"
+
+
+def _fsync_file(path: Path) -> None:
+    try:
+        fd = os.open(str(path), os.O_RDONLY)
+        try:
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+    except OSError as exc:
+        logger.warning("point document fsync failed: %s", exc)
+
+
+def _atomic_write_bytes(dest: Path, body: bytes) -> None:
+    """Write bytes then rename into place so readers never see a half-written file."""
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp_name = f".{dest.name}.{uuid.uuid4().hex}.tmp"
+    tmp_path = dest.parent / tmp_name
+    try:
+        tmp_path.write_bytes(body)
+        _fsync_file(tmp_path)
+        os.replace(str(tmp_path), str(dest))
+    except Exception:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise
 
 
 def _try_write_thumbnail_jpeg(full_path: Path, body: bytes) -> None:
@@ -98,7 +130,7 @@ async def upload_point_documents(
     if point is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Point not found")
     route = db.get(Route, point.route_id)
-    if route is None or route.assigned_user_id != current_user.id:
+    if route is None or route.assigned_user_id is None or int(route.assigned_user_id) != int(current_user.id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Point is not available")
     if point.status not in {"load", "docs", "success"}:
         raise HTTPException(
@@ -125,7 +157,7 @@ async def upload_point_documents(
             ext = ".jpg"
         fname = f"{uuid.uuid4().hex}{ext}"
         full_path = sub / fname
-        full_path.write_bytes(body)
+        _atomic_write_bytes(full_path, body)
         _try_write_thumbnail_jpeg(full_path, body)
         rel = f"{point_id}/{fname}"
         row = PointDocumentImage(
@@ -164,6 +196,7 @@ def download_point_document(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid path") from exc
     if not full_path.is_file():
+        logger.warning("point document file missing: image_id=%s storage_path=%s", image_id, row.storage_path)
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on server")
 
     serve_path = full_path

@@ -278,8 +278,8 @@ onUnmounted(() => {
   flex: 1;
   min-height: 0;
   width: 100%;
-  max-width: 720px;
-  margin: 0 auto;
+  max-width: none;
+  margin: 0;
   display: flex;
   flex-direction: column;
   background: #0e1621;
@@ -328,7 +328,8 @@ onUnmounted(() => {
 
 .list-inner {
   box-sizing: border-box;
-  min-height: 100%;
+  /* Сразу занимаем высоту экрана минус шапка/поле ввода: пустой чат не «узкий», лента растёт при сообщениях */
+  min-height: max(100%, calc(100dvh - 10.5rem));
   padding: 0.5rem 0.65rem 0.75rem;
   display: flex;
   flex-direction: column;

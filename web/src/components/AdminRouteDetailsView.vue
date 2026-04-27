@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 
-import PointDocThumbs from "./PointDocThumbs.vue";
+import PointDocLinks from "./PointDocLinks.vue";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, RouteWorkflowStatus } from "../types";
 
 type PointForm = {
@@ -372,7 +372,7 @@ function removeRoute(): void {
             </tbody>
           </table>
           </div>
-          <PointDocThumbs
+          <PointDocLinks
             v-if="authToken && point.docs_images?.length"
             :token="authToken"
             :images="point.docs_images"

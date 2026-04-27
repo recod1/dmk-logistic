@@ -288,6 +288,8 @@ export interface NotificationDto {
   point_type_point?: string | null;
   is_read: boolean;
   created_at: string;
+  /** Parsed server JSON: room_id, salary_id, route_id, etc. */
+  payload?: Record<string, unknown> | null;
 }
 
 export interface DriverRouteListItem {

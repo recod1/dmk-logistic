@@ -7,14 +7,23 @@
   box-sizing: border-box;
 }
 
+html {
+  min-height: 100%;
+  min-height: 100dvh;
+}
+
 body {
   margin: 0;
   background: #030712;
   overflow-x: hidden;
+  min-height: 100%;
+  min-height: 100dvh;
 }
 
 #app {
   width: 100%;
+  min-height: 100%;
+  min-height: 100dvh;
   overflow-x: hidden;
 }
 

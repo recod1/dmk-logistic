@@ -17,14 +17,33 @@ const emit = defineEmits<{
   disablePush: [];
   markRead: [notificationId: number];
   markAllRead: [];
-  openRoute: [routeId: string, notificationId: number];
+  openFromNotification: [item: NotificationDto];
 }>();
 
-function openRouteFromItem(item: NotificationDto): void {
-  if (!item.route_id) {
-    return;
+function payloadNumber(payload: Record<string, unknown> | null | undefined, key: string): number | null {
+  if (!payload || typeof payload !== "object") return null;
+  const v = payload[key];
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
   }
-  emit("openRoute", item.route_id, item.id);
+  return null;
+}
+
+function notificationIsNavigable(item: NotificationDto): boolean {
+  if (item.route_id) return true;
+  const p = item.payload;
+  if (p && typeof p === "object" && !Array.isArray(p)) {
+    if (payloadNumber(p as Record<string, unknown>, "room_id") != null) return true;
+    if (payloadNumber(p as Record<string, unknown>, "salary_id") != null) return true;
+  }
+  return false;
+}
+
+function onNotificationCardClick(item: NotificationDto): void {
+  if (!notificationIsNavigable(item)) return;
+  emit("openFromNotification", item);
 }
 
 function formatExtra(item: NotificationDto): string {
@@ -69,8 +88,8 @@ function formatExtra(item: NotificationDto): string {
         v-for="item in items"
         :key="item.id"
         class="card item-card"
-        :class="{ unread: !item.is_read, clickable: Boolean(item.route_id) }"
-        @click="openRouteFromItem(item)"
+        :class="{ unread: !item.is_read, clickable: notificationIsNavigable(item) }"
+        @click="onNotificationCardClick(item)"
       >
         <div class="row-top">
           <strong>{{ item.message }}</strong>

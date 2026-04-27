@@ -1573,13 +1573,34 @@ async function doMarkAllNotificationsRead(): Promise<void> {
   }
 }
 
-async function openRouteFromNotification(routeId: string, notificationId: number): Promise<void> {
-  if (!authToken.value || !authUser.value) {
+function notificationPayloadRecord(item: NotificationDto): Record<string, unknown> | null {
+  const p = item.payload;
+  if (!p || typeof p !== "object" || Array.isArray(p)) {
+    return null;
+  }
+  return p as Record<string, unknown>;
+}
+
+function notificationPayloadNumber(p: Record<string, unknown> | null, key: string): number | null {
+  if (!p) return null;
+  const v = p[key];
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string" && v.trim() !== "") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+function salaryBackSectionForNotification(): AppSection {
+  if (isDriver.value) return "driver_salary";
+  return "salary_accounting";
+}
+
+async function openRouteDetailsForRole(routeId: string): Promise<void> {
+  if (!authToken.value) {
     return;
   }
-  await doMarkNotificationRead(notificationId);
-  profileMenuOpen.value = false;
-  notificationsError.value = "";
   if (isDriver.value) {
     try {
       selectedDriverRoute.value = await getDriverRoute(authToken.value, routeId);
@@ -1596,6 +1617,69 @@ async function openRouteFromNotification(routeId: string, notificationId: number
     } catch (error) {
       routesError.value = `Ошибка открытия рейса: ${(error as Error).message}`;
     }
+  }
+}
+
+async function openNotificationFromItem(item: NotificationDto): Promise<void> {
+  if (!authToken.value || !authUser.value) {
+    return;
+  }
+  const p = notificationPayloadRecord(item);
+  const salaryId = p ? notificationPayloadNumber(p, "salary_id") : null;
+  const roomId = p ? notificationPayloadNumber(p, "room_id") : null;
+  const navigable =
+    Boolean(item.route_id) || salaryId != null || roomId != null;
+  if (!navigable) {
+    return;
+  }
+
+  await doMarkNotificationRead(item.id);
+  profileMenuOpen.value = false;
+  notificationsError.value = "";
+
+  const routeIdFromPayload =
+    p && typeof p["route_id"] === "string" && (p["route_id"] as string).trim() ? (p["route_id"] as string) : null;
+
+  if (item.event_type === "chat_message" && salaryId != null) {
+    try {
+      salaryCurrentRecord.value = await getSalary(authToken.value, salaryId);
+      salaryDetailBackSection.value = salaryBackSectionForNotification();
+      salaryChatSalaryId.value = salaryId;
+      currentSection.value = "salary_chat";
+      await refreshSalaryChat();
+      startSalaryChatPolling();
+    } catch (error) {
+      notificationsError.value = (error as Error).message;
+    }
+    return;
+  }
+
+  if (item.event_type === "chat_message" && roomId != null) {
+    const titleHint = (item.title || "").replace(/^Чат:\s*/i, "").trim() || item.title || undefined;
+    await openChatRoom(roomId, titleHint);
+    return;
+  }
+
+  if (item.event_type === "chat_message") {
+    const rid = routeIdFromPayload || item.route_id;
+    if (rid) {
+      await openChatForRoute(rid);
+      return;
+    }
+  }
+
+  if (salaryId != null) {
+    try {
+      const row = await getSalary(authToken.value, salaryId);
+      openSalaryDetail(row, salaryBackSectionForNotification());
+    } catch (error) {
+      notificationsError.value = (error as Error).message;
+    }
+    return;
+  }
+
+  if (item.route_id) {
+    await openRouteDetailsForRole(item.route_id);
   }
 }
 
@@ -2617,7 +2701,9 @@ onUnmounted(() => {
 <template>
   <main
     class="container"
-    :class="{ 'container--chat': isAuthed && (currentSection === 'chat' || currentSection === 'salary_chat') }"
+    :class="{
+      'container--chat': isAuthed && (currentSection === 'chat' || currentSection === 'chat_room' || currentSection === 'salary_chat')
+    }"
   >
     <header class="topbar">
       <div class="topbar-side">
@@ -2865,7 +2951,7 @@ onUnmounted(() => {
         @disable-push="tryUnsubscribeWebPush"
         @mark-read="doMarkNotificationRead"
         @mark-all-read="doMarkAllNotificationsRead"
-        @open-route="openRouteFromNotification"
+        @open-from-notification="openNotificationFromItem"
       />
     </section>
 

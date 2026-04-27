@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from jose import JWTError, jwt
 from pydantic import BaseModel, Field
@@ -14,6 +17,64 @@ from mobile_api.settings import mobile_settings
 
 
 router = APIRouter(tags=["notifications"])
+
+
+def _notification_payload_dict(item: Notification) -> dict[str, Any] | None:
+    if not item.payload_json:
+        return None
+    try:
+        parsed = json.loads(item.payload_json)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _notification_to_api_dict(
+    item: Notification,
+    *,
+    routes_by_id: dict[str, Route],
+    points_by_id: dict[int, Point],
+    drivers_by_id: dict[int, User],
+) -> dict[str, Any]:
+    return {
+        "id": item.id,
+        "event_type": item.event_type,
+        "title": item.title,
+        "message": item.message,
+        "route_id": item.route_id,
+        "point_id": item.point_id,
+        "driver_full_name": (
+            (drivers_by_id.get(int(routes_by_id[str(item.route_id)].assigned_user_id)).full_name)  # type: ignore[arg-type]
+            if item.route_id
+            and str(item.route_id) in routes_by_id
+            and routes_by_id[str(item.route_id)].assigned_user_id
+            and int(routes_by_id[str(item.route_id)].assigned_user_id) in drivers_by_id
+            else None
+        ),
+        "number_auto": (
+            routes_by_id[str(item.route_id)].number_auto
+            if item.route_id and str(item.route_id) in routes_by_id
+            else None
+        ),
+        "trailer_number": (
+            routes_by_id[str(item.route_id)].trailer_number
+            if item.route_id and str(item.route_id) in routes_by_id
+            else None
+        ),
+        "point_place_point": (
+            points_by_id[int(item.point_id)].place_point
+            if item.point_id is not None and int(item.point_id) in points_by_id
+            else None
+        ),
+        "point_type_point": (
+            points_by_id[int(item.point_id)].type_point
+            if item.point_id is not None and int(item.point_id) in points_by_id
+            else None
+        ),
+        "is_read": item.is_read,
+        "created_at": item.created_at.isoformat() if item.created_at else None,
+        "payload": _notification_payload_dict(item),
+    }
 
 
 class PushSubscribePayload(BaseModel):
@@ -54,44 +115,7 @@ def _list_notifications_impl(
 
     return {
         "items": [
-            {
-                "id": item.id,
-                "event_type": item.event_type,
-                "title": item.title,
-                "message": item.message,
-                "route_id": item.route_id,
-                "point_id": item.point_id,
-                "driver_full_name": (
-                    (drivers_by_id.get(int(routes_by_id[str(item.route_id)].assigned_user_id)).full_name)  # type: ignore[arg-type]
-                    if item.route_id
-                    and str(item.route_id) in routes_by_id
-                    and routes_by_id[str(item.route_id)].assigned_user_id
-                    and int(routes_by_id[str(item.route_id)].assigned_user_id) in drivers_by_id
-                    else None
-                ),
-                "number_auto": (
-                    routes_by_id[str(item.route_id)].number_auto
-                    if item.route_id and str(item.route_id) in routes_by_id
-                    else None
-                ),
-                "trailer_number": (
-                    routes_by_id[str(item.route_id)].trailer_number
-                    if item.route_id and str(item.route_id) in routes_by_id
-                    else None
-                ),
-                "point_place_point": (
-                    points_by_id[int(item.point_id)].place_point
-                    if item.point_id is not None and int(item.point_id) in points_by_id
-                    else None
-                ),
-                "point_type_point": (
-                    points_by_id[int(item.point_id)].type_point
-                    if item.point_id is not None and int(item.point_id) in points_by_id
-                    else None
-                ),
-                "is_read": item.is_read,
-                "created_at": item.created_at.isoformat() if item.created_at else None,
-            }
+            _notification_to_api_dict(item, routes_by_id=routes_by_id, points_by_id=points_by_id, drivers_by_id=drivers_by_id)
             for item in items
         ]
     }
@@ -438,17 +462,27 @@ def mark_notification_read(
         db.add(item)
         db.commit()
         db.refresh(item)
+
+    route_ids = sorted({str(item.route_id)} if item.route_id else set())
+    point_ids = sorted({int(item.point_id)} if item.point_id is not None else set())
+    routes_by_id: dict[str, Route] = {}
+    if route_ids:
+        routes = db.scalars(select(Route).where(Route.id.in_(route_ids))).all()
+        routes_by_id = {str(r.id): r for r in routes}
+    points_by_id: dict[int, Point] = {}
+    if point_ids:
+        points = db.scalars(select(Point).where(Point.id.in_(point_ids))).all()
+        points_by_id = {int(p.id): p for p in points}
+    driver_ids = sorted({int(r.assigned_user_id) for r in routes_by_id.values() if r and r.assigned_user_id})
+    drivers_by_id: dict[int, User] = {}
+    if driver_ids:
+        drivers = db.scalars(select(User).where(User.id.in_(driver_ids))).all()
+        drivers_by_id = {int(u.id): u for u in drivers}
+
     return {
-        "item": {
-            "id": item.id,
-            "event_type": item.event_type,
-            "title": item.title,
-            "message": item.message,
-            "route_id": item.route_id,
-            "point_id": item.point_id,
-            "is_read": item.is_read,
-            "created_at": item.created_at.isoformat() if item.created_at else None,
-        }
+        "item": _notification_to_api_dict(
+            item, routes_by_id=routes_by_id, points_by_id=points_by_id, drivers_by_id=drivers_by_id
+        )
     }
 
 
