@@ -8,10 +8,12 @@ export type ChatMessage = {
   author_name: string;
   text: string;
   created_at: string;
+  attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
 };
 
 const props = defineProps<{
   routeId: string;
+  title?: string;
   items: ChatMessage[];
   loading: boolean;
   error: string;
@@ -22,12 +24,18 @@ const props = defineProps<{
 const emit = defineEmits<{
   back: [];
   send: [text: string];
+  upload: [payload: { text: string; files: File[] }];
+  download: [payload: { attachmentId: number; originalName: string }];
 }>();
 
 const draft = ref("");
+const fileInputRef = ref<HTMLInputElement | null>(null);
+const pickedFiles = ref<File[]>([]);
 const listRef = ref<HTMLElement | null>(null);
 const listInnerRef = ref<HTMLElement | null>(null);
 let resizeObserver: ResizeObserver | null = null;
+const stickToBottom = ref(true);
+const showJump = ref(false);
 const emojiOpen = ref(false);
 const EMOJIS = [
   "👍",
@@ -61,6 +69,30 @@ function submit(): void {
   draft.value = "";
 }
 
+function onPickFiles(ev: Event): void {
+  const input = ev.target as HTMLInputElement;
+  const list = input.files ? Array.from(input.files) : [];
+  pickedFiles.value = list;
+}
+
+function triggerPickFiles(): void {
+  fileInputRef.value?.click();
+}
+
+function submitFiles(): void {
+  if (!props.canSend || props.loading) {
+    return;
+  }
+  const files = pickedFiles.value;
+  if (!files.length) return;
+  emit("upload", { text: draft.value.trim(), files });
+  pickedFiles.value = [];
+  draft.value = "";
+  if (fileInputRef.value) {
+    fileInputRef.value.value = "";
+  }
+}
+
 function toggleEmoji(): void {
   emojiOpen.value = !emojiOpen.value;
 }
@@ -89,12 +121,27 @@ async function scrollToBottom(): Promise<void> {
   const el = listRef.value;
   if (!el) return;
   el.scrollTop = el.scrollHeight;
+  stickToBottom.value = true;
+  showJump.value = false;
+}
+
+function updateStickiness(): void {
+  const el = listRef.value;
+  if (!el) return;
+  const threshold = 40;
+  const dist = el.scrollHeight - (el.scrollTop + el.clientHeight);
+  stickToBottom.value = dist <= threshold;
+  showJump.value = !stickToBottom.value;
 }
 
 watch(
   () => props.items,
   () => {
-    void scrollToBottom();
+    if (stickToBottom.value) {
+      void scrollToBottom();
+    } else {
+      showJump.value = true;
+    }
   },
   { deep: true }
 );
@@ -102,13 +149,15 @@ watch(
 watch(
   () => props.loading,
   (v) => {
-    if (!v) void scrollToBottom();
+    if (!v && stickToBottom.value) void scrollToBottom();
   }
 );
 
 watch(
   () => props.routeId,
   () => {
+    stickToBottom.value = true;
+    showJump.value = false;
     void scrollToBottom();
   }
 );
@@ -150,12 +199,16 @@ onUnmounted(() => {
   <section class="chat-wrap">
     <header class="head-row">
       <button class="ghost" type="button" @click="emit('back')">← Назад</button>
-      <h1 class="title">Чат рейса <span class="route-id">{{ routeId }}</span></h1>
+      <h1 class="title">
+        <span class="title-prefix">{{ props.title ? "Чат" : "Чат рейса" }}</span>
+        <span class="route-id">{{ props.title || routeId }}</span>
+      </h1>
     </header>
 
     <p v-if="error" class="error">{{ error }}</p>
 
-    <div ref="listRef" class="list" role="log" aria-live="polite">
+    <div ref="listRef" class="list" role="log" aria-live="polite" @scroll.passive="updateStickiness">
+      <button v-if="showJump" class="jump" type="button" @click="scrollToBottom">Новые сообщения ↓</button>
       <div ref="listInnerRef" class="list-inner">
         <article
           v-for="m in items"
@@ -166,6 +219,17 @@ onUnmounted(() => {
           <div class="bubble">
             <strong v-if="!currentUserId || m.user_id !== currentUserId" class="author">{{ m.author_name }}</strong>
             <p class="text">{{ m.text }}</p>
+            <div v-if="m.attachments?.length" class="att">
+              <button
+                v-for="a in m.attachments"
+                :key="a.id"
+                type="button"
+                class="att-btn"
+                @click="emit('download', { attachmentId: a.id, originalName: a.original_name })"
+              >
+                📎 {{ a.original_name || `file-${a.id}` }}
+              </button>
+            </div>
             <div class="bubble-foot">
               <span class="time">{{ new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }}</span>
             </div>
@@ -176,6 +240,7 @@ onUnmounted(() => {
     </div>
 
     <footer class="composer">
+      <input ref="fileInputRef" type="file" multiple class="hidden-file" @change="onPickFiles" />
       <div v-if="emojiOpen" class="emoji-panel" role="list">
         <button
           v-for="e in EMOJIS"
@@ -197,8 +262,12 @@ onUnmounted(() => {
           @keydown.enter.exact.prevent="submit"
         />
       </div>
+      <button class="emoji-toggle" type="button" :disabled="!canSend || loading" title="Файлы" @click="triggerPickFiles">📎</button>
       <button class="emoji-toggle" type="button" :disabled="!canSend" title="Эмодзи" @click="toggleEmoji">🙂</button>
-      <button class="send-btn" type="button" :disabled="!canSubmit" title="Отправить" @click="submit">➤</button>
+      <button v-if="pickedFiles.length" class="send-btn" type="button" :disabled="loading" title="Отправить файлы" @click="submitFiles">
+        ⤒
+      </button>
+      <button v-else class="send-btn" type="button" :disabled="!canSubmit" title="Отправить" @click="submit">➤</button>
     </footer>
   </section>
 </template>
@@ -237,6 +306,12 @@ onUnmounted(() => {
   text-align: center;
 }
 
+.title-prefix {
+  margin-right: 0.35rem;
+  color: rgba(255, 255, 255, 0.65);
+  font-weight: 600;
+}
+
 .route-id {
   font-weight: 700;
   color: #8eb2ea;
@@ -248,6 +323,7 @@ onUnmounted(() => {
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
+  position: relative;
 }
 
 .list-inner {
@@ -310,6 +386,21 @@ onUnmounted(() => {
   margin-top: 0.12rem;
 }
 
+.att {
+  display: grid;
+  gap: 0.25rem;
+  margin-top: 0.35rem;
+}
+.att-btn {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.06);
+  color: #e7edf4;
+  padding: 0.3rem 0.45rem;
+  text-align: left;
+  font: inherit;
+}
+
 .time {
   font-size: 0.68rem;
   line-height: 1;
@@ -330,6 +421,13 @@ onUnmounted(() => {
   padding: 0.5rem 0.65rem calc(0.55rem + env(safe-area-inset-bottom, 0));
   background: #17212b;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
+}
+.hidden-file {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .emoji-panel {
@@ -460,5 +558,20 @@ onUnmounted(() => {
   text-align: center;
   color: rgba(255, 255, 255, 0.38);
   font-size: 0.9rem;
+}
+
+.jump {
+  position: sticky;
+  bottom: 0.5rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  border: none;
+  border-radius: 999px;
+  background: rgba(34, 197, 94, 0.9);
+  color: #052e16;
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
 }
 </style>

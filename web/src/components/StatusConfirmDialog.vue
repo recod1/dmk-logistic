@@ -5,18 +5,42 @@ const props = defineProps<{
   open: boolean;
   nextStatusLabel: string;
   datetimeLocal: string;
+  showOdometer?: boolean;
+  odometer?: string;
+  odometerPrefillSource?: "wialon" | null;
+  initialOdometer?: string;
 }>();
 
 const emit = defineEmits<{
   cancel: [];
-  confirm: [datetimeLocal: string];
+  confirm: [payload: { datetimeLocal: string; odometer: string; odometer_source: "manual" | "wialon" | null }];
   "update:datetimeLocal": [value: string];
+  "update:odometer": [value: string];
 }>();
 
 const localValue = computed({
   get: () => props.datetimeLocal,
   set: (v: string) => emit("update:datetimeLocal", v)
 });
+
+const odometerValue = computed({
+  get: () => props.odometer ?? "",
+  set: (v: string) => emit("update:odometer", v)
+});
+
+function confirm(): void {
+  const odo = (props.showOdometer ? (odometerValue.value || "").trim() : "").trim();
+  const initial = (props.initialOdometer || "").trim();
+  let source: "manual" | "wialon" | null = null;
+  if (props.showOdometer) {
+    if (odo && props.odometerPrefillSource === "wialon" && odo === initial) {
+      source = "wialon";
+    } else if (odo) {
+      source = "manual";
+    }
+  }
+  emit("confirm", { datetimeLocal: localValue.value, odometer: odo, odometer_source: source });
+}
 </script>
 
 <template>
@@ -31,9 +55,15 @@ const localValue = computed({
         Дата и время
         <input v-model="localValue" type="datetime-local" step="60" />
       </label>
+      <label v-if="showOdometer" class="field">
+        Одометр
+        <input v-model="odometerValue" inputmode="text" placeholder="Например: 123456 или 123456 км" />
+        <small v-if="odometerPrefillSource === 'wialon'" class="hint">Подставлено из Wialon — можно подтвердить или исправить.</small>
+        <small v-else class="hint">Если связи с Wialon нет — введите вручную.</small>
+      </label>
       <div class="actions">
         <button type="button" class="secondary" @click="emit('cancel')">Отмена</button>
-        <button type="button" class="primary" @click="emit('confirm', localValue)">Подтвердить</button>
+        <button type="button" class="primary" @click="confirm">Подтвердить</button>
       </div>
     </article>
   </div>
@@ -74,12 +104,18 @@ const localValue = computed({
   font-size: 0.88rem;
   color: #cbd5e1;
 }
-input[type="datetime-local"] {
+input[type="datetime-local"],
+input {
   border-radius: 10px;
   border: 1px solid #334155;
   background: #111827;
   color: #f8fafc;
   padding: 0.55rem 0.65rem;
+}
+.hint {
+  color: #94a3b8;
+  font-size: 0.8rem;
+  line-height: 1.35;
 }
 .actions {
   display: flex;

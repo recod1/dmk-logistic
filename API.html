@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DMK Logistic — описание API</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { font-family: system-ui, sans-serif; line-height: 1.5; max-width: 960px; margin: 0 auto; padding: 1.25rem; background: #0f172a; color: #e2e8f0; }
+    h1 { font-size: 1.35rem; margin-top: 0; }
+    h2 { font-size: 1.1rem; margin-top: 2rem; border-bottom: 1px solid #334155; padding-bottom: 0.25rem; }
+    h3 { font-size: 0.95rem; margin-top: 1.25rem; color: #94a3b8; }
+    code, pre { font-family: ui-monospace, monospace; font-size: 0.82rem; }
+    pre { background: #020617; border: 1px solid #334155; border-radius: 8px; padding: 0.75rem; overflow: auto; }
+    a { color: #93c5fd; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.88rem; margin: 0.5rem 0; }
+    th, td { border: 1px solid #334155; padding: 0.35rem 0.5rem; text-align: left; vertical-align: top; }
+    th { background: #1e293b; }
+    .muted { color: #94a3b8; font-size: 0.88rem; }
+    .tag { display: inline-block; padding: 0.1rem 0.4rem; border-radius: 4px; background: #334155; font-size: 0.75rem; margin-right: 0.35rem; }
+  </style>
+</head>
+<body>
+  <h1>DMK Logistic — HTTP API (мобильный стек / PWA)</h1>
+  <p class="muted">
+    Базовый префикс приложения обычно <code>/api</code> (см. <code>VITE_API_BASE_URL</code>).
+    Ниже пути указаны относительно этого префикса, например: <code>POST /api/auth/login</code>.
+  </p>
+
+  <h2 id="auth">Аутентификация (JWT)</h2>
+  <h3><span class="tag">POST</span> /auth/login</h3>
+  <p>Тело JSON:</p>
+  <pre>{"login": "driver", "password": "driver123"}</pre>
+  <p>Ответ: <code>access_token</code>, объект <code>user</code> (id, login, role_code, …).</p>
+  <p>Для защищённых методов заголовок: <code>Authorization: Bearer &lt;access_token&gt;</code>.</p>
+
+  <h2 id="salary">Зарплата (как в Telegram-боте)</h2>
+  <p>
+    Расчёты хранятся в PostgreSQL (таблица <code>salary</code>). Поле <code>id_driver</code> — строка:
+    при наличии у пользователя <code>legacy_tg_id</code> используется он, иначе строковый <code>users.id</code>.
+    Создание вручную в PWA — у бухгалтера и администратора. Интеграционный ключ — для внешних систем.
+  </p>
+
+  <h3><span class="tag">GET</span> /v1/salary/lookup/drivers?q=…</h3>
+  <p>Роли: бухгалтер, админ, супер-админ. Поиск водителей по ФИО или логину.</p>
+
+  <h3><span class="tag">POST</span> /v1/salary</h3>
+  <p>Роли: бухгалтер, админ, супер-админ. Создание расчёта.</p>
+  <p>Тело JSON:</p>
+  <pre>{
+  "driver_user_id": 12,
+  "salary_line": "15.01.2026 г 50000 0 0 1000 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 150 0 5 0 0 0 0 0 0 0 51000.00 адрес_загр адрес_выгр А123BC прицеп 001"
+}</pre>
+  <p><strong>salary_line</strong> — ровно <strong>37</strong> значений через пробел (числа с <code>,</code> или <code>.</code>):</p>
+  <ol class="muted">
+    <li>дата (дд.мм.гггг)</li>
+    <li>г/мг/рд/пр</li>
+    <li>оклад, сутки, загр2р, шаттл, загр/выгр, дт (штора), возврат, доп_шаттл, доп_точка, азс</li>
+    <li>паллет_гипер, паллет_метро, паллет_ашан</li>
+    <li>3т, 3.5т, 5т, 10т, 12т, 12.5т, пробег, комп_связи, стаж, 10%, премия, удержать, возмещение, др</li>
+    <li>без_сут_др_прем_стажа, в_день, итого</li>
+    <li>адрес_загр, адрес_выгр, транспорт, прицеп, №рейса</li>
+  </ol>
+
+  <h3><span class="tag">POST</span> /v1/salary/integration</h3>
+  <p>Внешняя загрузка без JWT. Заголовок обязателен:</p>
+  <pre>X-Salary-Api-Key: &lt;значение из SALARY_INTEGRATION_API_KEY или API_KEY&gt;</pre>
+  <p>Если ключ в окружении не задан — <code>503</code>. Тело JSON (один из идентификаторов водителя + строка расчёта):</p>
+  <pre>{
+  "driver_user_id": 12,
+  "salary_line": "15.01.2026 г 50000 0 0 ..."
+}</pre>
+  <p>Альтернативы: <code>driver_login</code>, <code>legacy_tg_id</code> (строка).</p>
+
+  <h3><span class="tag">GET</span> /v1/salary/mine</h3>
+  <p>Только водитель. Query: <code>date_from</code>, <code>date_to</code> (дд.мм.гггг), опционально.</p>
+
+  <h3><span class="tag">GET</span> /v1/salary/mine/export.csv</h3>
+  <p>Водитель. Query: <code>date_from</code>, <code>date_to</code> (обязательны). Ответ — файл CSV (UTF-8 BOM), формат как в боте.</p>
+
+  <h3><span class="tag">GET</span> /v1/salary/for-driver/{driver_user_id}</h3>
+  <p>Бухгалтер / админ. Query: <code>date_from</code>, <code>date_to</code> опционально.</p>
+
+  <h3><span class="tag">GET</span> /v1/salary/{salary_id}</h3>
+  <p>Водитель — только свои записи; бухгалтер/админ — любые.</p>
+
+  <h3><span class="tag">POST</span> /v1/salary/{salary_id}/confirm</h3>
+  <p>Только водитель, свой расчёт. Статус <code>confirmed</code>.</p>
+
+  <h3><span class="tag">POST</span> /v1/salary/{salary_id}/comment</h3>
+  <p>Только водитель. Тело: <code>{"text": "…"}</code>. Статус <code>commented</code>.</p>
+
+  <h3>Чат по расчёту</h3>
+  <p>Доступ: водитель (свой расчёт), бухгалтер и администраторы. Сообщения в реальном времени через тот же WebSocket, что и чат рейса: событие <code>salary_chat_message_created</code>.</p>
+  <table>
+    <tr><th>Метод</th><th>Путь</th></tr>
+    <tr><td>GET</td><td>/v1/salary/{id}/chat/messages</td></tr>
+    <tr><td>POST</td><td>/v1/salary/{id}/chat/messages</td></tr>
+    <tr><td>POST</td><td>/v1/salary/{id}/chat/attachments (multipart: files, text)</td></tr>
+    <tr><td>GET</td><td>/v1/salary/chat/attachments/{attachment_id}/file</td></tr>
+  </table>
+
+  <h2 id="chat-route">Чат рейса</h2>
+  <p><span class="tag">GET</span> /v1/chat/routes/{route_id}/messages — список сообщений.</p>
+  <p><span class="tag">POST</span> /v1/chat/routes/{route_id}/messages — текст.</p>
+  <p><span class="tag">POST</span> /v1/chat/routes/{route_id}/attachments — вложения.</p>
+  <p>WebSocket: <code>GET /v1/chat/ws?token=&lt;JWT&gt;</code> — события <code>chat_message_created</code>, <code>chat_room_message_created</code>, <code>salary_chat_message_created</code>.</p>
+
+  <h2 id="chats">Общие чаты (комнаты)</h2>
+  <p>См. эндпоинты <code>/v1/chats/...</code> и <code>/v1/admin/chats/...</code> в исходниках <code>mobile_api/chats_router.py</code>, <code>mobile_api/admin_chats_router.py</code>.</p>
+
+  <h2 id="legacy">Legacy SQLite API (бот)</h2>
+  <p class="muted">
+    Для старого стека с SQLite по-прежнему могут использоваться маршруты вида <code>POST /api/salary</code> с заголовком <code>X-Api-Key</code> —
+    они не связаны напрямую с JWT-стеком Postgres; новые интеграции ориентируйте на <code>/v1/salary/integration</code>.
+  </p>
+
+  <p class="muted" style="margin-top:2rem;">Документ сгенерирован в репозитории; при изменении роутеров обновляйте этот файл.</p>
+</body>
+</html>

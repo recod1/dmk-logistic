@@ -40,7 +40,7 @@ const emit = defineEmits<{
       points: AdminRoutePointPayload[];
     }
   ];
-  createOnec: [payload: { raw_text: string; driver_user_id?: number | null }];
+  createOnec: [payload: { raw_text: string; driver_user_id?: number | null; number_auto?: string; trailer_number?: string }];
   selectRoute: [routeId: string];
 }>();
 
@@ -88,7 +88,9 @@ const createForm = reactive({
 
 const onecForm = reactive({
   raw_text: "",
-  driver_user_id: 0
+  driver_user_id: 0,
+  number_auto: "",
+  trailer_number: ""
 });
 
 function makeEmptyPoint(): PointForm {
@@ -159,6 +161,40 @@ function openCreateOnec(): void {
   showCreate.value = false;
   onecForm.raw_text = "";
   onecForm.driver_user_id = props.drivers[0]?.id ?? 0;
+  onecForm.number_auto = "";
+  onecForm.trailer_number = "";
+}
+
+function guessOnecField(raw: string, keys: string[]): string {
+  const lines = (raw || "")
+    .split(/\r?\n/g)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const lowKeys = keys.map((k) => k.toLowerCase());
+  for (const line of lines) {
+    const lower = line.toLowerCase();
+    const hit = lowKeys.find((k) => lower.includes(k));
+    if (!hit) continue;
+    const parts = line.split(":", 2);
+    if (parts.length === 2) {
+      return parts[1].trim();
+    }
+    const idx = lower.indexOf(hit);
+    if (idx >= 0) {
+      return line.slice(idx + hit.length).trim().replace(/^[-–—\s:]+/, "").trim();
+    }
+  }
+  return "";
+}
+
+function fillFromOnecText(): void {
+  const raw = onecForm.raw_text || "";
+  if (!onecForm.number_auto.trim()) {
+    onecForm.number_auto = guessOnecField(raw, ["номер тс", "тс", "номер авто"]).toUpperCase();
+  }
+  if (!onecForm.trailer_number.trim()) {
+    onecForm.trailer_number = guessOnecField(raw, ["номер прицепа", "прицеп"]).toUpperCase();
+  }
 }
 
 function addCreatePoint(): void {
@@ -198,7 +234,9 @@ function submitCreateOnec(): void {
   }
   emit("createOnec", {
     raw_text: raw,
-    driver_user_id: onecForm.driver_user_id || null
+    driver_user_id: onecForm.driver_user_id || null,
+    number_auto: onecForm.number_auto.trim() || undefined,
+    trailer_number: onecForm.trailer_number.trim() || undefined
   });
   showCreateOnec.value = false;
 }
@@ -324,6 +362,19 @@ onMounted(() => {
           </option>
         </select>
       </label>
+      <div class="create-grid onec-grid">
+        <label>
+          Номер ТС
+          <input v-model="onecForm.number_auto" class="upper" autocapitalize="characters" />
+        </label>
+        <label>
+          Номер прицепа
+          <input v-model="onecForm.trailer_number" class="upper" autocapitalize="characters" />
+        </label>
+        <div class="onec-fill">
+          <button class="secondary" type="button" @click="fillFromOnecText">Взять из текста</button>
+        </div>
+      </div>
       <label>
         Текст 1С
         <textarea v-model="onecForm.raw_text" rows="10" placeholder="Вставьте сообщение 1С целиком" />
@@ -650,6 +701,15 @@ button {
   .point-edit-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+}
+
+.onec-grid {
+  margin-top: 0.35rem;
+  margin-bottom: 0.35rem;
+}
+.onec-fill {
+  display: flex;
+  align-items: end;
 }
 </style>
 

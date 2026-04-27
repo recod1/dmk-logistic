@@ -1,10 +1,23 @@
 from __future__ import annotations
 
 import asyncio
+import mimetypes
 import threading
+import uuid
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    HTTPException,
+    Query,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
+from fastapi.responses import FileResponse
 from jose import JWTError, jwt
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -13,7 +26,8 @@ from sqlalchemy.orm import Session
 from mobile_api.auth import get_current_user
 from mobile_api.chat_realtime import chat_realtime_hub
 from mobile_api.db import SessionLocal, get_db
-from mobile_api.models import Route, RouteChatMessage, RouteChatRead, User
+from mobile_api.models import Route, RouteChatAttachment, RouteChatMessage, RouteChatRead, User
+from mobile_api.point_documents_router import _upload_root as _mobile_upload_root
 from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.roles import RoleCode, normalize_role_code
 from mobile_api.settings import mobile_settings
@@ -29,6 +43,7 @@ class ChatMessageOut(BaseModel):
     author_name: str
     text: str
     created_at: str
+    attachments: list[dict] = Field(default_factory=list)
 
 
 class ChatSendPayload(BaseModel):
@@ -59,6 +74,11 @@ def _assert_can_access_route(db: Session, user: User, route_id: str) -> Route:
 def _message_out(db: Session, msg: RouteChatMessage) -> dict:
     author = db.get(User, msg.user_id)
     author_name = (author.full_name or author.login) if author else f"user#{msg.user_id}"
+    attachments = db.scalars(
+        select(RouteChatAttachment)
+        .where(RouteChatAttachment.message_id == msg.id)
+        .order_by(RouteChatAttachment.id.asc())
+    ).all()
     return {
         "id": int(msg.id),
         "route_id": str(msg.route_id),
@@ -66,6 +86,15 @@ def _message_out(db: Session, msg: RouteChatMessage) -> dict:
         "author_name": author_name,
         "text": msg.text,
         "created_at": msg.created_at.isoformat() if isinstance(msg.created_at, datetime) else str(msg.created_at),
+        "attachments": [
+            {
+                "id": int(a.id),
+                "original_name": a.original_name,
+                "content_type": a.content_type,
+                "file_size": int(a.file_size),
+            }
+            for a in attachments
+        ],
     }
 
 
@@ -190,6 +219,125 @@ def send_message(
     db.commit()
 
     return out
+
+
+MAX_CHAT_FILES = 10
+MAX_CHAT_FILE_BYTES = 20 * 1024 * 1024
+
+
+@router.post("/v1/chat/routes/{route_id}/attachments", status_code=status.HTTP_201_CREATED)
+async def send_message_with_attachments(
+    route_id: str,
+    text: str = "",
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    route = _assert_can_access_route(db, current_user, route_id)
+    if not files:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files")
+    if len(files) > MAX_CHAT_FILES:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Too many files")
+
+    msg_text = (text or "").strip()
+    if not msg_text:
+        msg_text = "📎 Файлы"
+
+    msg = RouteChatMessage(route_id=route_id, user_id=current_user.id, text=msg_text)
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+
+    root = _mobile_upload_root()
+    sub = root / "chat" / str(route_id) / str(msg.id)
+    sub.mkdir(parents=True, exist_ok=True)
+
+    created_ids: list[int] = []
+    for upload in files:
+        body = await upload.read()
+        if len(body) > MAX_CHAT_FILE_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"File too large (max {MAX_CHAT_FILE_BYTES} bytes)",
+            )
+        ctype = (upload.content_type or "application/octet-stream").split(";")[0].strip().lower()
+        safe_name = (upload.filename or "").strip()[:255] or "file"
+        ext = mimetypes.guess_extension(ctype) or ""
+        fname = f"{uuid.uuid4().hex}{ext}"
+        full_path = sub / fname
+        full_path.write_bytes(body)
+        rel = f"chat/{route_id}/{msg.id}/{fname}"
+        row = RouteChatAttachment(
+            message_id=int(msg.id),
+            route_id=str(route_id),
+            uploaded_by_user_id=int(current_user.id),
+            original_name=safe_name,
+            storage_path=rel,
+            content_type=ctype,
+            file_size=len(body),
+        )
+        db.add(row)
+        db.flush()
+        created_ids.append(int(row.id))
+
+    db.commit()
+    out = _message_out(db, msg)
+
+    recipients: list[int] = []
+    if route.assigned_user_id:
+        recipients.append(int(route.assigned_user_id))
+    if route.created_by_user_id:
+        recipients.append(int(route.created_by_user_id))
+    manager_ids = db.scalars(
+        select(User.id).where(User.role_code.in_([RoleCode.ADMIN.value, RoleCode.SUPERADMIN.value, RoleCode.LOGISTIC.value]))
+    ).all()
+    recipients.extend(int(x) for x in manager_ids)
+    recipients = sorted(set(recipients))
+
+    _publish_chat(recipients, {"type": "chat_message_created", "item": out})
+    create_notification_for_users(
+        db,
+        user_ids=recipients,
+        event_type="chat_message",
+        title=f"Чат рейса {route_id}",
+        message=f"{(current_user.full_name or current_user.login or 'Пользователь')}: {msg_text}",
+        route_id=route_id,
+        payload={"route_id": route_id, "chat_message_id": int(msg.id)},
+        skip_user_ids=[current_user.id],
+    )
+    db.commit()
+
+    return out
+
+
+@router.get("/v1/chat/attachments/{attachment_id}/file")
+def download_chat_attachment(
+    attachment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> FileResponse:
+    row = db.get(RouteChatAttachment, attachment_id)
+    if row is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _assert_can_access_route(db, current_user, str(row.route_id))
+
+    root = _mobile_upload_root()
+    full_path = (root / row.storage_path).resolve()
+    try:
+        full_path.relative_to(root)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid path") from exc
+    if not full_path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File missing on server")
+
+    media_type = row.content_type or "application/octet-stream"
+    headers = {"Cache-Control": "private, max-age=86400"}
+    return FileResponse(
+        path=str(full_path),
+        media_type=media_type,
+        filename=row.original_name or full_path.name,
+        headers=headers,
+    )
 
 
 def _decode_ws_user(token: str | None, db: Session) -> User:

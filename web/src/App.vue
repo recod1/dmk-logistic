@@ -1,10 +1,15 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watchEffect } from "vue";
+import type { RoleCode } from "./roles";
 
 import AdminRouteDetailsView from "./components/AdminRouteDetailsView.vue";
 import AdminRoutesView from "./components/AdminRoutesView.vue";
 import AdminUsersView from "./components/AdminUsersView.vue";
 import ChatView from "./components/ChatView.vue";
+import ChatsHubView from "./components/ChatsHubView.vue";
+import DriverSalaryView from "./components/DriverSalaryView.vue";
+import AccountantSalaryView from "./components/AccountantSalaryView.vue";
+import SalaryDetailView from "./components/SalaryDetailView.vue";
 import DriverHomeView from "./components/DriverHomeView.vue";
 import DocsUploadDialog from "./components/DocsUploadDialog.vue";
 import DriverRouteDetailsView from "./components/DriverRouteDetailsView.vue";
@@ -25,9 +30,37 @@ import {
   getActiveRoute,
   getAdminRoute,
   getDriverRoute,
+  getPointTelemetry,
   getUnreadNotificationsCount,
   getVapidPublicKey,
   getChatUnreadSummary,
+  fetchChatAttachmentBlob,
+  // chats hub
+  postChatsBootstrap,
+  listChatRooms,
+  listChatUsers,
+  listLogisticDriverChatRooms,
+  listAdminChatRooms,
+  adminDeleteChatRoom,
+  adminBroadcastByRoles,
+  openDirectChat,
+  listChatRoomMessages,
+  sendChatRoomMessage,
+  uploadChatRoomAttachments,
+  fetchChatRoomAttachmentBlob,
+  type SalaryRecord,
+  listMySalaries,
+  fetchMySalaryCsvBlob,
+  lookupSalaryDrivers,
+  createSalaryManual,
+  listSalariesForDriver,
+  getSalary,
+  confirmSalary,
+  commentSalary,
+  listSalaryChatMessages,
+  sendSalaryChatMessage,
+  uploadSalaryChatAttachments,
+  fetchSalaryChatAttachmentBlob,
   listAdminRoutes,
   listAdminUsers,
   listDriverRoutes,
@@ -42,6 +75,7 @@ import {
   revertPointStatus,
   sendEventsBatch,
   sendRouteChatMessage,
+  uploadRouteChatAttachments,
   subscribeWebPush,
   clearWebPushSubscriptions,
   updateAdminRoute,
@@ -64,7 +98,7 @@ import {
 } from "./db";
 import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
 import { prepareDocumentImageBlobs, prepareDocumentImageFiles } from "./imageUploadPrep";
-import { isAdminRole, isRouteManagerRole } from "./roles";
+import { isAccountantRole, isAdminRole, isLogisticRole, isRouteManagerRole } from "./roles";
 import { isPointDone, nextStatus, nextStatusLabel } from "./status";
 import type {
   AdminRoute,
@@ -87,10 +121,16 @@ type AppSection =
   | "driver_routes"
   | "driver_route_details"
   | "chat"
+  | "chat_room"
+  | "chats"
   | "notifications"
   | "admin_users"
   | "admin_routes"
-  | "admin_route_details";
+  | "admin_route_details"
+  | "driver_salary"
+  | "salary_accounting"
+  | "salary_detail"
+  | "salary_chat";
 type RouteFilters = { status?: string; route_id?: string; number_auto?: string; driver_query?: string };
 
 const authToken = ref<string>("");
@@ -136,8 +176,18 @@ const statusConfirm = ref<{
   nextLabel: string;
   datetimeLocal: string;
   initialDatetimeLocal: string;
+  showOdometer: boolean;
+  odometer: string;
+  initialOdometer: string;
+  odometerPrefillSource: "wialon" | null;
 } | null>(null);
-const docsUpload = ref<{ pointId: number; occurredAtIso: string; timeSource: "device" | "manual" } | null>(null);
+const docsUpload = ref<{
+  pointId: number;
+  occurredAtIso: string;
+  timeSource: "device" | "manual";
+  odometer: string;
+  odometer_source: "manual" | "wialon" | null;
+} | null>(null);
 const docsUploading = ref(false);
 let docsUploadAbort: AbortController | null = null;
 
@@ -151,11 +201,90 @@ let chatWs: WebSocket | null = null;
 let chatWsReconnectTimer: number | null = null;
 let chatPingInterval: number | null = null;
 let chatPollInterval: number | null = null;
+let roomChatPollInterval: number | null = null;
+let salaryChatPollInterval: number | null = null;
+
+// Generic chats hub
+const chatsRooms = ref<Array<{ id: number; kind: "direct" | "group"; title: string; unread_count?: number }>>([]);
+const chatsUsers = ref<Array<{ id: number; login: string; full_name: string | null; role_code: string; role_label: string }>>([]);
+const chatsLoading = ref(false);
+const chatsError = ref("");
+const roomUnreadBump = ref<Record<number, number>>({});
+const logisticDriverChatRooms = ref<
+  Array<{
+    driver: { id: number; full_name: string | null; login: string };
+    room: { id: number; kind: "direct" | "group"; title: string; system_key?: string | null; unread_count?: number };
+  }>
+>([]);
+const adminChatRoomsList = ref<
+  Array<{
+    id: number;
+    kind: string;
+    title: string;
+    system_key: string | null;
+    member_user_ids: number[];
+    role_codes: string[];
+    created_at: string;
+  }>
+>([]);
+const adminChatRoomsLoading = ref(false);
+const chatRoomId = ref<number | null>(null);
+const chatRoomTitle = ref<string>("");
+const chatRoomMessages = ref<any[]>([]);
+const chatRoomLoading = ref(false);
+const chatRoomError = ref("");
+
+const salaryDriverFilterFrom = ref("");
+const salaryDriverFilterTo = ref("");
+const salaryListMine = ref<SalaryRecord[]>([]);
+const salaryListLoading = ref(false);
+const salaryError = ref("");
+const salaryCurrentRecord = ref<SalaryRecord | null>(null);
+const salaryDetailBusy = ref(false);
+const salaryChatSalaryId = ref<number | null>(null);
+const salaryChatMessages = ref<any[]>([]);
+const salaryChatLoading = ref(false);
+const salaryChatError = ref("");
+const salaryAccountantDrivers = ref<Array<{ id: number; login: string; full_name: string | null; legacy_tg_id: string | null }>>([]);
+const salaryAccountantItems = ref<SalaryRecord[]>([]);
+const salarySelectedDriver = ref<{ id: number; login: string; full_name: string | null } | null>(null);
+const salarySaving = ref(false);
+const salaryDetailBackSection = ref<AppSection>("driver_salary");
 
 const isAuthed = computed(() => Boolean(authToken.value));
 const isAdmin = computed(() => isAdminRole(authUser.value?.role_code || ""));
 const isRouteManager = computed(() => isRouteManagerRole(authUser.value?.role_code || ""));
 const isDriver = computed(() => authUser.value?.role_code === "driver");
+const isLogistic = computed(() => isLogisticRole(authUser.value?.role_code || ""));
+const isAccountant = computed(() => isAccountantRole(authUser.value?.role_code || ""));
+
+const chatsRoomsForDisplay = computed(() => {
+  const bump = roomUnreadBump.value;
+  return chatsRooms.value.map((r) => ({
+    ...r,
+    unread_count: (r.unread_count ?? 0) + (bump[r.id] ?? 0)
+  }));
+});
+
+const logisticDriverChatRoomsDisplay = computed(() => {
+  const bump = roomUnreadBump.value;
+  return logisticDriverChatRooms.value.map((row) => ({
+    ...row,
+    room: {
+      ...row.room,
+      unread_count: (row.room.unread_count ?? 0) + (bump[row.room.id] ?? 0)
+    }
+  }));
+});
+
+const hasUnreadGenericChats = computed(() => chatsRoomsForDisplay.value.some((r) => (r.unread_count ?? 0) > 0));
+
+const salaryChatItemsForChatView = computed(() => {
+  const sid = salaryChatSalaryId.value;
+  if (!sid) return [];
+  return salaryChatMessages.value.map((m: Record<string, unknown>) => ({ ...m, route_id: String(sid) }));
+});
+
 const activeRouteSummary = computed(() => {
   if (!route.value) {
     return null;
@@ -292,6 +421,21 @@ const currentPageTitle = computed(() => {
   if (currentSection.value === "notifications") {
     return "ДМК - Уведомления";
   }
+  if (currentSection.value === "chats") {
+    return "ДМК - Чаты";
+  }
+  if (currentSection.value === "chat_room") {
+    return "ДМК - Чаты";
+  }
+  if (currentSection.value === "driver_salary" || currentSection.value === "salary_accounting") {
+    return "ДМК - Зарплата";
+  }
+  if (currentSection.value === "salary_detail") {
+    return "ДМК - Расчёт";
+  }
+  if (currentSection.value === "salary_chat") {
+    return "ДМК - Чат расчёта";
+  }
   return "ДМК";
 });
 
@@ -304,15 +448,26 @@ const profileMenuItems = computed<Array<{ section: AppSection; label: string }>>
   if (isAdminRole(authUser.value.role_code)) {
     return [
       { section: "admin_routes", label: "Рейсы" },
+      { section: "chats", label: "Чаты" },
+      { section: "salary_accounting", label: "Зарплата" },
       { section: "admin_users", label: "Пользователи" }
     ];
   }
   if (isRouteManagerRole(authUser.value.role_code)) {
-    return [{ section: "admin_routes", label: "Рейсы" }];
+    const items: Array<{ section: AppSection; label: string }> = [
+      { section: "admin_routes", label: "Рейсы" },
+      { section: "chats", label: "Чаты" }
+    ];
+    if (isAccountantRole(authUser.value.role_code)) {
+      items.push({ section: "salary_accounting", label: "Зарплата" });
+    }
+    return items;
   }
   return [
     { section: "driver_home", label: "Главная" },
-    { section: "driver_routes", label: "Рейсы" }
+    { section: "driver_routes", label: "Рейсы" },
+    { section: "chats", label: "Чаты" },
+    { section: "driver_salary", label: "Зарплата" }
   ];
 });
 
@@ -405,6 +560,42 @@ function stopChatPolling(): void {
   }
 }
 
+function stopRoomChatPolling(): void {
+  if (roomChatPollInterval !== null) {
+    window.clearInterval(roomChatPollInterval);
+    roomChatPollInterval = null;
+  }
+}
+
+function startRoomChatPolling(): void {
+  stopRoomChatPolling();
+  roomChatPollInterval = window.setInterval(() => {
+    if (currentSection.value !== "chat_room" || !chatRoomId.value) {
+      stopRoomChatPolling();
+      return;
+    }
+    void refreshChatRoom();
+  }, 2500);
+}
+
+function stopSalaryChatPolling(): void {
+  if (salaryChatPollInterval !== null) {
+    window.clearInterval(salaryChatPollInterval);
+    salaryChatPollInterval = null;
+  }
+}
+
+function startSalaryChatPolling(): void {
+  stopSalaryChatPolling();
+  salaryChatPollInterval = window.setInterval(() => {
+    if (currentSection.value !== "salary_chat" || !salaryChatSalaryId.value) {
+      stopSalaryChatPolling();
+      return;
+    }
+    void refreshSalaryChat();
+  }, 2500);
+}
+
 function startChatPolling(): void {
   stopChatPolling();
   // Fallback for environments where WS delivery is unreliable:
@@ -471,6 +662,46 @@ function connectChatSocket(): void {
           } else if (authUser.value?.id && item.user_id !== authUser.value.id) {
             const current = chatUnreadByRoute.value[item.route_id] ?? 0;
             chatUnreadByRoute.value = { ...chatUnreadByRoute.value, [item.route_id]: current + 1 };
+          }
+        }
+        if (payload.type === "chat_room_message_created" && payload.item) {
+          const item = payload.item as {
+            id: number;
+            room_id: number;
+            user_id: number;
+            author_name: string;
+            text: string;
+            created_at: string;
+          };
+          if (currentSection.value === "chat_room" && chatRoomId.value && item.room_id === chatRoomId.value) {
+            const exists = chatRoomMessages.value.some((m) => m.id === item.id);
+            if (!exists) {
+              chatRoomMessages.value = [...chatRoomMessages.value, item];
+            }
+          } else if (authUser.value?.id && item.user_id !== authUser.value.id) {
+            const rid = item.room_id;
+            const cur = roomUnreadBump.value[rid] ?? 0;
+            roomUnreadBump.value = { ...roomUnreadBump.value, [rid]: cur + 1 };
+          }
+        }
+        if (payload.type === "salary_chat_message_created" && payload.item) {
+          const item = payload.item as {
+            id: number;
+            salary_id: number;
+            user_id: number;
+            author_name: string;
+            text: string;
+            created_at: string;
+          };
+          if (
+            currentSection.value === "salary_chat" &&
+            salaryChatSalaryId.value &&
+            item.salary_id === salaryChatSalaryId.value
+          ) {
+            const exists = salaryChatMessages.value.some((m) => m.id === item.id);
+            if (!exists) {
+              salaryChatMessages.value = [...salaryChatMessages.value, item];
+            }
           }
         }
       } catch {
@@ -657,6 +888,8 @@ function clearAuth(): void {
   stopNotificationsPolling();
   closeChatSocket();
   stopChatPolling();
+  stopRoomChatPolling();
+  stopSalaryChatPolling();
   authUser.value = null;
   route.value = null;
   selectedDriverRoute.value = null;
@@ -676,6 +909,17 @@ function clearAuth(): void {
   pushLastOkAt.value = null;
   pushLastError.value = "";
   useLegacyBrowserNotification.value = true;
+  roomUnreadBump.value = {};
+  logisticDriverChatRooms.value = [];
+  adminChatRoomsList.value = [];
+  salaryListMine.value = [];
+  salaryCurrentRecord.value = null;
+  salaryChatSalaryId.value = null;
+  salaryChatMessages.value = [];
+  salaryAccountantDrivers.value = [];
+  salaryAccountantItems.value = [];
+  salarySelectedDriver.value = null;
+  salaryError.value = "";
   currentSection.value = "driver_home";
   profileMenuOpen.value = false;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -981,7 +1225,8 @@ async function syncOutboxInBackground(): Promise<void> {
         occurred_at_client: event.occurred_at_client,
         point_id: event.point_id,
         to_status: event.to_status,
-        odometer: null,
+        odometer: event.odometer ?? null,
+        odometer_source: event.odometer_source ?? null,
         coordinates: null
       };
       if (event.document_file_ids?.length) {
@@ -1157,7 +1402,12 @@ async function doCreateAdminRoute(payload: AdminRouteCreatePayload): Promise<voi
   }
 }
 
-async function doCreateAdminRouteFromOnec(payload: { raw_text: string; driver_user_id?: number | null }): Promise<void> {
+async function doCreateAdminRouteFromOnec(payload: {
+  raw_text: string;
+  driver_user_id?: number | null;
+  number_auto?: string;
+  trailer_number?: string;
+}): Promise<void> {
   if (!authToken.value || !isRouteManager.value) {
     return;
   }
@@ -1400,6 +1650,23 @@ function openRoleMainSection(section: AppSection): void {
     currentSection.value = "notifications";
     return;
   }
+  if (section === "chats") {
+    currentSection.value = "chats";
+    void refreshChatsHub();
+    return;
+  }
+  if (section === "driver_salary" && authUser.value.role_code === "driver") {
+    void openDriverSalarySection();
+    return;
+  }
+  if (section === "salary_accounting" && (isAdmin.value || isAccountant.value)) {
+    currentSection.value = "salary_accounting";
+    salaryAccountantDrivers.value = [];
+    salaryAccountantItems.value = [];
+    salarySelectedDriver.value = null;
+    salaryError.value = "";
+    return;
+  }
   if (section === "admin_users" && isAdminRole(authUser.value.role_code)) {
     currentSection.value = section;
     return;
@@ -1482,28 +1749,57 @@ function openStatusConfirm(pointId: number): void {
   if (!nextStatus(current.status)) {
     return;
   }
+  const pointIndex = base.points.findIndex((p) => p.id === pointId);
+  const to = nextStatus(current.status);
+  const showOdometer =
+    (current.status === "new" && pointIndex === 0 && to === "process") ||
+    (current.status === "process" && to === "registration") ||
+    (current.status === "load" && pointIndex === base.points.length - 1 && to === "docs");
   const initial = toDatetimeLocalValue(new Date());
   statusConfirm.value = {
     pointId,
     nextLabel: nextStatusLabel(current.status) || "",
     datetimeLocal: initial,
-    initialDatetimeLocal: initial
+    initialDatetimeLocal: initial,
+    showOdometer,
+    odometer: "",
+    initialOdometer: "",
+    odometerPrefillSource: null
   };
+  if (showOdometer && navigator.onLine && authToken.value) {
+    void (async () => {
+      try {
+        const tel = await getPointTelemetry(authToken.value, pointId);
+        if (!statusConfirm.value || statusConfirm.value.pointId !== pointId) return;
+        if (tel.odometer) {
+          statusConfirm.value.odometer = tel.odometer;
+          statusConfirm.value.initialOdometer = tel.odometer;
+          statusConfirm.value.odometerPrefillSource = tel.odometer_source;
+        }
+      } catch {
+        // ignore telemetry prefetch errors; driver can enter manually
+      }
+    })();
+  }
 }
 
 function cancelStatusConfirm(): void {
   statusConfirm.value = null;
 }
 
-async function applyStatusConfirm(datetimeLocal: string): Promise<void> {
+async function applyStatusConfirm(payload: {
+  datetimeLocal: string;
+  odometer: string;
+  odometer_source: "manual" | "wialon" | null;
+}): Promise<void> {
   const pending = statusConfirm.value;
   statusConfirm.value = null;
   if (!pending) {
     return;
   }
   try {
-    const iso = fromDatetimeLocalToIso(datetimeLocal);
-    const timeSource: "device" | "manual" = pending.initialDatetimeLocal === datetimeLocal ? "device" : "manual";
+    const iso = fromDatetimeLocalToIso(payload.datetimeLocal);
+    const timeSource: "device" | "manual" = pending.initialDatetimeLocal === payload.datetimeLocal ? "device" : "manual";
     const base =
       currentSection.value === "driver_route_details" && selectedDriverRoute.value
         ? selectedDriverRoute.value
@@ -1514,10 +1810,20 @@ async function applyStatusConfirm(datetimeLocal: string): Promise<void> {
     }
     const to = nextStatus(current.status);
     if (to === "docs") {
-      docsUpload.value = { pointId: pending.pointId, occurredAtIso: iso, timeSource };
+      docsUpload.value = {
+        pointId: pending.pointId,
+        occurredAtIso: iso,
+        timeSource,
+        odometer: payload.odometer,
+        odometer_source: payload.odometer_source
+      };
       return;
     }
-    await markPointNext(pending.pointId, iso, undefined, { timeSource });
+    await markPointNext(pending.pointId, iso, undefined, {
+      timeSource,
+      odometer: payload.odometer,
+      odometer_source: payload.odometer_source
+    });
   } catch (error) {
     syncMessage.value = (error as Error).message;
   }
@@ -1548,7 +1854,12 @@ async function applyDocsUpload(files: File[]): Promise<void> {
     if (navigator.onLine) {
       const { file_ids } = await uploadPointDocuments(authToken.value, ctx.pointId, blobs, { signal: docsUploadAbort.signal });
       docsUpload.value = null;
-      await markPointNext(ctx.pointId, ctx.occurredAtIso, { fileIds: file_ids }, { timeSource: ctx.timeSource });
+      await markPointNext(
+        ctx.pointId,
+        ctx.occurredAtIso,
+        { fileIds: file_ids },
+        { timeSource: ctx.timeSource, odometer: ctx.odometer, odometer_source: ctx.odometer_source }
+      );
     } else {
       const localKeys: string[] = [];
       for (const blob of blobs) {
@@ -1564,7 +1875,12 @@ async function applyDocsUpload(files: File[]): Promise<void> {
         localKeys.push(key);
       }
       docsUpload.value = null;
-      await markPointNext(ctx.pointId, ctx.occurredAtIso, { localKeys }, { timeSource: ctx.timeSource });
+      await markPointNext(
+        ctx.pointId,
+        ctx.occurredAtIso,
+        { localKeys },
+        { timeSource: ctx.timeSource, odometer: ctx.odometer, odometer_source: ctx.odometer_source }
+      );
     }
   } catch (error) {
     const e = error as { name?: string; message?: string };
@@ -1585,7 +1901,7 @@ async function markPointNext(
   pointId: number,
   occurredAtOverride?: string,
   docsAttach?: DocsAttach,
-  options?: { timeSource?: "device" | "manual" }
+  options?: { timeSource?: "device" | "manual"; odometer?: string; odometer_source?: "manual" | "wialon" | null }
 ): Promise<void> {
   if (!route.value || !isDriver.value) {
     return;
@@ -1619,7 +1935,8 @@ async function markPointNext(
     point_id: pointId,
     to_status: toStatus,
     time_source: options?.timeSource ?? "device",
-    odometer: null,
+    odometer: (options?.odometer || "").trim() || null,
+    odometer_source: options?.odometer_source ?? null,
     coordinates: null
   };
   if (toStatus === "docs" && docsAttach) {
@@ -1771,6 +2088,472 @@ async function sendChat(text: string): Promise<void> {
   }
 }
 
+async function refreshChatsHub(): Promise<void> {
+  if (!authToken.value) return;
+  chatsLoading.value = true;
+  chatsError.value = "";
+  roomUnreadBump.value = {};
+  try {
+    await postChatsBootstrap(authToken.value);
+    const [rooms, users] = await Promise.all([listChatRooms(authToken.value), listChatUsers(authToken.value)]);
+    chatsRooms.value = rooms;
+    chatsUsers.value = users;
+    if (authUser.value && isLogisticRole(authUser.value.role_code)) {
+      logisticDriverChatRooms.value = await listLogisticDriverChatRooms(authToken.value);
+    } else {
+      logisticDriverChatRooms.value = [];
+    }
+    if (authUser.value && isAdminRole(authUser.value.role_code)) {
+      adminChatRoomsLoading.value = true;
+      try {
+        adminChatRoomsList.value = await listAdminChatRooms(authToken.value);
+      } finally {
+        adminChatRoomsLoading.value = false;
+      }
+    } else {
+      adminChatRoomsList.value = [];
+    }
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы открыть чаты." })) {
+      return;
+    }
+    chatsError.value = (error as Error).message;
+  } finally {
+    chatsLoading.value = false;
+  }
+}
+
+async function refreshAdminChatRoomsOnly(): Promise<void> {
+  if (!authToken.value || !authUser.value || !isAdminRole(authUser.value.role_code)) {
+    return;
+  }
+  adminChatRoomsLoading.value = true;
+  try {
+    adminChatRoomsList.value = await listAdminChatRooms(authToken.value);
+  } catch (error) {
+    chatsError.value = (error as Error).message;
+  } finally {
+    adminChatRoomsLoading.value = false;
+  }
+}
+
+async function doAdminBroadcast(payload: { title: string; message: string; role_codes: RoleCode[] }): Promise<void> {
+  if (!authToken.value) return;
+  if (!payload.title.trim() || !payload.message.trim()) {
+    syncMessage.value = "Укажите заголовок и текст рассылки";
+    return;
+  }
+  try {
+    const res = await adminBroadcastByRoles(authToken.value, {
+      title: payload.title.trim(),
+      message: payload.message.trim(),
+      role_codes: payload.role_codes
+    });
+    syncMessage.value = `Рассылка отправлена (${res.recipient_count} получателей)`;
+    await refreshNotifications();
+  } catch (error) {
+    syncMessage.value = `Ошибка рассылки: ${(error as Error).message}`;
+  }
+}
+
+async function doAdminDeleteRoom(roomId: number): Promise<void> {
+  if (!authToken.value) return;
+  if (!window.confirm(`Удалить комнату #${roomId}? Сообщения будут удалены.`)) {
+    return;
+  }
+  try {
+    await adminDeleteChatRoom(authToken.value, roomId);
+    syncMessage.value = "Комната удалена";
+    await refreshChatsHub();
+  } catch (error) {
+    syncMessage.value = `Не удалось удалить: ${(error as Error).message}`;
+  }
+}
+
+async function openChatRoom(roomId: number, titleHint?: string): Promise<void> {
+  if (!authToken.value) return;
+  const nextBump = { ...roomUnreadBump.value };
+  delete nextBump[roomId];
+  roomUnreadBump.value = nextBump;
+  chatRoomId.value = roomId;
+  chatRoomTitle.value = titleHint || `#${roomId}`;
+  currentSection.value = "chat_room";
+  await refreshChatRoom();
+  startRoomChatPolling();
+}
+
+function closeChatRoomToHub(): void {
+  stopRoomChatPolling();
+  currentSection.value = "chats";
+}
+
+function pad2(n: number): string {
+  return String(n).padStart(2, "0");
+}
+
+async function openDriverSalarySection(): Promise<void> {
+  if (!authToken.value) return;
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = d.getMonth();
+  const last = new Date(y, m + 1, 0).getDate();
+  salaryDriverFilterFrom.value = `01.${pad2(m + 1)}.${y}`;
+  salaryDriverFilterTo.value = `${pad2(last)}.${pad2(m + 1)}.${y}`;
+  currentSection.value = "driver_salary";
+  await refreshDriverSalaryList(salaryDriverFilterFrom.value, salaryDriverFilterTo.value);
+}
+
+async function refreshDriverSalaryList(dateFrom?: string, dateTo?: string): Promise<void> {
+  if (!authToken.value) return;
+  salaryListLoading.value = true;
+  salaryError.value = "";
+  try {
+    salaryListMine.value = await listMySalaries(authToken.value, dateFrom, dateTo);
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
+    salaryError.value = (error as Error).message;
+  } finally {
+    salaryListLoading.value = false;
+  }
+}
+
+async function onDriverSalaryRefresh(from?: string, to?: string): Promise<void> {
+  if (from) salaryDriverFilterFrom.value = from;
+  if (to) salaryDriverFilterTo.value = to;
+  await refreshDriverSalaryList(salaryDriverFilterFrom.value, salaryDriverFilterTo.value);
+}
+
+async function exportDriverSalaryCsv(dateFrom: string, dateTo: string): Promise<void> {
+  if (!authToken.value) return;
+  try {
+    const blob = await fetchMySalaryCsvBlob(authToken.value, dateFrom, dateTo);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `расчеты_${dateFrom}_${dateTo}.csv`.replace(/\./g, "-");
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.setTimeout(() => URL.revokeObjectURL(url), 15_000);
+    syncMessage.value = "CSV сохранён";
+  } catch (error) {
+    salaryError.value = (error as Error).message;
+  }
+}
+
+function openSalaryDetail(row: SalaryRecord, backSection: AppSection): void {
+  salaryCurrentRecord.value = row;
+  salaryDetailBackSection.value = backSection;
+  currentSection.value = "salary_detail";
+}
+
+function closeSalaryDetail(): void {
+  currentSection.value = salaryDetailBackSection.value;
+}
+
+async function reloadSalaryCurrent(): Promise<void> {
+  if (!authToken.value || !salaryCurrentRecord.value) return;
+  try {
+    salaryCurrentRecord.value = await getSalary(authToken.value, salaryCurrentRecord.value.id);
+    if (salaryDetailBackSection.value === "driver_salary") {
+      await refreshDriverSalaryList(salaryDriverFilterFrom.value, salaryDriverFilterTo.value);
+    } else if (salarySelectedDriver.value) {
+      await refreshAccountantSalaryList();
+    }
+  } catch {
+    // ignore
+  }
+}
+
+async function doSalaryConfirm(): Promise<void> {
+  if (!authToken.value || !salaryCurrentRecord.value) return;
+  salaryDetailBusy.value = true;
+  try {
+    salaryCurrentRecord.value = await confirmSalary(authToken.value, salaryCurrentRecord.value.id);
+    syncMessage.value = "Расчёт подтверждён";
+    await reloadSalaryCurrent();
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    salaryDetailBusy.value = false;
+  }
+}
+
+async function doSalaryComment(text: string): Promise<void> {
+  if (!authToken.value || !salaryCurrentRecord.value) return;
+  salaryDetailBusy.value = true;
+  try {
+    salaryCurrentRecord.value = await commentSalary(authToken.value, salaryCurrentRecord.value.id, text);
+    syncMessage.value = "Комментарий отправлен";
+    await reloadSalaryCurrent();
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    salaryDetailBusy.value = false;
+  }
+}
+
+async function openSalaryChatFromDetail(): Promise<void> {
+  if (!salaryCurrentRecord.value || !authToken.value) return;
+  salaryChatSalaryId.value = salaryCurrentRecord.value.id;
+  currentSection.value = "salary_chat";
+  await refreshSalaryChat();
+  startSalaryChatPolling();
+}
+
+function closeSalaryChat(): void {
+  stopSalaryChatPolling();
+  currentSection.value = "salary_detail";
+}
+
+async function refreshSalaryChat(): Promise<void> {
+  if (!authToken.value || !salaryChatSalaryId.value) return;
+  salaryChatLoading.value = true;
+  salaryChatError.value = "";
+  try {
+    salaryChatMessages.value = await listSalaryChatMessages(authToken.value, salaryChatSalaryId.value);
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
+    salaryChatError.value = (error as Error).message;
+  } finally {
+    salaryChatLoading.value = false;
+  }
+}
+
+async function sendSalaryChat(text: string): Promise<void> {
+  if (!authToken.value || !salaryChatSalaryId.value) return;
+  salaryChatLoading.value = true;
+  try {
+    const created = await sendSalaryChatMessage(authToken.value, salaryChatSalaryId.value, { text });
+    const exists = salaryChatMessages.value.some((m) => m.id === created.id);
+    if (!exists) {
+      salaryChatMessages.value = [...salaryChatMessages.value, created];
+    }
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла." })) {
+      return;
+    }
+    salaryChatError.value = (error as Error).message;
+  } finally {
+    salaryChatLoading.value = false;
+  }
+}
+
+async function uploadSalaryChatFiles(payload: { text: string; files: File[] }): Promise<void> {
+  if (!authToken.value || !salaryChatSalaryId.value || !payload.files.length) return;
+  salaryChatLoading.value = true;
+  try {
+    const created = await uploadSalaryChatAttachments(authToken.value, salaryChatSalaryId.value, payload.files, {
+      text: payload.text
+    });
+    const exists = salaryChatMessages.value.some((m) => m.id === created.id);
+    if (!exists) {
+      salaryChatMessages.value = [...salaryChatMessages.value, created];
+    }
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла." })) {
+      return;
+    }
+    salaryChatError.value = (error as Error).message;
+  } finally {
+    salaryChatLoading.value = false;
+  }
+}
+
+async function downloadSalaryChatAttachment(payload: { attachmentId: number; originalName: string }): Promise<void> {
+  if (!authToken.value) return;
+  try {
+    const blob = await fetchSalaryChatAttachmentBlob(authToken.value, payload.attachmentId);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = payload.originalName || `file-${payload.attachmentId}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  } catch (error) {
+    salaryChatError.value = `Не удалось скачать: ${(error as Error).message}`;
+  }
+}
+
+async function searchSalaryDriversForAccounting(q: string): Promise<void> {
+  if (!authToken.value || !q.trim()) return;
+  salaryError.value = "";
+  try {
+    salaryAccountantDrivers.value = await lookupSalaryDrivers(authToken.value, q.trim());
+  } catch (error) {
+    salaryError.value = (error as Error).message;
+  }
+}
+
+async function pickSalaryAccountantDriver(userId: number): Promise<void> {
+  if (!authToken.value) return;
+  const d = salaryAccountantDrivers.value.find((x) => x.id === userId);
+  if (!d) return;
+  salarySelectedDriver.value = { id: d.id, login: d.login, full_name: d.full_name };
+  await refreshAccountantSalaryList();
+}
+
+async function refreshAccountantSalaryList(dateFrom?: string, dateTo?: string): Promise<void> {
+  if (!authToken.value || !salarySelectedDriver.value) return;
+  salaryListLoading.value = true;
+  salaryError.value = "";
+  try {
+    const res = await listSalariesForDriver(authToken.value, salarySelectedDriver.value.id, dateFrom, dateTo);
+    salaryAccountantItems.value = res.items;
+  } catch (error) {
+    salaryError.value = (error as Error).message;
+  } finally {
+    salaryListLoading.value = false;
+  }
+}
+
+async function createSalaryFromAccountant(payload: { driver_user_id: number; salary_line: string }): Promise<void> {
+  if (!authToken.value) return;
+  salarySaving.value = true;
+  salaryError.value = "";
+  try {
+    await createSalaryManual(authToken.value, payload);
+    syncMessage.value = "Расчёт создан";
+    await refreshAccountantSalaryList();
+  } catch (error) {
+    salaryError.value = (error as Error).message;
+  } finally {
+    salarySaving.value = false;
+  }
+}
+
+async function refreshChatRoom(): Promise<void> {
+  if (!authToken.value || !chatRoomId.value) return;
+  chatRoomLoading.value = true;
+  chatRoomError.value = "";
+  try {
+    chatRoomMessages.value = await listChatRoomMessages(authToken.value, chatRoomId.value);
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы открыть чат." })) {
+      return;
+    }
+    chatRoomError.value = (error as Error).message;
+  } finally {
+    chatRoomLoading.value = false;
+  }
+}
+
+async function sendChatRoom(text: string): Promise<void> {
+  if (!authToken.value || !chatRoomId.value) return;
+  chatRoomLoading.value = true;
+  try {
+    const created = await sendChatRoomMessage(authToken.value, chatRoomId.value, { text });
+    const exists = chatRoomMessages.value.some((m) => m.id === created.id);
+    if (!exists) {
+      chatRoomMessages.value = [...chatRoomMessages.value, created];
+    }
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы отправить сообщение." })) {
+      return;
+    }
+    chatRoomError.value = (error as Error).message;
+  } finally {
+    chatRoomLoading.value = false;
+  }
+}
+
+async function uploadChatRoomFiles(payload: { text: string; files: File[] }): Promise<void> {
+  if (!authToken.value || !chatRoomId.value) return;
+  if (!payload.files.length) return;
+  chatRoomLoading.value = true;
+  try {
+    const created = await uploadChatRoomAttachments(authToken.value, chatRoomId.value, payload.files, { text: payload.text });
+    const exists = chatRoomMessages.value.some((m) => m.id === created.id);
+    if (!exists) {
+      chatRoomMessages.value = [...chatRoomMessages.value, created];
+    }
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы отправить файлы." })) {
+      return;
+    }
+    chatRoomError.value = (error as Error).message;
+  } finally {
+    chatRoomLoading.value = false;
+  }
+}
+
+async function downloadChatRoomAttachment(payload: { attachmentId: number; originalName: string }): Promise<void> {
+  if (!authToken.value) return;
+  try {
+    const blob = await fetchChatRoomAttachmentBlob(authToken.value, payload.attachmentId);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = payload.originalName || `file-${payload.attachmentId}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  } catch (error) {
+    chatRoomError.value = `Не удалось скачать файл: ${(error as Error).message}`;
+  }
+}
+
+async function openDirectWithUser(userId: number): Promise<void> {
+  if (!authToken.value) return;
+  try {
+    const res = await openDirectChat(authToken.value, userId);
+    await refreshChatsHub();
+    await openChatRoom(res.room.id, res.room.title);
+  } catch (error) {
+    chatsError.value = (error as Error).message;
+  }
+}
+
+async function uploadChatFiles(payload: { text: string; files: File[] }): Promise<void> {
+  if (!authToken.value || !chatRouteId.value) {
+    return;
+  }
+  if (!payload.files.length) {
+    return;
+  }
+  chatLoading.value = true;
+  try {
+    const created = await uploadRouteChatAttachments(authToken.value, chatRouteId.value, payload.files, { text: payload.text });
+    const exists = chatMessages.value.some((m) => m.id === created.id);
+    if (!exists) {
+      chatMessages.value = [...chatMessages.value, created];
+    }
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы отправить файлы." })) {
+      return;
+    }
+    chatError.value = (error as Error).message;
+  } finally {
+    chatLoading.value = false;
+  }
+}
+
+async function downloadChatAttachment(payload: { attachmentId: number; originalName: string }): Promise<void> {
+  if (!authToken.value) {
+    return;
+  }
+  try {
+    const blob = await fetchChatAttachmentBlob(authToken.value, payload.attachmentId);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = payload.originalName || `file-${payload.attachmentId}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  } catch (error) {
+    chatError.value = `Не удалось скачать файл: ${(error as Error).message}`;
+  }
+}
+
 function openDriverRoutes(): void {
   profileMenuOpen.value = false;
   currentSection.value = "driver_routes";
@@ -1822,6 +2605,8 @@ onUnmounted(() => {
   stopNotificationsPolling();
   closeChatSocket();
   stopChatPolling();
+  stopRoomChatPolling();
+  stopSalaryChatPolling();
   window.removeEventListener("online", onOnline);
   window.removeEventListener("offline", onOffline);
   window.removeEventListener("mousedown", onDocumentClick);
@@ -1830,7 +2615,10 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <main class="container" :class="{ 'container--chat': isAuthed && currentSection === 'chat' }">
+  <main
+    class="container"
+    :class="{ 'container--chat': isAuthed && (currentSection === 'chat' || currentSection === 'salary_chat') }"
+  >
     <header class="topbar">
       <div class="topbar-side">
         <button v-if="isAuthed" class="icon-btn bell-btn" @click="openNotifications">
@@ -1857,6 +2645,7 @@ onUnmounted(() => {
               @click="selectProfileSection(item.section)"
             >
               {{ item.label }}
+              <span v-if="item.section === 'chats' && hasUnreadGenericChats" class="notif-dot menu-dot" />
             </button>
             <button class="menu-item danger" @click="logout">Выход</button>
           </div>
@@ -1886,6 +2675,7 @@ onUnmounted(() => {
         :drivers="routeDrivers"
         :loading="routesLoading"
         :auth-token="authToken"
+        :unread-chat-count="chatUnreadByRoute[selectedAdminRoute.id] ?? 0"
         @back="openAdminRouteList"
         @assign-driver="doAssignAdminRoute"
         @cancel-route="doCancelAdminRoute"
@@ -1941,6 +2731,7 @@ onUnmounted(() => {
         :active-route-id="route?.id || null"
         :syncing="syncing"
         :can-accept-route="canAcceptSelectedDriverRoute"
+        :unread-chat-count="chatUnreadByRoute[selectedDriverRoute.id] ?? 0"
         @back="openDriverRoutes"
         @advance-point="openStatusConfirm"
         @revert-point="doRevertPoint"
@@ -1959,6 +2750,104 @@ onUnmounted(() => {
         :current-user-id="authUser?.id ?? null"
         @back="() => (currentSection = isDriver ? 'driver_route_details' : 'admin_route_details')"
         @send="sendChat"
+        @upload="uploadChatFiles"
+        @download="downloadChatAttachment"
+      />
+    </section>
+
+    <section v-else-if="currentSection === 'chat_room' && chatRoomId">
+      <ChatView
+        :route-id="String(chatRoomId)"
+        :title="chatRoomTitle"
+        :items="chatRoomMessages"
+        :loading="chatRoomLoading"
+        :error="chatRoomError"
+        :can-send="Boolean(isAuthed)"
+        :current-user-id="authUser?.id ?? null"
+        @back="closeChatRoomToHub"
+        @send="sendChatRoom"
+        @upload="uploadChatRoomFiles"
+        @download="downloadChatRoomAttachment"
+      />
+    </section>
+
+    <section v-else-if="isDriver && currentSection === 'driver_salary'">
+      <DriverSalaryView
+        :items="salaryListMine"
+        :loading="salaryListLoading"
+        :error="salaryError"
+        :initial-from="salaryDriverFilterFrom"
+        :initial-to="salaryDriverFilterTo"
+        @back="openDriverHome"
+        @refresh="onDriverSalaryRefresh"
+        @export-csv="exportDriverSalaryCsv"
+        @select="(r) => openSalaryDetail(r, 'driver_salary')"
+      />
+    </section>
+
+    <section v-else-if="(isAdmin || isAccountant) && currentSection === 'salary_accounting'">
+      <AccountantSalaryView
+        :drivers="salaryAccountantDrivers"
+        :items="salaryAccountantItems"
+        :selected-driver="salarySelectedDriver"
+        :loading="salaryListLoading"
+        :saving="salarySaving"
+        :error="salaryError"
+        @back="() => (currentSection = 'admin_routes')"
+        @search="(q) => void searchSalaryDriversForAccounting(q)"
+        @pick-driver="(id) => void pickSalaryAccountantDriver(id)"
+        @refresh-list="(a, b) => void refreshAccountantSalaryList(a, b)"
+        @create="(p) => void createSalaryFromAccountant(p)"
+        @select="(r) => openSalaryDetail(r, 'salary_accounting')"
+      />
+    </section>
+
+    <section v-else-if="currentSection === 'salary_detail' && salaryCurrentRecord">
+      <SalaryDetailView
+        :record="salaryCurrentRecord"
+        :is-driver="isDriver"
+        :busy="salaryDetailBusy"
+        @back="closeSalaryDetail"
+        @confirm="doSalaryConfirm"
+        @comment="doSalaryComment"
+        @open-chat="openSalaryChatFromDetail"
+      />
+    </section>
+
+    <section v-else-if="currentSection === 'salary_chat' && salaryChatSalaryId">
+      <ChatView
+        :route-id="String(salaryChatSalaryId)"
+        :title="`Чат расчёта #${salaryChatSalaryId}`"
+        :items="salaryChatItemsForChatView"
+        :loading="salaryChatLoading"
+        :error="salaryChatError"
+        :can-send="Boolean(isAuthed)"
+        :current-user-id="authUser?.id ?? null"
+        @back="closeSalaryChat"
+        @send="sendSalaryChat"
+        @upload="uploadSalaryChatFiles"
+        @download="downloadSalaryChatAttachment"
+      />
+    </section>
+
+    <section v-else-if="currentSection === 'chats'">
+      <ChatsHubView
+        :rooms="chatsRoomsForDisplay"
+        :users="chatsUsers"
+        :loading="chatsLoading"
+        :error="chatsError"
+        :logistic-driver-rooms="logisticDriverChatRoomsDisplay"
+        :is-logistic="isLogistic"
+        :is-admin="isAdmin"
+        :admin-rooms="adminChatRoomsList"
+        :admin-rooms-loading="adminChatRoomsLoading"
+        @back="() => (currentSection = isDriver ? 'driver_home' : isRouteManager ? 'admin_routes' : 'driver_home')"
+        @refresh="refreshChatsHub"
+        @open-room="(id, title) => openChatRoom(id, title)"
+        @open-direct-with="openDirectWithUser"
+        @admin-broadcast="doAdminBroadcast"
+        @admin-delete-room="doAdminDeleteRoom"
+        @admin-refresh-rooms="refreshAdminChatRoomsOnly"
       />
     </section>
 
@@ -1994,9 +2883,18 @@ onUnmounted(() => {
       :open="true"
       :next-status-label="statusConfirm.nextLabel"
       :datetime-local="statusConfirm.datetimeLocal"
+      :show-odometer="statusConfirm.showOdometer"
+      :odometer="statusConfirm.odometer"
+      :initial-odometer="statusConfirm.initialOdometer"
+      :odometer-prefill-source="statusConfirm.odometerPrefillSource"
       @update:datetime-local="
         (v) => {
           if (statusConfirm) statusConfirm.datetimeLocal = v;
+        }
+      "
+      @update:odometer="
+        (v) => {
+          if (statusConfirm) statusConfirm.odometer = v;
         }
       "
       @cancel="cancelStatusConfirm"
@@ -2131,6 +3029,14 @@ onUnmounted(() => {
   color: #fff;
   padding: 0.42rem 0.58rem;
   text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.menu-item .menu-dot {
+  position: static;
+  flex-shrink: 0;
 }
 .menu-item.danger {
   background: #7f1d1d;

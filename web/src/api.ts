@@ -101,6 +101,20 @@ export async function getDriverRoute(token: string, routeId: string): Promise<Ro
   return data.route;
 }
 
+export async function getPointTelemetry(
+  token: string,
+  pointId: number
+): Promise<{ odometer: string | null; odometer_source: "wialon" | null }> {
+  return requestJson<{ odometer: string | null; odometer_source: "wialon" | null }>(
+    `${API_BASE}/v1/mobile/points/${pointId}/telemetry`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
+}
+
 export async function acceptRoute(token: string, routeId: string): Promise<RouteDto> {
   const data = await requestJson<{ route: RouteDto }>(`${API_BASE}/v1/mobile/routes/${routeId}/accept`, {
     method: "POST",
@@ -291,7 +305,7 @@ export async function createAdminRoute(token: string, payload: AdminRouteCreateP
 
 export async function createAdminRouteFromOnec(
   token: string,
-  payload: { raw_text: string; driver_user_id?: number | null }
+  payload: { raw_text: string; driver_user_id?: number | null; number_auto?: string; trailer_number?: string }
 ): Promise<AdminRoute> {
   return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/onec`, {
     method: "POST",
@@ -498,10 +512,19 @@ export async function listRouteChatMessages(
     author_name: string;
     text: string;
     created_at: string;
+    attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
   }>
 > {
   const data = await requestJson<{
-    items: Array<{ id: number; route_id: string; user_id: number; author_name: string; text: string; created_at: string }>;
+    items: Array<{
+      id: number;
+      route_id: string;
+      user_id: number;
+      author_name: string;
+      text: string;
+      created_at: string;
+      attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
+    }>;
   }>(`${API_BASE}/v1/chat/routes/${encodeURIComponent(routeId)}/messages`, {
     headers: {
       Authorization: `Bearer ${token}`
@@ -514,8 +537,24 @@ export async function sendRouteChatMessage(
   token: string,
   routeId: string,
   payload: { text: string }
-): Promise<{ id: number; route_id: string; user_id: number; author_name: string; text: string; created_at: string }> {
-  return requestJson<{ id: number; route_id: string; user_id: number; author_name: string; text: string; created_at: string }>(
+): Promise<{
+  id: number;
+  route_id: string;
+  user_id: number;
+  author_name: string;
+  text: string;
+  created_at: string;
+  attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
+}> {
+  return requestJson<{
+    id: number;
+    route_id: string;
+    user_id: number;
+    author_name: string;
+    text: string;
+    created_at: string;
+    attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
+  }>(
     `${API_BASE}/v1/chat/routes/${encodeURIComponent(routeId)}/messages`,
     {
       method: "POST",
@@ -525,6 +564,390 @@ export async function sendRouteChatMessage(
       body: JSON.stringify(payload)
     }
   );
+}
+
+export async function uploadRouteChatAttachments(
+  token: string,
+  routeId: string,
+  files: File[],
+  opts?: { text?: string }
+): Promise<{
+  id: number;
+  route_id: string;
+  user_id: number;
+  author_name: string;
+  text: string;
+  created_at: string;
+  attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
+}> {
+  const fd = new FormData();
+  fd.set("text", (opts?.text || "").trim());
+  files.forEach((f) => fd.append("files", f, f.name));
+  const url = `${API_BASE}/v1/chat/routes/${encodeURIComponent(routeId)}/attachments`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: fd
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    const trimmed = text.length > 280 ? `${text.slice(0, 280)}…` : text;
+    throw new Error(trimmed || `HTTP ${response.status}`);
+  }
+  return response.json() as Promise<{
+    id: number;
+    route_id: string;
+    user_id: number;
+    author_name: string;
+    text: string;
+    created_at: string;
+    attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
+  }>;
+}
+
+export async function fetchChatAttachmentBlob(token: string, attachmentId: number): Promise<Blob> {
+  const url = `${API_BASE}/v1/chat/attachments/${attachmentId}/file`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return response.blob();
+}
+
+// --- Generic chats (rooms) ---
+
+export async function listChatUsers(token: string): Promise<
+  Array<{ id: number; login: string; full_name: string | null; role_code: string; role_label: string }>
+> {
+  const data = await requestJson<{ items: Array<{ id: number; login: string; full_name: string | null; role_code: string; role_label: string }> }>(
+    `${API_BASE}/v1/chats/users`,
+    {
+      headers: { Authorization: `Bearer ${token}` }
+    }
+  );
+  return data.items;
+}
+
+export async function postChatsBootstrap(token: string): Promise<void> {
+  await requestJson<{ ok: boolean }>(`${API_BASE}/v1/chats/bootstrap`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({})
+  });
+}
+
+export async function listLogisticDriverChatRooms(
+  token: string
+): Promise<
+  Array<{
+    driver: { id: number; full_name: string | null; login: string };
+    room: { id: number; kind: "direct" | "group"; title: string; system_key?: string | null; unread_count?: number };
+  }>
+> {
+  const data = await requestJson<{
+    items: Array<{
+      driver: { id: number; full_name: string | null; login: string };
+      room: { id: number; kind: "direct" | "group"; title: string; system_key?: string | null; unread_count?: number };
+    }>;
+  }>(`${API_BASE}/v1/chats/logistic/driver-rooms`, { headers: { Authorization: `Bearer ${token}` } });
+  return data.items;
+}
+
+export async function listChatRooms(
+  token: string,
+  kind?: "direct" | "group"
+): Promise<Array<{ id: number; kind: "direct" | "group"; title: string; system_key?: string | null; unread_count?: number }>> {
+  const qs = new URLSearchParams();
+  if (kind) qs.set("kind", kind);
+  const data = await requestJson<{ items: Array<{ id: number; kind: "direct" | "group"; title: string; system_key?: string | null; unread_count?: number }> }>(
+    `${API_BASE}/v1/chats/rooms?${qs.toString()}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return data.items;
+}
+
+export async function openDirectChat(token: string, userId: number): Promise<{ room: { id: number; kind: "direct" | "group"; title: string } }> {
+  return requestJson<{ room: { id: number; kind: "direct" | "group"; title: string } }>(`${API_BASE}/v1/chats/direct`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ user_id: userId })
+  });
+}
+
+export async function listChatRoomMessages(
+  token: string,
+  roomId: number
+): Promise<
+  Array<{
+    id: number;
+    room_id: number;
+    user_id: number;
+    author_name: string;
+    text: string;
+    created_at: string;
+    attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
+  }>
+> {
+  const data = await requestJson<{ items: any[] }>(`${API_BASE}/v1/chats/rooms/${roomId}/messages`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return data.items;
+}
+
+export async function sendChatRoomMessage(
+  token: string,
+  roomId: number,
+  payload: { text: string }
+): Promise<any> {
+  return requestJson<any>(`${API_BASE}/v1/chats/rooms/${roomId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function uploadChatRoomAttachments(
+  token: string,
+  roomId: number,
+  files: File[],
+  opts?: { text?: string }
+): Promise<any> {
+  const fd = new FormData();
+  fd.set("text", (opts?.text || "").trim());
+  files.forEach((f) => fd.append("files", f, f.name));
+  const url = `${API_BASE}/v1/chats/rooms/${roomId}/attachments`;
+  const response = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function fetchChatRoomAttachmentBlob(token: string, attachmentId: number): Promise<Blob> {
+  const url = `${API_BASE}/v1/chats/attachments/${attachmentId}/file`;
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return response.blob();
+}
+
+export type AdminChatRoomRow = {
+  id: number;
+  kind: string;
+  title: string;
+  system_key: string | null;
+  member_user_ids: number[];
+  role_codes: string[];
+  created_at: string;
+};
+
+export async function listAdminChatRooms(token: string): Promise<AdminChatRoomRow[]> {
+  const data = await requestJson<{ items: AdminChatRoomRow[] }>(`${API_BASE}/v1/admin/chats/rooms`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return data.items;
+}
+
+export async function adminDeleteChatRoom(token: string, roomId: number): Promise<void> {
+  const response = await fetch(`${API_BASE}/v1/admin/chats/rooms/${roomId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+}
+
+export async function adminBroadcastByRoles(
+  token: string,
+  payload: { title: string; message: string; role_codes: string[]; skip_self?: boolean }
+): Promise<{ recipient_count: number }> {
+  return requestJson<{ recipient_count: number }>(`${API_BASE}/v1/admin/chats/broadcast`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ ...payload, skip_self: payload.skip_self ?? true })
+  });
+}
+
+// --- Salary (зарплата, как в боте) ---
+
+export type SalaryRecord = {
+  id: number;
+  id_driver: string;
+  date_salary: string;
+  type_route: string;
+  sum_status: number;
+  sum_daily: number;
+  load_2_trips: number;
+  calc_shuttle: number;
+  sum_load_unload: number;
+  sum_curtain: number;
+  sum_return: number;
+  sum_add_shuttle: number;
+  sum_add_point: number;
+  sum_gas_station: number;
+  pallets_hyper: number;
+  pallets_metro: number;
+  pallets_ashan: number;
+  rate_3km: number;
+  rate_3_5km: number;
+  rate_5km: number;
+  rate_10km: number;
+  rate_12km: number;
+  rate_12_5km: number;
+  mileage: number;
+  sum_cell_compensation: number;
+  experience: number;
+  percent_10: number;
+  sum_bonus: number;
+  withhold: number;
+  compensation: number;
+  dr: number;
+  sum_without_daily_dr_bonus_exp: number;
+  sum_without_daily_dr_bonus: number;
+  total: number;
+  load_address: string;
+  unload_address: string;
+  transport: string;
+  trailer_number: string;
+  route_number: string;
+  status_driver: string;
+  comment_driver: string;
+  created_at: string;
+};
+
+export async function lookupSalaryDrivers(
+  token: string,
+  q: string
+): Promise<Array<{ id: number; login: string; full_name: string | null; legacy_tg_id: string | null }>> {
+  const qs = new URLSearchParams({ q });
+  const data = await requestJson<{ items: Array<{ id: number; login: string; full_name: string | null; legacy_tg_id: string | null }> }>(
+    `${API_BASE}/v1/salary/lookup/drivers?${qs.toString()}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return data.items;
+}
+
+export async function createSalaryManual(token: string, payload: { driver_user_id: number; salary_line: string }): Promise<SalaryRecord> {
+  return requestJson<SalaryRecord>(`${API_BASE}/v1/salary`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function listMySalaries(token: string, dateFrom?: string, dateTo?: string): Promise<SalaryRecord[]> {
+  const qs = new URLSearchParams();
+  if (dateFrom) qs.set("date_from", dateFrom);
+  if (dateTo) qs.set("date_to", dateTo);
+  const suf = qs.toString() ? `?${qs.toString()}` : "";
+  const data = await requestJson<{ items: SalaryRecord[] }>(`${API_BASE}/v1/salary/mine${suf}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return data.items;
+}
+
+export async function fetchMySalaryCsvBlob(token: string, dateFrom: string, dateTo: string): Promise<Blob> {
+  const qs = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
+  const url = `${API_BASE}/v1/salary/mine/export.csv?${qs.toString()}`;
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return response.blob();
+}
+
+export async function listSalariesForDriver(
+  token: string,
+  driverUserId: number,
+  dateFrom?: string,
+  dateTo?: string
+): Promise<{ items: SalaryRecord[]; driver: { id: number; full_name: string | null; login: string } }> {
+  const qs = new URLSearchParams();
+  if (dateFrom) qs.set("date_from", dateFrom);
+  if (dateTo) qs.set("date_to", dateTo);
+  const suf = qs.toString() ? `?${qs.toString()}` : "";
+  return requestJson<{ items: SalaryRecord[]; driver: { id: number; full_name: string | null; login: string } }>(
+    `${API_BASE}/v1/salary/for-driver/${driverUserId}${suf}`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+}
+
+export async function getSalary(token: string, salaryId: number): Promise<SalaryRecord> {
+  return requestJson<SalaryRecord>(`${API_BASE}/v1/salary/${salaryId}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export async function confirmSalary(token: string, salaryId: number): Promise<SalaryRecord> {
+  return requestJson<SalaryRecord>(`${API_BASE}/v1/salary/${salaryId}/confirm`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({})
+  });
+}
+
+export async function commentSalary(token: string, salaryId: number, text: string): Promise<SalaryRecord> {
+  return requestJson<SalaryRecord>(`${API_BASE}/v1/salary/${salaryId}/comment`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ text })
+  });
+}
+
+export async function listSalaryChatMessages(token: string, salaryId: number): Promise<any[]> {
+  const data = await requestJson<{ items: any[] }>(`${API_BASE}/v1/salary/${salaryId}/chat/messages`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return data.items;
+}
+
+export async function sendSalaryChatMessage(token: string, salaryId: number, payload: { text: string }): Promise<any> {
+  return requestJson<any>(`${API_BASE}/v1/salary/${salaryId}/chat/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function uploadSalaryChatAttachments(
+  token: string,
+  salaryId: number,
+  files: File[],
+  opts?: { text?: string }
+): Promise<any> {
+  const fd = new FormData();
+  fd.set("text", (opts?.text || "").trim());
+  files.forEach((f) => fd.append("files", f, f.name));
+  const url = `${API_BASE}/v1/salary/${salaryId}/chat/attachments`;
+  const response = await fetch(url, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: fd });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
+export async function fetchSalaryChatAttachmentBlob(token: string, attachmentId: number): Promise<Blob> {
+  const url = `${API_BASE}/v1/salary/chat/attachments/${attachmentId}/file`;
+  const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return response.blob();
 }
 
 export function chatWebSocketUrl(token: string): string {

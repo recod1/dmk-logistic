@@ -267,21 +267,25 @@ function removeUser(user: AdminUser): void {
 table {
   width: 100%;
   border-collapse: collapse;
+  table-layout: fixed;
 }
 th,
 td {
   padding: 0.55rem;
   border-bottom: 1px solid #1f2937;
   text-align: left;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .row-actions {
   display: flex;
   gap: 0.4rem;
   flex-wrap: wrap;
+  align-items: center;
 }
 .row-actions button {
   max-width: 100%;
+  flex: 1 1 auto;
 }
 td.row-actions {
   white-space: normal;

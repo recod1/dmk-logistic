@@ -31,6 +31,9 @@ class MobileSettings:
     demo_password: str = os.getenv("DEMO_PASSWORD", "driver123")
     demo_role: str = os.getenv("DEMO_ROLE", "driver")
 
+    # Внешние POST /v1/salary/integration (заголовок X-Salary-Api-Key). Если пусто — эндпоинт отключён.
+    salary_integration_api_key: str = (os.getenv("SALARY_INTEGRATION_API_KEY") or os.getenv("API_KEY") or "").strip()
+
 
 mobile_settings = MobileSettings()
 

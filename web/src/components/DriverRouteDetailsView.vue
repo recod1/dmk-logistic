@@ -16,6 +16,7 @@ const props = defineProps<{
   activeRouteId: string | null;
   syncing: boolean;
   canAcceptRoute: boolean;
+  unreadChatCount?: number;
 }>();
 
 const emit = defineEmits<{
@@ -187,7 +188,10 @@ function showRevert(pointId: number): boolean {
         <p v-if="!isAcceptedCurrentRoute && route.status === 'process'" class="note">
           Изменение статусов доступно только для принятого текущего рейса.
         </p>
-        <button class="ghost wide" type="button" @click="emit('openChat', route.id)">Открыть чат рейса</button>
+        <button class="ghost wide chat-btn" type="button" @click="emit('openChat', route.id)">
+          Открыть чат рейса
+          <span v-if="(unreadChatCount ?? 0) > 0" class="chat-badge" aria-label="Новые сообщения" />
+        </button>
       </article>
 
       <article class="card">
@@ -361,6 +365,19 @@ small {
 .primary.wide,
 .ghost.wide {
   width: 100%;
+}
+.chat-btn {
+  position: relative;
+}
+.chat-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
 }
 .primary {
   border: none;

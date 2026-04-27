@@ -83,6 +83,7 @@ class BatchEventPayload(BaseModel):
     to_status: Literal["process", "registration", "load", "docs", "success"]
     time_source: Literal["device", "manual"] | None = None
     odometer: str | None = Field(default=None, max_length=128)
+    odometer_source: Literal["manual", "wialon"] | None = None
     coordinates: dict | None = None
     document_file_ids: list[int] | None = Field(default=None, max_length=32)
 
@@ -131,18 +132,22 @@ def _point_to_dict(
         "departure_time": _format_datetime_ru(point.departure_time),
         "departure_time_source": sources.get("process"),
         "departure_odometer": point.departure_odometer,
+        "departure_odometer_source": point.departure_odometer_source,
         "departure_coordinates": {"lat": point.departure_lat, "lng": point.departure_lng},
         "registration_time": _format_datetime_ru(point.registration_time),
         "registration_time_source": sources.get("registration"),
         "registration_odometer": point.registration_odometer,
+        "registration_odometer_source": point.registration_odometer_source,
         "registration_coordinates": {"lat": point.registration_lat, "lng": point.registration_lng},
         "gate_time": _format_datetime_ru(point.gate_time),
         "gate_time_source": sources.get("load"),
         "gate_odometer": point.gate_odometer,
+        "gate_odometer_source": point.gate_odometer_source,
         "gate_coordinates": {"lat": point.gate_lat, "lng": point.gate_lng},
         "docs_time": _format_datetime_ru(point.docs_time),
         "docs_time_source": sources.get("docs"),
         "docs_odometer": point.docs_odometer,
+        "docs_odometer_source": point.docs_odometer_source,
         "docs_coordinates": {"lat": point.docs_lat, "lng": point.docs_lng},
         "odometer": point.odometer,
         "coordinates": {"lat": point.lat, "lng": point.lng},
@@ -454,7 +459,13 @@ def _telemetry_coords_ok(value: dict | None) -> bool:
     return not (float(lat_raw) == 0.0 and float(lng_raw) == 0.0)
 
 
-def _apply_point_telemetry(point: Point, status_value: str, odometer: str | None, coordinates: dict | None) -> None:
+def _apply_point_telemetry(
+    point: Point,
+    status_value: str,
+    odometer: str | None,
+    odometer_source: str | None,
+    coordinates: dict | None,
+) -> None:
     odometer_value: str | None = None
     lat_value: float | None = None
     lng_value: float | None = None
@@ -475,6 +486,7 @@ def _apply_point_telemetry(point: Point, status_value: str, odometer: str | None
     if status_value == "process":
         if odometer_value is not None:
             point.departure_odometer = odometer_value
+            point.departure_odometer_source = (odometer_source or "").strip() or None
         if lat_value is not None:
             point.departure_lat = lat_value
         if lng_value is not None:
@@ -482,6 +494,7 @@ def _apply_point_telemetry(point: Point, status_value: str, odometer: str | None
     elif status_value == "registration":
         if odometer_value is not None:
             point.registration_odometer = odometer_value
+            point.registration_odometer_source = (odometer_source or "").strip() or None
         if lat_value is not None:
             point.registration_lat = lat_value
         if lng_value is not None:
@@ -489,6 +502,7 @@ def _apply_point_telemetry(point: Point, status_value: str, odometer: str | None
     elif status_value == "load":
         if odometer_value is not None:
             point.gate_odometer = odometer_value
+            point.gate_odometer_source = (odometer_source or "").strip() or None
         if lat_value is not None:
             point.gate_lat = lat_value
         if lng_value is not None:
@@ -496,6 +510,7 @@ def _apply_point_telemetry(point: Point, status_value: str, odometer: str | None
     elif status_value == "docs":
         if odometer_value is not None:
             point.docs_odometer = odometer_value
+            point.docs_odometer_source = (odometer_source or "").strip() or None
         if lat_value is not None:
             point.docs_lat = lat_value
         if lng_value is not None:
@@ -712,6 +727,7 @@ def batch_events(
         db.add(stored_event)
         if applied:
             odometer = event.odometer
+            odometer_source = event.odometer_source
             coordinates = event.coordinates
             vehicle_no = vehicle_number_for_wialon(route.number_auto, route.registration_number)
             need_odom = not _telemetry_odometer_ok(odometer)
@@ -760,6 +776,8 @@ def batch_events(
                     else:
                         if need_odom:
                             odometer = wialon.get("odometer") or odometer
+                            if _telemetry_odometer_ok(odometer):
+                                odometer_source = "wialon"
                         if need_coords:
                             coordinates = {"lat": wialon.get("lat"), "lng": wialon.get("lng")}
                         logger.info(
@@ -781,7 +799,9 @@ def batch_events(
                     exc_info=True,
                 )
 
-            _apply_point_telemetry(point, target_status, odometer, coordinates)
+            if _telemetry_odometer_ok(odometer) and not (odometer_source or "").strip():
+                odometer_source = "manual"
+            _apply_point_telemetry(point, target_status, odometer, odometer_source, coordinates)
             db.add(point)
             route_completed_now = _refresh_route_status_if_completed(db, route)
             notify_point_status_changed(
@@ -837,4 +857,34 @@ def wialon_debug_endpoint(
     if probe:
         out["probe_token_login"] = wialon_probe_token_login()
     return out
+
+
+@router.get("/v1/mobile/points/{point_id}/telemetry")
+def point_telemetry_endpoint(
+    point_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_driver),
+) -> dict:
+    """Telemetry prefetch for UI (odometer from Wialon when available)."""
+    point = db.get(Point, point_id)
+    if point is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Point not found")
+    route = db.get(Route, point.route_id)
+    if route is None or route.assigned_user_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Point is not available")
+    if not WIALON_ENABLED:
+        return {"odometer": None, "odometer_source": None}
+    vehicle_no = vehicle_number_for_wialon(route.number_auto, route.registration_number)
+    if not vehicle_no:
+        return {"odometer": None, "odometer_source": None}
+    try:
+        wialon = get_vehicle_location_data(vehicle_no)
+    except Exception:
+        wialon = None
+    if not wialon:
+        return {"odometer": None, "odometer_source": None}
+    odo = wialon.get("odometer")
+    if not _telemetry_odometer_ok(odo):
+        return {"odometer": None, "odometer_source": None}
+    return {"odometer": str(odo), "odometer_source": "wialon"}
 

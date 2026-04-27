@@ -100,10 +100,10 @@ async def upload_point_documents(
     route = db.get(Route, point.route_id)
     if route is None or route.assigned_user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Point is not available")
-    if point.status != "load":
+    if point.status not in {"load", "docs", "success"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Documents can only be uploaded at the gates stage (before completing documents)",
+            detail="Documents can only be uploaded at the gates / documents stage",
         )
 
     root = _upload_root()

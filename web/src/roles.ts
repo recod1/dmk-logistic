@@ -20,3 +20,11 @@ export function isRouteManagerRole(roleCode: string): boolean {
   return roleCode === "admin" || roleCode === "superadmin" || roleCode === "logistic" || roleCode === "accountant";
 }
 
+export function isLogisticRole(roleCode: string): boolean {
+  return roleCode === "logistic";
+}
+
+export function isAccountantRole(roleCode: string): boolean {
+  return roleCode === "accountant";
+}
+

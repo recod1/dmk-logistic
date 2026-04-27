@@ -16,6 +16,7 @@ const props = defineProps<{
   drivers: DriverOption[];
   loading: boolean;
   authToken: string;
+  unreadChatCount?: number;
 }>();
 
 const emit = defineEmits<{
@@ -87,6 +88,12 @@ function normalizePointStageLabel(stage: string): string {
     docs: "Забрал документы"
   };
   return labels[stage] ?? stage;
+}
+
+function odoSourceLabel(value?: string | null): string {
+  if (value === "wialon") return " (Wialon)";
+  if (value === "manual") return " (вручную)";
+  return "";
 }
 
 function pointStatusLabel(status: string): string {
@@ -218,9 +225,30 @@ function removeRoute(): void {
         <p><strong>Контакты диспетчера:</strong> {{ route.dispatcher_contacts || "—" }}</p>
         <p><strong>N регистрации:</strong> {{ route.registration_number || "—" }}</p>
       </div>
-      <div class="actions">
-        <button class="secondary" type="button" @click="emit('openChat', route.id)">Открыть чат рейса</button>
-      </div>
+      <section class="actions top-actions">
+        <button class="secondary chat-btn" type="button" @click="emit('openChat', route.id)">
+          Открыть чат рейса
+          <span v-if="(unreadChatCount ?? 0) > 0" class="chat-badge" aria-label="Новые сообщения" />
+        </button>
+        <button class="secondary" v-if="!showEdit" :disabled="loading" type="button" @click="openEdit">Редактировать</button>
+        <button class="secondary" v-if="!showReassign" :disabled="loading" type="button" @click="openReassign">
+          Переназначить
+        </button>
+        <div v-if="showReassign" class="reassign-wrap">
+          <select v-model.number="reassignDriverId">
+            <option :value="0">Выберите водителя</option>
+            <option v-for="driver in drivers" :key="driver.id" :value="driver.id">
+              {{ driver.full_name || driver.login }}
+            </option>
+          </select>
+          <button class="secondary" type="button" :disabled="loading || !canAssign" @click="submitReassign">Сохранить</button>
+          <button class="ghost" type="button" @click="closeReassign">Отмена</button>
+        </div>
+        <button class="danger" type="button" :disabled="loading || !canCancel(route.status)" @click="emit('cancelRoute', route.id)">
+          Отменить
+        </button>
+        <button class="danger soft" type="button" :disabled="loading" @click="removeRoute">Удалить рейс</button>
+      </section>
 
       <section v-if="showEdit" class="edit-card">
         <h3>Редактирование рейса</h3>
@@ -320,25 +348,25 @@ function removeRoute(): void {
               <tr>
                 <td>{{ normalizePointStageLabel("accepted") }}</td>
                 <td>{{ point.departure_time || point.time_accepted || "—" }}</td>
-                <td>{{ point.departure_odometer || "—" }}</td>
+                <td>{{ point.departure_odometer || "—" }}{{ odoSourceLabel(point.departure_odometer_source) }}</td>
                 <td>{{ point.departure_coordinates?.lat ?? "—" }}, {{ point.departure_coordinates?.lng ?? "—" }}</td>
               </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("registration") }}</td>
                 <td>{{ point.registration_time || point.time_registration || "—" }}</td>
-                <td>{{ point.registration_odometer || "—" }}</td>
+                <td>{{ point.registration_odometer || "—" }}{{ odoSourceLabel(point.registration_odometer_source) }}</td>
                 <td>{{ point.registration_coordinates?.lat ?? "—" }}, {{ point.registration_coordinates?.lng ?? "—" }}</td>
               </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("load") }}</td>
                 <td>{{ point.gate_time || point.time_put_on_gate || "—" }}</td>
-                <td>{{ point.gate_odometer || "—" }}</td>
+                <td>{{ point.gate_odometer || "—" }}{{ odoSourceLabel(point.gate_odometer_source) }}</td>
                 <td>{{ point.gate_coordinates?.lat ?? "—" }}, {{ point.gate_coordinates?.lng ?? "—" }}</td>
               </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("docs") }}</td>
                 <td>{{ point.docs_time || point.time_docs || "—" }}</td>
-                <td>{{ point.docs_odometer || "—" }}</td>
+                <td>{{ point.docs_odometer || "—" }}{{ odoSourceLabel(point.docs_odometer_source) }}</td>
                 <td>{{ point.docs_coordinates?.lat ?? "—" }}, {{ point.docs_coordinates?.lng ?? "—" }}</td>
               </tr>
             </tbody>
@@ -350,38 +378,6 @@ function removeRoute(): void {
             :images="point.docs_images"
           />
         </article>
-      </section>
-
-      <section class="actions route-actions-bottom">
-        <button class="secondary" v-if="!showEdit" :disabled="loading" @click="openEdit">Редактировать</button>
-        <button
-          class="secondary"
-          v-if="!showReassign"
-          :disabled="loading"
-          @click="openReassign"
-        >
-          Переназначить
-        </button>
-        <div v-if="showReassign" class="reassign-wrap">
-          <select v-model.number="reassignDriverId">
-            <option :value="0">Выберите водителя</option>
-            <option v-for="driver in drivers" :key="driver.id" :value="driver.id">
-              {{ driver.full_name || driver.login }}
-            </option>
-          </select>
-          <button
-            class="secondary"
-            :disabled="loading || !canAssign"
-            @click="submitReassign"
-          >
-            Сохранить
-          </button>
-          <button class="ghost" @click="closeReassign">Отмена</button>
-        </div>
-        <button class="danger" :disabled="loading || !canCancel(route.status)" @click="emit('cancelRoute', route.id)">
-          Отменить
-        </button>
-        <button class="danger soft" :disabled="loading" @click="removeRoute">Удалить рейс</button>
       </section>
     </section>
   </section>
@@ -418,10 +414,21 @@ function removeRoute(): void {
   flex-wrap: wrap;
   gap: 0.45rem;
 }
-.route-actions-bottom {
-  margin-top: 0.4rem;
-  padding-top: 0.6rem;
-  border-top: 1px solid #243043;
+.top-actions {
+  align-items: center;
+}
+.chat-btn {
+  position: relative;
+}
+.chat-badge {
+  position: absolute;
+  top: -6px;
+  right: -6px;
+  width: 12px;
+  height: 12px;
+  border-radius: 999px;
+  background: #ef4444;
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.2);
 }
 .reassign-wrap {
   display: flex;

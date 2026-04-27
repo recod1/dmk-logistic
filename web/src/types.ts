@@ -35,6 +35,7 @@ export interface PointDto {
   departure_time?: string | null;
   departure_time_source?: "device" | "manual" | null;
   departure_odometer?: string | null;
+  departure_odometer_source?: "manual" | "wialon" | null;
   departure_coordinates?: {
     lat: number | null;
     lng: number | null;
@@ -42,6 +43,7 @@ export interface PointDto {
   registration_time?: string | null;
   registration_time_source?: "device" | "manual" | null;
   registration_odometer?: string | null;
+  registration_odometer_source?: "manual" | "wialon" | null;
   registration_coordinates?: {
     lat: number | null;
     lng: number | null;
@@ -49,6 +51,7 @@ export interface PointDto {
   gate_time?: string | null;
   gate_time_source?: "device" | "manual" | null;
   gate_odometer?: string | null;
+  gate_odometer_source?: "manual" | "wialon" | null;
   gate_coordinates?: {
     lat: number | null;
     lng: number | null;
@@ -56,6 +59,7 @@ export interface PointDto {
   docs_time?: string | null;
   docs_time_source?: "device" | "manual" | null;
   docs_odometer?: string | null;
+  docs_odometer_source?: "manual" | "wialon" | null;
   docs_coordinates?: {
     lat: number | null;
     lng: number | null;
@@ -92,6 +96,7 @@ export interface EventPayload {
   to_status: Exclude<PointStatus, "new">;
   time_source?: "device" | "manual" | null;
   odometer?: string | null;
+  odometer_source?: "manual" | "wialon" | null;
   coordinates?: {
     lat?: number | null;
     lng?: number | null;
@@ -217,24 +222,28 @@ export interface AdminRoute {
       time_departure: string | null;
       departure_time?: string | null;
       departure_odometer?: string | null;
+      departure_odometer_source?: "manual" | "wialon" | null;
       departure_coordinates?: {
         lat: number | null;
         lng: number | null;
       } | null;
       registration_time?: string | null;
       registration_odometer?: string | null;
+      registration_odometer_source?: "manual" | "wialon" | null;
       registration_coordinates?: {
         lat: number | null;
         lng: number | null;
       } | null;
       gate_time?: string | null;
       gate_odometer?: string | null;
+      gate_odometer_source?: "manual" | "wialon" | null;
       gate_coordinates?: {
         lat: number | null;
         lng: number | null;
       } | null;
       docs_time?: string | null;
       docs_odometer?: string | null;
+      docs_odometer_source?: "manual" | "wialon" | null;
       docs_coordinates?: {
         lat: number | null;
         lng: number | null;

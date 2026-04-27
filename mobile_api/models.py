@@ -115,21 +115,25 @@ class Point(Base):
     # выезд -> регистрация -> ворота -> документы.
     departure_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     departure_odometer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    departure_odometer_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     departure_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     departure_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     registration_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     registration_odometer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    registration_odometer_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     registration_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     registration_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     gate_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     gate_odometer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    gate_odometer_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     gate_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     gate_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
 
     docs_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     docs_odometer: Mapped[str | None] = mapped_column(Text, nullable=True)
+    docs_odometer_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     docs_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     docs_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
 
@@ -279,6 +283,96 @@ class RouteChatMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
 
 
+class RouteChatAttachment(Base):
+    __tablename__ = "route_chat_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("route_chat_messages.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    route_id: Mapped[str] = mapped_column(ForeignKey("routes.id", ondelete="CASCADE"), nullable=False, index=True)
+    uploaded_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    storage_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChatRoom(Base):
+    __tablename__ = "chat_rooms"
+    __table_args__ = (
+        UniqueConstraint("system_key", name="uq_chat_rooms_system_key"),
+        UniqueConstraint("kind", "direct_user1_id", "direct_user2_id", name="uq_chat_rooms_direct_pair"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    kind: Mapped[str] = mapped_column(String(16), nullable=False, index=True)  # direct|group
+    title: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    system_key: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    direct_user1_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    direct_user2_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+
+
+class ChatRoomMember(Base):
+    __tablename__ = "chat_room_members"
+    __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_chat_room_members_room_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChatRoomRoleMember(Base):
+    __tablename__ = "chat_room_role_members"
+    __table_args__ = (UniqueConstraint("room_id", "role_code", name="uq_chat_room_role_members_room_role"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    role_code: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChatMessage(Base):
+    __tablename__ = "chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+
+
+class ChatAttachment(Base):
+    __tablename__ = "chat_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    message_id: Mapped[int] = mapped_column(ForeignKey("chat_messages.id", ondelete="CASCADE"), nullable=False, index=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    uploaded_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    storage_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class ChatRead(Base):
+    __tablename__ = "chat_reads"
+    __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_chat_reads_room_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    last_read_message_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), index=True)
+
+
 class RouteChatRead(Base):
     __tablename__ = "route_chat_reads"
     __table_args__ = (UniqueConstraint("user_id", "route_id", name="uq_route_chat_reads_user_route"),)
@@ -337,6 +431,47 @@ class Salary(Base):
     comment_driver: Mapped[str] = mapped_column(Text, nullable=False, default=" ", server_default=" ")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+
+class SalaryChatMessage(Base):
+    __tablename__ = "salary_chat_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    salary_id: Mapped[int] = mapped_column(ForeignKey("salary.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+
+class SalaryChatAttachment(Base):
+    __tablename__ = "salary_chat_attachments"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    message_id: Mapped[int] = mapped_column(
+        ForeignKey("salary_chat_messages.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    salary_id: Mapped[int] = mapped_column(ForeignKey("salary.id", ondelete="CASCADE"), nullable=False, index=True)
+    uploaded_by_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    original_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    storage_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+
+class SalaryChatRead(Base):
+    __tablename__ = "salary_chat_reads"
+    __table_args__ = (UniqueConstraint("salary_id", "user_id", name="uq_salary_chat_reads_salary_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    salary_id: Mapped[int] = mapped_column(ForeignKey("salary.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    last_read_message_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), index=True
     )
 
 

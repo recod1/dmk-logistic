@@ -61,6 +61,8 @@ class AdminRouteCreatePayload(BaseModel):
 class AdminRouteCreateFromOnecPayload(BaseModel):
     raw_text: str = Field(min_length=1, max_length=20000)
     driver_user_id: int | None = None
+    number_auto: str | None = Field(default=None, max_length=64)
+    trailer_number: str | None = Field(default=None, max_length=64)
 
 
 class AssignDriverPayload(BaseModel):
@@ -139,15 +141,19 @@ def _point_out(db: Session, point: Point, order_index: int) -> dict:
         "time_departure": _format_datetime_ru(point.time_departure),
         "departure_time": _format_datetime_ru(point.departure_time),
         "departure_odometer": point.departure_odometer,
+        "departure_odometer_source": point.departure_odometer_source,
         "departure_coordinates": {"lat": point.departure_lat, "lng": point.departure_lng},
         "registration_time": _format_datetime_ru(point.registration_time),
         "registration_odometer": point.registration_odometer,
+        "registration_odometer_source": point.registration_odometer_source,
         "registration_coordinates": {"lat": point.registration_lat, "lng": point.registration_lng},
         "gate_time": _format_datetime_ru(point.gate_time),
         "gate_odometer": point.gate_odometer,
+        "gate_odometer_source": point.gate_odometer_source,
         "gate_coordinates": {"lat": point.gate_lat, "lng": point.gate_lng},
         "docs_time": _format_datetime_ru(point.docs_time),
         "docs_odometer": point.docs_odometer,
+        "docs_odometer_source": point.docs_odometer_source,
         "docs_coordinates": {"lat": point.docs_lat, "lng": point.docs_lng},
         "odometer": point.odometer,
         "coordinates": {"lat": point.lat, "lng": point.lng},
@@ -386,11 +392,11 @@ def create_route_from_onec(
         assigned_user_id=driver.id,
         created_by_user_id=current_user.id,
         status="new",
-        number_auto=(parsed.number_auto or "").strip(),
+        number_auto=((payload.number_auto or parsed.number_auto) or "").strip(),
         temperature=(parsed.temperature or "").strip(),
         dispatcher_contacts=(parsed.dispatcher_contacts or "").strip(),
         registration_number=(parsed.registration_number or "").strip(),
-        trailer_number=(parsed.trailer_number or "").strip(),
+        trailer_number=((payload.trailer_number or parsed.trailer_number) or "").strip(),
     )
     db.add(route)
     db.flush()

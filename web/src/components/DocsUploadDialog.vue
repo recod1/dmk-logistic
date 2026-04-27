@@ -11,7 +11,8 @@ const emit = defineEmits<{
   confirm: [files: File[]];
 }>();
 
-const inputRef = ref<HTMLInputElement | null>(null);
+const galleryInputRef = ref<HTMLInputElement | null>(null);
+const cameraInputRef = ref<HTMLInputElement | null>(null);
 const picked = ref<File[]>([]);
 
 watch(
@@ -32,7 +33,11 @@ function onFileChange(ev: Event): void {
 }
 
 function triggerPick(): void {
-  inputRef.value?.click();
+  galleryInputRef.value?.click();
+}
+
+function triggerCamera(): void {
+  cameraInputRef.value?.click();
 }
 
 function submit(): void {
@@ -52,16 +57,30 @@ function submit(): void {
         сервер; в офлайне файлы сохранятся и отправятся при появлении сети.
       </p>
       <input
-        ref="inputRef"
+        ref="galleryInputRef"
         type="file"
         accept="image/*"
         multiple
         class="hidden-input"
         @change="onFileChange"
       />
-      <button type="button" class="secondary pick" :disabled="uploading" @click="triggerPick">
-        {{ picked.length ? `Выбрано файлов: ${picked.length}` : "Выбрать из галереи" }}
-      </button>
+      <input
+        ref="cameraInputRef"
+        type="file"
+        accept="image/*"
+        capture="environment"
+        multiple
+        class="hidden-input"
+        @change="onFileChange"
+      />
+      <div class="pick-grid">
+        <button type="button" class="secondary pick" :disabled="uploading" @click="triggerCamera">
+          {{ picked.length ? `Добавить фото (камера): уже выбрано ${picked.length}` : "Сделать фото (камера)" }}
+        </button>
+        <button type="button" class="secondary pick" :disabled="uploading" @click="triggerPick">
+          {{ picked.length ? `Добавить из галереи: уже выбрано ${picked.length}` : "Выбрать из галереи" }}
+        </button>
+      </div>
       <ul v-if="picked.length" class="names">
         <li v-for="(f, i) in picked" :key="`${i}-${f.name}`">{{ f.name }}</li>
       </ul>
@@ -112,6 +131,11 @@ function submit(): void {
 }
 .pick {
   width: 100%;
+  margin-bottom: 0.5rem;
+}
+.pick-grid {
+  display: grid;
+  gap: 0.45rem;
   margin-bottom: 0.5rem;
 }
 .names {
