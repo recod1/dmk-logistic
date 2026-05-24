@@ -20,6 +20,11 @@ import type {
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
+/** Path segment for route id (#, ?, / break fetch if left unencoded). */
+function encodeRouteId(routeId: string): string {
+  return encodeURIComponent(routeId);
+}
+
 export class ApiError extends Error {
   status: number;
   bodyText: string;
@@ -93,7 +98,7 @@ export async function listDriverRoutes(
 }
 
 export async function getDriverRoute(token: string, routeId: string): Promise<RouteDto> {
-  const data = await requestJson<{ route: RouteDto }>(`${API_BASE}/v1/mobile/routes/${routeId}`, {
+  const data = await requestJson<{ route: RouteDto }>(`${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }
@@ -116,7 +121,7 @@ export async function getPointTelemetry(
 }
 
 export async function acceptRoute(token: string, routeId: string): Promise<RouteDto> {
-  const data = await requestJson<{ route: RouteDto }>(`${API_BASE}/v1/mobile/routes/${routeId}/accept`, {
+  const data = await requestJson<{ route: RouteDto }>(`${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}/accept`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`
@@ -286,7 +291,7 @@ export async function listAdminRoutes(
 }
 
 export async function getAdminRoute(token: string, routeId: string): Promise<AdminRoute> {
-  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${routeId}`, {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${encodeRouteId(routeId)}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }
@@ -317,7 +322,7 @@ export async function createAdminRouteFromOnec(
 }
 
 export async function assignAdminRouteDriver(token: string, routeId: string, driverUserId: number): Promise<AdminRoute> {
-  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${routeId}/assign`, {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${encodeRouteId(routeId)}/assign`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`
@@ -327,7 +332,7 @@ export async function assignAdminRouteDriver(token: string, routeId: string, dri
 }
 
 export async function cancelAdminRoute(token: string, routeId: string): Promise<AdminRoute> {
-  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${routeId}/cancel`, {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${encodeRouteId(routeId)}/cancel`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`
@@ -336,7 +341,7 @@ export async function cancelAdminRoute(token: string, routeId: string): Promise<
 }
 
 export async function deleteAdminRoute(token: string, routeId: string): Promise<void> {
-  const response = await fetch(`${API_BASE}/v1/admin/routes/${routeId}`, {
+  const response = await fetch(`${API_BASE}/v1/admin/routes/${encodeRouteId(routeId)}`, {
     method: "DELETE",
     headers: {
       Authorization: `Bearer ${token}`
@@ -360,7 +365,7 @@ export async function updateAdminRoute(
     points?: AdminRouteCreatePayload["points"];
   }
 ): Promise<AdminRoute> {
-  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${routeId}`, {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${encodeRouteId(routeId)}`, {
     method: "PATCH",
     headers: {
       Authorization: `Bearer ${token}`
@@ -525,7 +530,7 @@ export async function listRouteChatMessages(
       created_at: string;
       attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
     }>;
-  }>(`${API_BASE}/v1/chat/routes/${encodeURIComponent(routeId)}/messages`, {
+  }>(`${API_BASE}/v1/chat/routes/${encodeRouteId(routeId)}/messages`, {
     headers: {
       Authorization: `Bearer ${token}`
     }
@@ -555,7 +560,7 @@ export async function sendRouteChatMessage(
     created_at: string;
     attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
   }>(
-    `${API_BASE}/v1/chat/routes/${encodeURIComponent(routeId)}/messages`,
+    `${API_BASE}/v1/chat/routes/${encodeRouteId(routeId)}/messages`,
     {
       method: "POST",
       headers: {
@@ -583,7 +588,7 @@ export async function uploadRouteChatAttachments(
   const fd = new FormData();
   fd.set("text", (opts?.text || "").trim());
   files.forEach((f) => fd.append("files", f, f.name));
-  const url = `${API_BASE}/v1/chat/routes/${encodeURIComponent(routeId)}/attachments`;
+  const url = `${API_BASE}/v1/chat/routes/${encodeRouteId(routeId)}/attachments`;
   const response = await fetch(url, {
     method: "POST",
     headers: {
