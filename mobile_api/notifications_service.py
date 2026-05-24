@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.models import Notification, Point, Route, User
 from mobile_api.notifications_realtime import notifications_realtime_hub
+from mobile_api.push_notification_format import build_push_body, resolve_push_context_line
 
 POINT_STATUS_LABELS_RU: dict[str, str] = {
     "new": "Новая",
@@ -99,6 +100,9 @@ def create_notification_for_users(
     for sub_id, user_id, endpoint, p256dh, auth in collect_subscriptions_for_users(db, unique_ids):
         subs_by_user.setdefault(user_id, []).append((sub_id, endpoint, p256dh, auth))
 
+    push_context_line = resolve_push_context_line(db, route_id=route_id, point_id=point_id)
+    push_body = build_push_body(message, push_context_line)
+
     for created in created_items:
         row: Notification = created["row"]
         subs = subs_by_user.get(created["user_id"], [])
@@ -106,7 +110,7 @@ def create_notification_for_users(
             send_web_push_to_users(
                 subscriptions=subs,
                 title=title,
-                body=message,
+                body=push_body,
                 notification_id=row.id,
             )
 
