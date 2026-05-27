@@ -22,6 +22,8 @@ from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.point_documents_router import _upload_root as _mobile_upload_root
 from mobile_api.roles import RoleCode, normalize_role_code
 from mobile_api.salary_logic import (
+    SalaryDriverReference,
+    SalaryIntegrationDriverReference,
     SalaryIntegrationStructuredBody,
     SalaryStructuredCreateBody,
     build_salaries_csv_bytes,
@@ -32,6 +34,7 @@ from mobile_api.salary_logic import (
     resolve_user_for_salary_driver_id,
     salary_belongs_to_driver,
     salary_date_in_range,
+    try_find_driver_by_fio,
 )
 from mobile_api.settings import mobile_settings
 
@@ -197,21 +200,37 @@ def _insert_salary_for_driver(db: Session, driver: User, fields: dict[str, Any])
     return _salary_to_dict(row)
 
 
-def _resolve_driver_for_integration(
+_FIO_AMBIGUOUS_DETAIL = (
+    "Не удалось однозначно определить водителя по ФИО. "
+    "Укажите полное ФИО как в системе или передайте driver_user_id."
+)
+
+
+def _resolve_driver_for_salary(
     db: Session,
     *,
-    driver_user_id: int | None,
-    driver_login: str | None,
-    legacy_tg_id: str | None,
+    driver_user_id: int | None = None,
+    driver_fio: str | None = None,
+    driver_login: str | None = None,
+    legacy_tg_id: str | None = None,
 ) -> User:
     driver: User | None = None
-    if driver_user_id:
+    if driver_user_id and driver_user_id > 0:
         driver = db.get(User, int(driver_user_id))
     elif driver_login and driver_login.strip():
         driver = db.scalar(select(User).where(func.lower(User.login) == driver_login.strip().lower()))
     elif legacy_tg_id and str(legacy_tg_id).strip():
         driver = db.scalar(
             select(User).where(User.legacy_tg_id == str(legacy_tg_id).strip(), User.is_active.is_(True))  # noqa: E712
+        )
+    elif driver_fio and driver_fio.strip():
+        driver = try_find_driver_by_fio(db, driver_fio)
+        if driver is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=_FIO_AMBIGUOUS_DETAIL)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Укажите driver_user_id, driver_fio, driver_login или legacy_tg_id",
         )
     if driver is None or not driver.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
@@ -223,23 +242,6 @@ def _resolve_driver_for_integration(
     return driver
 
 
-def _resolve_driver_for_create(db: Session, driver_user_id: int | None, driver_login: str | None) -> User:
-    if driver_user_id and driver_user_id > 0:
-        u = db.get(User, int(driver_user_id))
-    elif driver_login and driver_login.strip():
-        u = db.scalar(select(User).where(func.lower(User.login) == driver_login.strip().lower()))
-    else:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="driver_user_id or driver_login required")
-    if u is None or not u.is_active:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
-    try:
-        if normalize_role_code(u.role_code) != RoleCode.DRIVER:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User must be a driver")
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid driver role") from exc
-    return u
-
-
 def _verify_salary_integration_key(x_salary_api_key: str | None = Header(None, alias="X-Salary-Api-Key")) -> None:
     expected = (mobile_settings.salary_integration_api_key or "").strip()
     if not expected:
@@ -248,8 +250,7 @@ def _verify_salary_integration_key(x_salary_api_key: str | None = Header(None, a
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid X-Salary-Api-Key")
 
 
-class SalaryCreateBody(BaseModel):
-    driver_user_id: int = Field(ge=1)
+class SalaryCreateBody(SalaryDriverReference):
     salary_line: str = Field(min_length=10, description="37 значений через пробел, как в боте")
 
 
@@ -261,10 +262,7 @@ class SalaryChatSendBody(BaseModel):
     text: str = Field(min_length=1, max_length=4000)
 
 
-class SalaryIntegrationBody(BaseModel):
-    driver_user_id: int | None = Field(default=None, ge=1)
-    driver_login: str | None = None
-    legacy_tg_id: str | None = None
+class SalaryIntegrationBody(SalaryIntegrationDriverReference):
     salary_line: str = Field(min_length=10)
 
 
@@ -308,7 +306,12 @@ def create_salary_manual(
 ) -> dict:
     if not _is_accountant_admin(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-    driver = _resolve_driver_for_create(db, payload.driver_user_id, None)
+    driver = _resolve_driver_for_salary(
+        db,
+        driver_user_id=payload.driver_user_id,
+        driver_fio=payload.driver_fio,
+        driver_login=payload.driver_login,
+    )
     try:
         fields = parse_salary_line_37(payload.salary_line)
     except ValueError as exc:
@@ -325,7 +328,12 @@ def create_salary_structured(
     """Создание расчёта ЗП с отдельными полями JSON (как после разбора строки в боте)."""
     if not _is_accountant_admin(current_user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-    driver = _resolve_driver_for_create(db, payload.driver_user_id, None)
+    driver = _resolve_driver_for_salary(
+        db,
+        driver_user_id=payload.driver_user_id,
+        driver_fio=payload.driver_fio,
+        driver_login=payload.driver_login,
+    )
     try:
         fields = payload.to_db_fields()
     except ValueError as exc:
@@ -339,9 +347,10 @@ def create_salary_integration(
     db: Session = Depends(get_db),
     _: None = Depends(_verify_salary_integration_key),
 ) -> dict:
-    driver = _resolve_driver_for_integration(
+    driver = _resolve_driver_for_salary(
         db,
         driver_user_id=payload.driver_user_id,
+        driver_fio=payload.driver_fio,
         driver_login=payload.driver_login,
         legacy_tg_id=payload.legacy_tg_id,
     )
@@ -358,9 +367,10 @@ def create_salary_integration_structured(
     db: Session = Depends(get_db),
     _: None = Depends(_verify_salary_integration_key),
 ) -> dict:
-    driver = _resolve_driver_for_integration(
+    driver = _resolve_driver_for_salary(
         db,
         driver_user_id=payload.driver_user_id,
+        driver_fio=payload.driver_fio,
         driver_login=payload.driver_login,
         legacy_tg_id=payload.legacy_tg_id,
     )

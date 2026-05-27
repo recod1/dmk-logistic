@@ -9,10 +9,11 @@ from decimal import Decimal
 from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mobile_api.models import Salary, User
+from mobile_api.roles import RoleCode
 
 
 def parse_float_token(s: str) -> float:
@@ -159,23 +160,73 @@ class SalaryStructuredFields(BaseModel):
         }
 
 
-class SalaryStructuredCreateBody(SalaryStructuredFields):
-    driver_user_id: int = Field(ge=1)
+class SalaryDriverReference(BaseModel):
+    """Водитель: один из driver_user_id, driver_fio, driver_login."""
 
-
-class SalaryIntegrationStructuredBody(SalaryStructuredFields):
     driver_user_id: int | None = Field(default=None, ge=1)
+    driver_fio: str | None = Field(default=None, max_length=255)
+    driver_login: str | None = Field(default=None, max_length=64)
+
+    @model_validator(mode="after")
+    def require_driver_reference(self) -> SalaryDriverReference:
+        has_id = self.driver_user_id is not None and self.driver_user_id > 0
+        has_fio = bool((self.driver_fio or "").strip())
+        has_login = bool((self.driver_login or "").strip())
+        if not (has_id or has_fio or has_login):
+            raise ValueError("Укажите driver_user_id, driver_fio или driver_login")
+        return self
+
+
+class SalaryStructuredCreateBody(SalaryStructuredFields, SalaryDriverReference):
+    pass
+
+
+class SalaryIntegrationDriverReference(BaseModel):
+    driver_user_id: int | None = Field(default=None, ge=1)
+    driver_fio: str | None = Field(default=None, max_length=255)
     driver_login: str | None = None
     legacy_tg_id: str | None = None
 
     @model_validator(mode="after")
-    def require_driver_reference(self) -> SalaryIntegrationStructuredBody:
+    def require_driver_reference(self) -> SalaryIntegrationDriverReference:
         has_id = self.driver_user_id is not None and self.driver_user_id > 0
+        has_fio = bool((self.driver_fio or "").strip())
         has_login = bool((self.driver_login or "").strip())
         has_tg = bool((self.legacy_tg_id or "").strip())
-        if not (has_id or has_login or has_tg):
-            raise ValueError("Укажите driver_user_id, driver_login или legacy_tg_id")
+        if not (has_id or has_fio or has_login or has_tg):
+            raise ValueError("Укажите driver_user_id, driver_fio, driver_login или legacy_tg_id")
         return self
+
+
+class SalaryIntegrationStructuredBody(SalaryStructuredFields, SalaryIntegrationDriverReference):
+    pass
+
+
+def try_find_driver_by_fio(db: Session, fio: str) -> User | None:
+    """Точное совпадение ФИО или единственный результат по подстроке (как для рейсов)."""
+    text = (fio or "").strip()
+    if not text:
+        return None
+    exact = db.scalar(
+        select(User).where(
+            User.role_code == RoleCode.DRIVER.value,
+            User.is_active.is_(True),  # noqa: E712
+            func.lower(User.full_name) == text.lower(),  # type: ignore[attr-defined]
+        )
+    )
+    if exact is not None:
+        return exact
+    pattern = f"%{text.lower()}%"
+    rows = db.scalars(
+        select(User).where(
+            User.role_code == RoleCode.DRIVER.value,
+            User.is_active.is_(True),  # noqa: E712
+            func.coalesce(func.lower(User.full_name), "").like(pattern),
+        )
+    ).all()
+    if len(rows) == 1:
+        return rows[0]
+    return None
 
 
 def driver_salary_key(user: User) -> str:

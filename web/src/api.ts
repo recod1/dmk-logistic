@@ -885,7 +885,10 @@ export async function lookupSalaryDrivers(
   return data.items;
 }
 
-export async function createSalaryManual(token: string, payload: { driver_user_id: number; salary_line: string }): Promise<SalaryRecord> {
+export async function createSalaryManual(
+  token: string,
+  payload: { driver_user_id?: number; driver_fio?: string; driver_login?: string; salary_line: string }
+): Promise<SalaryRecord> {
   return requestJson<SalaryRecord>(`${API_BASE}/v1/salary`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
@@ -895,7 +898,10 @@ export async function createSalaryManual(token: string, payload: { driver_user_i
 
 /** Поля расчёта без salary_line — см. POST /v1/salary/structured */
 export type SalaryStructuredCreatePayload = {
-  driver_user_id: number;
+  /** Один из: driver_user_id, driver_fio, driver_login */
+  driver_user_id?: number;
+  driver_fio?: string;
+  driver_login?: string;
   date_salary: string;
   type_route?: string;
   sum_status?: number;

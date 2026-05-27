@@ -221,11 +221,17 @@ curl -s -X POST "https://example.com/api/v1/admin/routes" \
 
 **Требуется роль:** `accountant`, `admin` или `superadmin`.
 
-### Поиск водителя
+### Водитель в запросе
 
-**GET** `/v1/salary/lookup/drivers?q=<ФИО или логин>`
+Укажите **одно** из полей (приоритет: `driver_user_id` → `driver_login` → `driver_fio`):
 
-Ответ: `{ "items": [ { "id", "login", "full_name", "legacy_tg_id" }, ... ] }` — возьмите `id` для `driver_user_id`.
+| Поле | Описание |
+|------|----------|
+| `driver_user_id` | ID водителя в `users` |
+| `driver_fio` | ФИО: сначала точное совпадение с `full_name`, иначе единственный результат по подстроке (как при создании рейса) |
+| `driver_login` | Логин водителя |
+
+Опционально: **GET** `/v1/salary/lookup/drivers?q=<ФИО>` — список кандидатов, если по ФИО неоднозначно.
 
 ### Тело запроса создания
 
@@ -233,14 +239,16 @@ curl -s -X POST "https://example.com/api/v1/admin/routes" \
 
 ```json
 {
-  "driver_user_id": 12,
+  "driver_fio": "Иванов Иван Иванович",
   "salary_line": "15.01.2026 г 50000 0 0 1000 ..."
 }
 ```
 
 | Поле | Тип | Описание |
 |------|-----|----------|
-| `driver_user_id` | number | ID водителя из `users` |
+| `driver_user_id` | number | ID водителя (необязательно, если есть `driver_fio` или `driver_login`) |
+| `driver_fio` | string | ФИО водителя |
+| `driver_login` | string | Логин водителя |
 | `salary_line` | string | **Ровно 37 значений через пробел** — тот же формат, что в Telegram-боте и в textarea PWA |
 
 ### Формат `salary_line` (37 полей)
@@ -321,6 +329,7 @@ curl -s -X POST "https://example.com/api/v1/admin/routes" \
 | 401 | Нет или неверный JWT |
 | 403 | Роль не бухгалтер/админ |
 | 404 | Водитель не найден |
+| 422 | По `driver_fio` найдено ноль или несколько водителей |
 | 400 | Неверная строка `salary_line` или пользователь не водитель |
 
 ### Пример (curl, строка)
@@ -341,11 +350,11 @@ curl -s -X POST "https://example.com/api/v1/salary" \
 
 **POST** `/v1/salary/structured`
 
-Обязательны: `driver_user_id`, `date_salary` (`дд.мм.гггг`). Остальные числовые поля по умолчанию `0`, строковые — `""`. Имена полей совпадают с объектом расчёта в ответе API (`sum_status`, `sum_daily`, `total`, `load_address`, …).
+Обязательны: **водитель** (`driver_user_id` или `driver_fio` или `driver_login`) и `date_salary` (`дд.мм.гггг`). Остальные числовые поля по умолчанию `0`, строковые — `""`. Имена полей совпадают с объектом расчёта в ответе API (`sum_status`, `sum_daily`, `total`, `load_address`, …).
 
 ```json
 {
-  "driver_user_id": 12,
+  "driver_fio": "Иванов Иван Иванович",
   "date_salary": "15.01.2026",
   "type_route": "г",
   "sum_status": 50000,
@@ -412,14 +421,11 @@ curl -s -X POST "https://drive.dmk.msk.ru/api/v1/salary/structured" \
 }
 ```
 
-Альтернативная идентификация водителя (одно из полей вместо `driver_user_id`):
-
-- `driver_login` — логин в системе;
-- `legacy_tg_id` — старый Telegram ID.
+Идентификация водителя (одно из полей): `driver_user_id`, `driver_fio`, `driver_login`, `legacy_tg_id`.
 
 Тот же формат с **отдельными полями**:
 
-**POST** `/v1/salary/integration/structured` — заголовок `X-Salary-Api-Key` + `driver_user_id` (или `driver_login` / `legacy_tg_id`) + все поля расчёта, как в `/v1/salary/structured` (без обёртки `salary_line`).
+**POST** `/v1/salary/integration/structured` — заголовок `X-Salary-Api-Key` + водитель (см. выше) + все поля расчёта, как в `/v1/salary/structured` (без `salary_line`).
 
 ---
 
