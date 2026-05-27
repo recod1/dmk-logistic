@@ -893,6 +893,59 @@ export async function createSalaryManual(token: string, payload: { driver_user_i
   });
 }
 
+/** Поля расчёта без salary_line — см. POST /v1/salary/structured */
+export type SalaryStructuredCreatePayload = {
+  driver_user_id: number;
+  date_salary: string;
+  type_route?: string;
+  sum_status?: number;
+  sum_daily?: number;
+  load_2_trips?: number;
+  calc_shuttle?: number;
+  sum_load_unload?: number;
+  sum_curtain?: number;
+  sum_return?: number;
+  sum_add_shuttle?: number;
+  sum_add_point?: number;
+  sum_gas_station?: number;
+  pallets_hyper?: number;
+  pallets_metro?: number;
+  pallets_ashan?: number;
+  rate_3km?: number;
+  rate_3_5km?: number;
+  rate_5km?: number;
+  rate_10km?: number;
+  rate_12km?: number;
+  rate_12_5km?: number;
+  mileage?: number;
+  sum_cell_compensation?: number;
+  experience?: number;
+  percent_10?: number;
+  sum_bonus?: number;
+  withhold?: number;
+  compensation?: number;
+  dr?: number;
+  sum_without_daily_dr_bonus_exp?: number;
+  sum_without_daily_dr_bonus?: number;
+  total?: number;
+  load_address?: string;
+  unload_address?: string;
+  transport?: string;
+  trailer_number?: string;
+  route_number?: string;
+};
+
+export async function createSalaryStructured(
+  token: string,
+  payload: SalaryStructuredCreatePayload
+): Promise<SalaryRecord> {
+  return requestJson<SalaryRecord>(`${API_BASE}/v1/salary/structured`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
 export async function listMySalaries(token: string, dateFrom?: string, dateTo?: string): Promise<SalaryRecord[]> {
   const qs = new URLSearchParams();
   if (dateFrom) qs.set("date_from", dateFrom);

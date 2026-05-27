@@ -38,6 +38,9 @@ services:
       TG_TOKEN: ${TG_TOKEN:-}
       WIALON_TOKEN: ${WIALON_TOKEN:-}
       WIALON_BASE_URL: ${WIALON_BASE_URL:-http://w1.wialon.justgps.ru}
+      MOBILE_UPLOAD_ROOT: ${MOBILE_UPLOAD_ROOT:-/data/mobile_uploads}
+    volumes:
+      - mobile_uploads:/data/mobile_uploads
     depends_on:
       db:
         condition: service_healthy
@@ -54,3 +57,4 @@ services:
 
 volumes:
   pg_data:
+  mobile_uploads:

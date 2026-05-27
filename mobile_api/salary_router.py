@@ -22,6 +22,8 @@ from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.point_documents_router import _upload_root as _mobile_upload_root
 from mobile_api.roles import RoleCode, normalize_role_code
 from mobile_api.salary_logic import (
+    SalaryIntegrationStructuredBody,
+    SalaryStructuredCreateBody,
     build_salaries_csv_bytes,
     driver_identity_keys,
     driver_salary_key,
@@ -177,6 +179,50 @@ def _chat_message_out(db: Session, msg: SalaryChatMessage) -> dict[str, Any]:
     }
 
 
+def _insert_salary_for_driver(db: Session, driver: User, fields: dict[str, Any]) -> dict[str, Any]:
+    row = Salary(id_driver=driver_salary_key(driver), status_driver=" ", comment_driver=" ", **fields)
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    create_notification_for_users(
+        db,
+        user_ids=[int(driver.id)],
+        event_type="salary_new",
+        title="Новый расчёт зарплаты",
+        message=f"Расчёт за {row.date_salary}, итого {_fnum(row.total):.2f} ₽",
+        payload={"salary_id": int(row.id)},
+        skip_user_ids=[],
+    )
+    db.commit()
+    return _salary_to_dict(row)
+
+
+def _resolve_driver_for_integration(
+    db: Session,
+    *,
+    driver_user_id: int | None,
+    driver_login: str | None,
+    legacy_tg_id: str | None,
+) -> User:
+    driver: User | None = None
+    if driver_user_id:
+        driver = db.get(User, int(driver_user_id))
+    elif driver_login and driver_login.strip():
+        driver = db.scalar(select(User).where(func.lower(User.login) == driver_login.strip().lower()))
+    elif legacy_tg_id and str(legacy_tg_id).strip():
+        driver = db.scalar(
+            select(User).where(User.legacy_tg_id == str(legacy_tg_id).strip(), User.is_active.is_(True))  # noqa: E712
+        )
+    if driver is None or not driver.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
+    try:
+        if normalize_role_code(driver.role_code) != RoleCode.DRIVER:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User must be a driver")
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid driver role") from exc
+    return driver
+
+
 def _resolve_driver_for_create(db: Session, driver_user_id: int | None, driver_login: str | None) -> User:
     if driver_user_id and driver_user_id > 0:
         u = db.get(User, int(driver_user_id))
@@ -267,21 +313,24 @@ def create_salary_manual(
         fields = parse_salary_line_37(payload.salary_line)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    row = Salary(id_driver=driver_salary_key(driver), status_driver=" ", comment_driver=" ", **fields)
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    create_notification_for_users(
-        db,
-        user_ids=[int(driver.id)],
-        event_type="salary_new",
-        title="Новый расчёт зарплаты",
-        message=f"Расчёт за {row.date_salary}, итого {_fnum(row.total):.2f} ₽",
-        payload={"salary_id": int(row.id)},
-        skip_user_ids=[],
-    )
-    db.commit()
-    return _salary_to_dict(row)
+    return _insert_salary_for_driver(db, driver, fields)
+
+
+@router.post("/v1/salary/structured", status_code=status.HTTP_201_CREATED)
+def create_salary_structured(
+    payload: SalaryStructuredCreateBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    """Создание расчёта ЗП с отдельными полями JSON (как после разбора строки в боте)."""
+    if not _is_accountant_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    driver = _resolve_driver_for_create(db, payload.driver_user_id, None)
+    try:
+        fields = payload.to_db_fields()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return _insert_salary_for_driver(db, driver, fields)
 
 
 @router.post("/v1/salary/integration", status_code=status.HTTP_201_CREATED)
@@ -290,41 +339,36 @@ def create_salary_integration(
     db: Session = Depends(get_db),
     _: None = Depends(_verify_salary_integration_key),
 ) -> dict:
-    driver: User | None = None
-    if payload.driver_user_id:
-        driver = db.get(User, int(payload.driver_user_id))
-    elif payload.driver_login and payload.driver_login.strip():
-        driver = db.scalar(select(User).where(func.lower(User.login) == payload.driver_login.strip().lower()))
-    elif payload.legacy_tg_id and str(payload.legacy_tg_id).strip():
-        driver = db.scalar(
-            select(User).where(User.legacy_tg_id == str(payload.legacy_tg_id).strip(), User.is_active.is_(True))  # noqa: E712
-        )
-    if driver is None or not driver.is_active:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
-    try:
-        if normalize_role_code(driver.role_code) != RoleCode.DRIVER:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="User must be a driver")
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid driver role") from exc
+    driver = _resolve_driver_for_integration(
+        db,
+        driver_user_id=payload.driver_user_id,
+        driver_login=payload.driver_login,
+        legacy_tg_id=payload.legacy_tg_id,
+    )
     try:
         fields = parse_salary_line_37(payload.salary_line)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-    row = Salary(id_driver=driver_salary_key(driver), status_driver=" ", comment_driver=" ", **fields)
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    create_notification_for_users(
+    return _insert_salary_for_driver(db, driver, fields)
+
+
+@router.post("/v1/salary/integration/structured", status_code=status.HTTP_201_CREATED)
+def create_salary_integration_structured(
+    payload: SalaryIntegrationStructuredBody,
+    db: Session = Depends(get_db),
+    _: None = Depends(_verify_salary_integration_key),
+) -> dict:
+    driver = _resolve_driver_for_integration(
         db,
-        user_ids=[int(driver.id)],
-        event_type="salary_new",
-        title="Новый расчёт зарплаты",
-        message=f"Расчёт за {row.date_salary}, итого {_fnum(row.total):.2f} ₽",
-        payload={"salary_id": int(row.id)},
-        skip_user_ids=[],
+        driver_user_id=payload.driver_user_id,
+        driver_login=payload.driver_login,
+        legacy_tg_id=payload.legacy_tg_id,
     )
-    db.commit()
-    return _salary_to_dict(row)
+    try:
+        fields = payload.to_db_fields()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    return _insert_salary_for_driver(db, driver, fields)
 
 
 @router.get("/v1/salary/mine")

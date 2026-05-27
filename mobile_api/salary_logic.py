@@ -8,6 +8,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -68,6 +69,113 @@ def parse_salary_line_37(line: str) -> dict[str, Any]:
         "trailer_number": parts[35].strip(),
         "route_number": parts[36].strip(),
     }
+
+
+class SalaryStructuredFields(BaseModel):
+    """Поля расчёта ЗП по отдельности (имена как в ответе API / таблице salary)."""
+
+    date_salary: str = Field(min_length=1, max_length=64, description="дд.мм.гггг")
+    type_route: str = Field(default="", max_length=32)
+    sum_status: float = 0
+    sum_daily: float = 0
+    load_2_trips: float = 0
+    calc_shuttle: float = 0
+    sum_load_unload: float = 0
+    sum_curtain: float = 0
+    sum_return: float = 0
+    sum_add_shuttle: float = 0
+    sum_add_point: float = 0
+    sum_gas_station: float = 0
+    pallets_hyper: int = 0
+    pallets_metro: int = 0
+    pallets_ashan: int = 0
+    rate_3km: float = 0
+    rate_3_5km: float = 0
+    rate_5km: float = 0
+    rate_10km: float = 0
+    rate_12km: float = 0
+    rate_12_5km: float = 0
+    mileage: float = 0
+    sum_cell_compensation: float = 0
+    experience: int = 0
+    percent_10: float = 0
+    sum_bonus: float = 0
+    withhold: float = 0
+    compensation: float = 0
+    dr: float = 0
+    sum_without_daily_dr_bonus_exp: float = 0
+    sum_without_daily_dr_bonus: float = 0
+    total: float = 0
+    load_address: str = ""
+    unload_address: str = ""
+    transport: str = ""
+    trailer_number: str = ""
+    route_number: str = ""
+
+    def to_db_fields(self) -> dict[str, Any]:
+        """Нормализация как после parse_salary_line_37."""
+        try:
+            parse_dd_mm_yyyy(self.date_salary.strip())
+        except ValueError as exc:
+            raise ValueError("date_salary: ожидается формат дд.мм.гггг") from exc
+        return {
+            "date_salary": self.date_salary.strip(),
+            "type_route": (self.type_route or "").strip(),
+            "sum_status": float(self.sum_status),
+            "sum_daily": float(self.sum_daily),
+            "load_2_trips": float(self.load_2_trips),
+            "calc_shuttle": float(self.calc_shuttle),
+            "sum_load_unload": float(self.sum_load_unload),
+            "sum_curtain": float(self.sum_curtain),
+            "sum_return": float(self.sum_return),
+            "sum_add_shuttle": float(self.sum_add_shuttle),
+            "sum_add_point": float(self.sum_add_point),
+            "sum_gas_station": float(self.sum_gas_station),
+            "pallets_hyper": int(self.pallets_hyper),
+            "pallets_metro": int(self.pallets_metro),
+            "pallets_ashan": int(self.pallets_ashan),
+            "rate_3km": float(self.rate_3km),
+            "rate_3_5km": float(self.rate_3_5km),
+            "rate_5km": float(self.rate_5km),
+            "rate_10km": float(self.rate_10km),
+            "rate_12km": float(self.rate_12km),
+            "rate_12_5km": float(self.rate_12_5km),
+            "mileage": float(int(round(self.mileage))),
+            "sum_cell_compensation": float(self.sum_cell_compensation),
+            "experience": int(self.experience),
+            "percent_10": float(self.percent_10),
+            "sum_bonus": float(self.sum_bonus),
+            "withhold": float(self.withhold),
+            "compensation": float(self.compensation),
+            "dr": float(self.dr),
+            "sum_without_daily_dr_bonus_exp": float(self.sum_without_daily_dr_bonus_exp),
+            "sum_without_daily_dr_bonus": float(self.sum_without_daily_dr_bonus),
+            "total": float(self.total),
+            "load_address": (self.load_address or "").strip(),
+            "unload_address": (self.unload_address or "").strip(),
+            "transport": (self.transport or "").strip(),
+            "trailer_number": (self.trailer_number or "").strip(),
+            "route_number": (self.route_number or "").strip(),
+        }
+
+
+class SalaryStructuredCreateBody(SalaryStructuredFields):
+    driver_user_id: int = Field(ge=1)
+
+
+class SalaryIntegrationStructuredBody(SalaryStructuredFields):
+    driver_user_id: int | None = Field(default=None, ge=1)
+    driver_login: str | None = None
+    legacy_tg_id: str | None = None
+
+    @model_validator(mode="after")
+    def require_driver_reference(self) -> SalaryIntegrationStructuredBody:
+        has_id = self.driver_user_id is not None and self.driver_user_id > 0
+        has_login = bool((self.driver_login or "").strip())
+        has_tg = bool((self.legacy_tg_id or "").strip())
+        if not (has_id or has_login or has_tg):
+            raise ValueError("Укажите driver_user_id, driver_login или legacy_tg_id")
+        return self
 
 
 def driver_salary_key(user: User) -> str:
