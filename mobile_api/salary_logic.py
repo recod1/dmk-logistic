@@ -7,6 +7,7 @@ import io
 from datetime import datetime
 from decimal import Decimal
 from typing import Any
+from urllib.parse import quote
 
 from pydantic import BaseModel, Field, model_validator
 from sqlalchemy import func, select
@@ -270,7 +271,32 @@ def _num(v: Any) -> float:
         return 0.0
     if isinstance(v, Decimal):
         return float(v)
-    return float(v)
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _int_nz(v: Any) -> str:
+    n = int(round(_num(v)))
+    return str(n) if n > 0 else ""
+
+
+def _salary_sort_key(salary: Salary) -> datetime:
+    try:
+        return parse_dd_mm_yyyy(salary.date_salary or "")
+    except ValueError:
+        return datetime.min
+
+
+def csv_content_disposition(filename: str) -> str:
+    """ASCII filename= plus RFC 5987 filename* so Cyrillic FIO does not crash Starlette headers."""
+    safe = (filename or "export.csv").replace("\r", "").replace("\n", "").replace('"', "'").strip() or "export.csv"
+    ascii_name = "".join(ch if 32 <= ord(ch) < 127 and ch not in "\\/" else "_" for ch in safe).strip("._")
+    if not ascii_name.lower().endswith(".csv"):
+        ascii_name = (ascii_name or "salary_export") + ".csv"
+    ascii_name = ascii_name.replace(" ", "_") or "salary_export.csv"
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(safe)}"
 
 
 def salary_row_csv_values(salary: Salary) -> list[Any]:
@@ -304,9 +330,9 @@ def salary_row_csv_values(salary: Salary) -> list[Any]:
         nz_num(salary.sum_add_shuttle),
         nz_num(salary.sum_add_point),
         nz_num(salary.sum_gas_station),
-        str(salary.pallets_hyper) if salary.pallets_hyper > 0 else "",
-        str(salary.pallets_metro) if salary.pallets_metro > 0 else "",
-        str(salary.pallets_ashan) if salary.pallets_ashan > 0 else "",
+        _int_nz(salary.pallets_hyper),
+        _int_nz(salary.pallets_metro),
+        _int_nz(salary.pallets_ashan),
         nz_num(salary.rate_3km),
         nz_num(salary.rate_3_5km),
         nz_num(salary.rate_5km),
@@ -315,7 +341,7 @@ def salary_row_csv_values(salary: Salary) -> list[Any]:
         nz_num(salary.rate_12_5km),
         nz_num(salary.mileage),
         nz_num(salary.sum_cell_compensation),
-        str(salary.experience) if salary.experience > 0 else "",
+        _int_nz(salary.experience),
         nz_num(salary.percent_10),
         nz_num(salary.sum_bonus),
         nz_num(salary.withhold),
@@ -336,7 +362,7 @@ def salary_row_csv_values(salary: Salary) -> list[Any]:
 
 def build_salaries_csv_bytes(salaries: list[Salary], driver_name: str, period_info: str) -> bytes:
     """Формат как create_csv_file / create_admin_csv_file в боте (UTF-8 BOM)."""
-    salaries_sorted = sorted(salaries, key=lambda x: parse_dd_mm_yyyy(x.date_salary))
+    salaries_sorted = sorted(salaries, key=_salary_sort_key)
     fieldnames = [
         "ID",
         "Дата",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 import type { SalaryRecord } from "../api";
 
@@ -18,12 +18,75 @@ const emit = defineEmits<{
 
 const commentText = ref("");
 
+type DetailRow = { label: string; value: string };
+
 function statusLabel(s: string): string {
   const t = (s || "").trim();
   if (t === "confirmed") return "Подтверждено";
   if (t === "commented") return "С комментарием";
   return "Ожидает подтверждения";
 }
+
+function isNonZeroNumber(v: number): boolean {
+  return typeof v === "number" && Number.isFinite(v) && v !== 0;
+}
+
+function isNonEmptyText(v: string | null | undefined): boolean {
+  const t = (v || "").trim();
+  return Boolean(t) && t !== "0";
+}
+
+const detailRows = computed<DetailRow[]>(() => {
+  const r = props.record;
+  const rows: DetailRow[] = [];
+  const num = (label: string, v: number) => {
+    if (isNonZeroNumber(v)) {
+      rows.push({ label, value: String(v) });
+    }
+  };
+  const text = (label: string, v: string) => {
+    if (isNonEmptyText(v)) {
+      rows.push({ label, value: v.trim() });
+    }
+  };
+
+  text("г/мг/рд/пр", r.type_route);
+  num("Оклад", r.sum_status);
+  num("Суточные", r.sum_daily);
+  num("Загр 2р", r.load_2_trips);
+  num("Шаттл", r.calc_shuttle);
+  num("Загр/выгр", r.sum_load_unload);
+  num("Штора", r.sum_curtain);
+  num("Возврат", r.sum_return);
+  num("Доп. шаттл", r.sum_add_shuttle);
+  num("Доп. точка", r.sum_add_point);
+  num("АЗС", r.sum_gas_station);
+  num("Паллеты гипер", r.pallets_hyper);
+  num("Паллеты метро", r.pallets_metro);
+  num("Паллеты ашан", r.pallets_ashan);
+  num("Тариф 3", r.rate_3km);
+  num("Тариф 3.5", r.rate_3_5km);
+  num("Тариф 5", r.rate_5km);
+  num("Тариф 10", r.rate_10km);
+  num("Тариф 12", r.rate_12km);
+  num("Тариф 12.5", r.rate_12_5km);
+  num("Пробег", r.mileage);
+  num("Комп. связи", r.sum_cell_compensation);
+  num("Стаж", r.experience);
+  num("10%", r.percent_10);
+  num("Премия", r.sum_bonus);
+  num("Удержать", r.withhold);
+  num("Возмещение", r.compensation);
+  num("ДР", r.dr);
+  num("Без сут/ДР/прем/стажа", r.sum_without_daily_dr_bonus_exp);
+  num("В день", r.sum_without_daily_dr_bonus);
+  text("Адрес загрузки", r.load_address);
+  text("Адрес выгрузки", r.unload_address);
+  text("ТС", r.transport);
+  text("Прицеп", r.trailer_number);
+  text("№ рейса", r.route_number);
+  return rows;
+});
 </script>
 
 <template>
@@ -36,30 +99,13 @@ function statusLabel(s: string): string {
     <div class="card">
       <p class="meta">{{ record.date_salary }} · {{ statusLabel(record.status_driver) }}</p>
       <p class="sum">Итого: {{ record.total.toFixed(2) }} ₽</p>
-      <dl class="grid">
-        <dt>г/мг/рд/пр</dt>
-        <dd>{{ record.type_route }}</dd>
-        <dt>Оклад / суточные</dt>
-        <dd>{{ record.sum_status }} / {{ record.sum_daily }}</dd>
-        <dt>Загр 2р / шаттл / загр-выгр</dt>
-        <dd>{{ record.load_2_trips }} / {{ record.calc_shuttle }} / {{ record.sum_load_unload }}</dd>
-        <dt>Штора / возврат / доп.шаттл / доп.точка / АЗС</dt>
-        <dd>{{ record.sum_curtain }} / {{ record.sum_return }} / {{ record.sum_add_shuttle }} / {{ record.sum_add_point }} / {{ record.sum_gas_station }}</dd>
-        <dt>Паллеты гипер/метро/ашан</dt>
-        <dd>{{ record.pallets_hyper }} / {{ record.pallets_metro }} / {{ record.pallets_ashan }}</dd>
-        <dt>Тарифы км 3/3.5/5/10/12/12.5</dt>
-        <dd>{{ record.rate_3km }} / {{ record.rate_3_5km }} / {{ record.rate_5km }} / {{ record.rate_10km }} / {{ record.rate_12km }} / {{ record.rate_12_5km }}</dd>
-        <dt>Пробег / комп.связи / стаж / 10%</dt>
-        <dd>{{ record.mileage }} / {{ record.sum_cell_compensation }} / {{ record.experience }} / {{ record.percent_10 }}</dd>
-        <dt>Премия / удержать / возмещение / ДР</dt>
-        <dd>{{ record.sum_bonus }} / {{ record.withhold }} / {{ record.compensation }} / {{ record.dr }}</dd>
-        <dt>Без сут/ДР/прем/стажа · в день</dt>
-        <dd>{{ record.sum_without_daily_dr_bonus_exp }} · {{ record.sum_without_daily_dr_bonus }}</dd>
-        <dt>Адреса</dt>
-        <dd>{{ record.load_address }} → {{ record.unload_address }}</dd>
-        <dt>ТС / прицеп / № рейса</dt>
-        <dd>{{ record.transport }} / {{ record.trailer_number }} / {{ record.route_number }}</dd>
+      <dl v-if="detailRows.length" class="grid">
+        <template v-for="row in detailRows" :key="row.label">
+          <dt>{{ row.label }}</dt>
+          <dd>{{ row.value }}</dd>
+        </template>
       </dl>
+      <p v-else class="empty">Все значения равны нулю</p>
       <p v-if="record.comment_driver && record.comment_driver.trim()" class="comment">
         Комментарий водителя: {{ record.comment_driver }}
       </p>
@@ -120,8 +166,8 @@ h2 {
 }
 .grid {
   display: grid;
-  grid-template-columns: 1fr 1.2fr;
-  gap: 0.35rem 0.65rem;
+  grid-template-columns: minmax(8rem, 1fr) 1.2fr;
+  gap: 0.4rem 0.65rem;
   font-size: 0.85rem;
   margin: 0;
 }
@@ -131,6 +177,11 @@ dt {
 dd {
   margin: 0;
   word-break: break-word;
+}
+.empty {
+  margin: 0;
+  color: #94a3b8;
+  font-size: 0.88rem;
 }
 .comment {
   margin-top: 0.65rem;

@@ -1,0 +1,28 @@
+# Только Telegram-бот (legacy, SQLite). Без API, PWA и Postgres.
+#
+# На сервере БД: /var/opt/dmk/olymp.db (каталог монтируется в контейнер).
+#
+# Запуск:
+#   cp .env.example .env   # задайте TG_TOKEN
+#   docker compose -f docker-compose.bot.yml up -d
+#
+# Локально (другой путь к БД):
+#   BOT_DB_HOST_DIR=./db docker compose -f docker-compose.bot.yml up -d --build
+
+version: "3.9"
+
+services:
+  bot:
+    image: ${BOT_IMAGE:-recod0/dmk-logistic-bot:latest}
+    build:
+      context: .
+      dockerfile: docker/bot/Dockerfile
+    restart: unless-stopped
+    environment:
+      TG_TOKEN: ${TG_TOKEN:?Задайте TG_TOKEN в .env}
+      DB_PATH: ${DB_PATH:-/app/db/olymp.db}
+      WIALON_TOKEN: ${WIALON_TOKEN:-}
+      WIALON_BASE_URL: ${WIALON_BASE_URL:-http://w1.wialon.justgps.ru}
+    volumes:
+      # Хост: /var/opt/dmk/olymp.db → в контейнере: /app/db/olymp.db
+      - ${BOT_DB_HOST_DIR:-/var/opt/dmk}:/app/db

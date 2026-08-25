@@ -17,6 +17,7 @@ const props = defineProps<{
   syncing: boolean;
   canAcceptRoute: boolean;
   unreadChatCount?: number;
+  logisticsContacts?: Array<{ name: string; phone: string }>;
 }>();
 
 const emit = defineEmits<{
@@ -76,11 +77,7 @@ function splitPhones(raw: string): string[] {
 
 const dispatcherPhones = computed(() => splitPhones(props.route.dispatcher_contacts || ""));
 
-const logisticsContacts = [
-  { name: "Гуля", phoneRaw: "+7 (916) 842-01-12" },
-  { name: "Александр", phoneRaw: "+7 (989) 150-51-42" },
-  { name: "Зураб", phoneRaw: "+7 (985) 046-84-82" }
-] as const;
+const logisticsContacts = computed(() => props.logisticsContacts ?? []);
 
 function phoneToTel(phoneRaw: string): string {
   return phoneRaw.replace(/[^+\d]/g, "");
@@ -172,18 +169,19 @@ function showRevert(pointId: number): boolean {
         </p>
         <p>
           <strong>Контакты логистов:</strong>
-          <span class="contacts">
+          <span v-if="logisticsContacts.length" class="contacts">
             <a
               v-for="c in logisticsContacts"
-              :key="c.phoneRaw"
+              :key="`${c.name}-${c.phone}`"
               class="tel tel-contact"
-              :href="`tel:${phoneToTel(c.phoneRaw)}`"
+              :href="`tel:${phoneToTel(c.phone)}`"
               @click.stop
             >
               <span class="tel-name">{{ c.name }}</span>
-              <span class="tel-phone">{{ c.phoneRaw }}</span>
+              <span class="tel-phone">{{ c.phone }}</span>
             </a>
           </span>
+          <span v-else>—</span>
         </p>
         <p v-if="!isAcceptedCurrentRoute && route.status === 'process'" class="note">
           Изменение статусов доступно только для принятого текущего рейса.

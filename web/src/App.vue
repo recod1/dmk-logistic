@@ -5,6 +5,7 @@ import type { RoleCode } from "./roles";
 import AdminRouteDetailsView from "./components/AdminRouteDetailsView.vue";
 import AdminRoutesView from "./components/AdminRoutesView.vue";
 import AdminUsersView from "./components/AdminUsersView.vue";
+import AdminLogisticsContactsView from "./components/AdminLogisticsContactsView.vue";
 import ChatView from "./components/ChatView.vue";
 import ChatsHubView from "./components/ChatsHubView.vue";
 import DriverSalaryView from "./components/DriverSalaryView.vue";
@@ -52,8 +53,10 @@ import {
   uploadChatRoomAttachments,
   fetchChatRoomAttachmentBlob,
   type SalaryRecord,
+  type LogisticsContact,
   listMySalaries,
   fetchMySalaryCsvBlob,
+  fetchDriverSalaryCsvBlob,
   lookupSalaryDrivers,
   createSalaryManual,
   listSalariesForDriver,
@@ -64,6 +67,8 @@ import {
   sendSalaryChatMessage,
   uploadSalaryChatAttachments,
   fetchSalaryChatAttachmentBlob,
+  listLogisticsContacts,
+  saveLogisticsContacts,
   listAdminRoutes,
   listAdminUsers,
   listDriverRoutes,
@@ -128,6 +133,7 @@ type AppSection =
   | "chats"
   | "notifications"
   | "admin_users"
+  | "admin_logistics_contacts"
   | "admin_routes"
   | "admin_route_details"
   | "driver_salary"
@@ -260,6 +266,15 @@ const salaryAccountantItems = ref<SalaryRecord[]>([]);
 const salarySelectedDriver = ref<{ id: number; login: string; full_name: string | null } | null>(null);
 const salarySaving = ref(false);
 const salaryDetailBackSection = ref<AppSection>("driver_salary");
+const DEFAULT_LOGISTICS_CONTACTS: LogisticsContact[] = [
+  { name: "Гуля", phone: "+7 (916) 842-01-12" },
+  { name: "Александр", phone: "+7 (989) 150-51-42" },
+  { name: "Зураб", phone: "+7 (985) 046-84-82" }
+];
+const logisticsContacts = ref<LogisticsContact[]>([...DEFAULT_LOGISTICS_CONTACTS]);
+const logisticsContactsLoading = ref(false);
+const logisticsContactsSaving = ref(false);
+const logisticsContactsError = ref("");
 
 const isAuthed = computed(() => Boolean(authToken.value));
 const isAdmin = computed(() => isAdminRole(authUser.value?.role_code || ""));
@@ -444,6 +459,9 @@ const currentPageTitle = computed(() => {
   if (currentSection.value === "admin_users") {
     return "ДМК - Пользователи";
   }
+  if (currentSection.value === "admin_logistics_contacts") {
+    return "ДМК - Контакты логистов";
+  }
   if (currentSection.value === "notifications") {
     return "ДМК - Уведомления";
   }
@@ -476,7 +494,8 @@ const profileMenuItems = computed<Array<{ section: AppSection; label: string }>>
       { section: "admin_routes", label: "Рейсы" },
       { section: "chats", label: "Чаты" },
       { section: "salary_accounting", label: "Зарплата" },
-      { section: "admin_users", label: "Пользователи" }
+      { section: "admin_users", label: "Пользователи" },
+      { section: "admin_logistics_contacts", label: "Контакты логистов" }
     ];
   }
   if (isRouteManagerRole(authUser.value.role_code)) {
@@ -947,6 +966,8 @@ function clearAuth(): void {
   salaryAccountantItems.value = [];
   salarySelectedDriver.value = null;
   salaryError.value = "";
+  logisticsContacts.value = [...DEFAULT_LOGISTICS_CONTACTS];
+  logisticsContactsError.value = "";
   currentSection.value = "driver_home";
   profileMenuOpen.value = false;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
@@ -1722,6 +1743,7 @@ async function openActiveRouteFromHome(): Promise<void> {
     }
     selectedDriverRoute.value = await getDriverRoute(authToken.value, route.value.id);
     currentSection.value = "driver_route_details";
+    void refreshLogisticsContacts();
   } catch (error) {
     syncMessage.value = `Ошибка загрузки деталей рейса: ${(error as Error).message}`;
   }
@@ -1749,6 +1771,7 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
     startBackgroundSyncLoop();
   }
   await refreshNotifications();
+  await refreshLogisticsContacts();
 }
 
 function openRoleMainSection(section: AppSection): void {
@@ -1780,6 +1803,11 @@ function openRoleMainSection(section: AppSection): void {
   }
   if (section === "admin_users" && isAdminRole(authUser.value.role_code)) {
     currentSection.value = section;
+    return;
+  }
+  if (section === "admin_logistics_contacts" && isAdminRole(authUser.value.role_code)) {
+    currentSection.value = section;
+    void refreshLogisticsContacts();
     return;
   }
   if ((section === "admin_routes" || section === "admin_route_details") && isRouteManagerRole(authUser.value.role_code)) {
@@ -2123,6 +2151,7 @@ async function openDriverRouteDetails(routeId: string): Promise<void> {
   try {
     selectedDriverRoute.value = await getDriverRoute(authToken.value, routeId);
     currentSection.value = "driver_route_details";
+    void refreshLogisticsContacts();
   } catch (error) {
     syncMessage.value = `Ошибка загрузки деталей рейса: ${(error as Error).message}`;
   }
@@ -2380,18 +2409,43 @@ async function exportDriverSalaryCsv(dateFrom: string, dateTo: string): Promise<
   if (!authToken.value) return;
   try {
     const blob = await fetchMySalaryCsvBlob(authToken.value, dateFrom, dateTo);
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `расчеты_${dateFrom}_${dateTo}.csv`.replace(/\./g, "-");
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    window.setTimeout(() => URL.revokeObjectURL(url), 15_000);
+    downloadBlob(blob, `расчеты_${dateFrom}_${dateTo}.csv`.replace(/\./g, "-"));
     syncMessage.value = "CSV сохранён";
   } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
     salaryError.value = (error as Error).message;
   }
+}
+
+async function exportAccountantSalaryCsv(dateFrom: string, dateTo: string): Promise<void> {
+  if (!authToken.value || !salarySelectedDriver.value) return;
+  try {
+    const blob = await fetchDriverSalaryCsvBlob(authToken.value, salarySelectedDriver.value.id, dateFrom, dateTo);
+    const name = (salarySelectedDriver.value.full_name || salarySelectedDriver.value.login || String(salarySelectedDriver.value.id)).replace(
+      /\s+/g,
+      "_"
+    );
+    downloadBlob(blob, `расчеты_${name}_${dateFrom}_${dateTo}.csv`.replace(/\./g, "-"));
+    syncMessage.value = "CSV сохранён";
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
+    salaryError.value = (error as Error).message;
+  }
+}
+
+function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.setTimeout(() => URL.revokeObjectURL(url), 15_000);
 }
 
 function openSalaryDetail(row: SalaryRecord, backSection: AppSection): void {
@@ -2576,6 +2630,42 @@ async function createSalaryFromAccountant(payload: { driver_user_id: number; sal
     salaryError.value = (error as Error).message;
   } finally {
     salarySaving.value = false;
+  }
+}
+
+async function refreshLogisticsContacts(): Promise<void> {
+  if (!authToken.value) return;
+  logisticsContactsLoading.value = true;
+  logisticsContactsError.value = "";
+  try {
+    logisticsContacts.value = await listLogisticsContacts(authToken.value);
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
+    logisticsContactsError.value = (error as Error).message;
+    if (!logisticsContacts.value.length) {
+      logisticsContacts.value = [...DEFAULT_LOGISTICS_CONTACTS];
+    }
+  } finally {
+    logisticsContactsLoading.value = false;
+  }
+}
+
+async function doSaveLogisticsContacts(items: Array<{ name: string; phone: string }>): Promise<void> {
+  if (!authToken.value) return;
+  logisticsContactsSaving.value = true;
+  logisticsContactsError.value = "";
+  try {
+    logisticsContacts.value = await saveLogisticsContacts(authToken.value, items);
+    syncMessage.value = "Контакты логистов сохранены";
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
+    logisticsContactsError.value = (error as Error).message;
+  } finally {
+    logisticsContactsSaving.value = false;
   }
 }
 
@@ -2850,6 +2940,17 @@ onUnmounted(() => {
       />
     </section>
 
+    <section v-else-if="isAdmin && currentSection === 'admin_logistics_contacts'">
+      <AdminLogisticsContactsView
+        :items="logisticsContacts"
+        :loading="logisticsContactsLoading"
+        :saving="logisticsContactsSaving"
+        :error="logisticsContactsError"
+        @refresh="refreshLogisticsContacts"
+        @save="doSaveLogisticsContacts"
+      />
+    </section>
+
     <section v-else-if="isDriver && currentSection === 'driver_home'">
       <DriverHomeView
         :active-route="route"
@@ -2885,6 +2986,7 @@ onUnmounted(() => {
         :syncing="syncing"
         :can-accept-route="canAcceptSelectedDriverRoute"
         :unread-chat-count="chatUnreadByRoute[selectedDriverRoute.id] ?? 0"
+        :logistics-contacts="logisticsContacts"
         @back="openDriverRoutes"
         @advance-point="openStatusConfirm"
         @revert-point="doRevertPoint"
@@ -2952,6 +3054,7 @@ onUnmounted(() => {
         @refresh-list="(a, b) => void refreshAccountantSalaryList(a, b)"
         @create="(p) => void createSalaryFromAccountant(p)"
         @select="(r) => openSalaryDetail(r, 'salary_accounting')"
+        @export-csv="exportAccountantSalaryCsv"
       />
     </section>
 

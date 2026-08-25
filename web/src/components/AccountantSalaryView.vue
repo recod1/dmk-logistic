@@ -19,6 +19,7 @@ const emit = defineEmits<{
   refreshList: [dateFrom?: string, dateTo?: string];
   create: [payload: { driver_user_id: number; salary_line: string }];
   select: [row: SalaryRecord];
+  exportCsv: [dateFrom: string, dateTo: string];
 }>();
 
 const q = ref("");
@@ -43,6 +44,13 @@ function applyMonth(): void {
 function submit(): void {
   if (!props.selectedDriver) return;
   emit("create", { driver_user_id: props.selectedDriver.id, salary_line: salaryLine.value.trim() });
+}
+
+function doExport(): void {
+  if (!dateFrom.value.trim() || !dateTo.value.trim()) {
+    return;
+  }
+  emit("exportCsv", dateFrom.value.trim(), dateTo.value.trim());
 }
 </script>
 
@@ -81,6 +89,7 @@ function submit(): void {
         <button type="button" class="secondary" :disabled="loading" @click="emit('refreshList', dateFrom || undefined, dateTo || undefined)">
           Загрузить
         </button>
+        <button type="button" class="primary" :disabled="!dateFrom || !dateTo" @click="doExport">CSV за период</button>
       </div>
       <div class="list">
         <button v-for="r in items" :key="r.id" type="button" class="row-item" @click="emit('select', r)">
@@ -142,6 +151,9 @@ input {
   margin: 0.5rem 0;
   font-family: ui-monospace, monospace;
   font-size: 0.82rem;
+}
+.ta + .primary {
+  margin-top: 0.35rem;
 }
 .drivers {
   display: grid;
@@ -213,7 +225,6 @@ input {
   background: #16a34a;
   color: #fff;
   padding: 0.45rem 0.65rem;
-  margin-top: 0.35rem;
 }
 .error {
   color: #fca5a5;

@@ -963,15 +963,60 @@ export async function listMySalaries(token: string, dateFrom?: string, dateTo?: 
   return data.items;
 }
 
-export async function fetchMySalaryCsvBlob(token: string, dateFrom: string, dateTo: string): Promise<Blob> {
-  const qs = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
-  const url = `${API_BASE}/v1/salary/mine/export.csv?${qs.toString()}`;
+async function fetchCsvBlob(url: string, token: string): Promise<Blob> {
   const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || `HTTP ${response.status}`);
+    let message = text || `HTTP ${response.status}`;
+    try {
+      const parsed = JSON.parse(text) as { detail?: unknown };
+      if (typeof parsed?.detail === "string") {
+        message = parsed.detail;
+      }
+    } catch {
+      // keep raw body
+    }
+    throw new Error(message);
   }
   return response.blob();
+}
+
+export async function fetchMySalaryCsvBlob(token: string, dateFrom: string, dateTo: string): Promise<Blob> {
+  const qs = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
+  return fetchCsvBlob(`${API_BASE}/v1/salary/mine/export.csv?${qs.toString()}`, token);
+}
+
+export async function fetchDriverSalaryCsvBlob(
+  token: string,
+  driverUserId: number,
+  dateFrom: string,
+  dateTo: string
+): Promise<Blob> {
+  const qs = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
+  return fetchCsvBlob(`${API_BASE}/v1/salary/for-driver/${driverUserId}/export.csv?${qs.toString()}`, token);
+}
+
+export type LogisticsContact = {
+  id?: number;
+  name: string;
+  phone: string;
+  sort_order?: number;
+};
+
+export async function listLogisticsContacts(token: string): Promise<LogisticsContact[]> {
+  const data = await requestJson<{ items: LogisticsContact[] }>(`${API_BASE}/v1/logistics-contacts`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return data.items;
+}
+
+export async function saveLogisticsContacts(token: string, items: Array<{ name: string; phone: string }>): Promise<LogisticsContact[]> {
+  const data = await requestJson<{ items: LogisticsContact[] }>(`${API_BASE}/v1/admin/logistics-contacts`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ items })
+  });
+  return data.items;
 }
 
 export async function listSalariesForDriver(

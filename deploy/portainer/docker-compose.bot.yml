@@ -1,0 +1,27 @@
+# Portainer stack: только Telegram-бот (без api / web / postgres).
+#
+# Compose path: deploy/portainer/docker-compose.bot.yml
+#
+# БД на хосте: /var/opt/dmk/olymp.db (монтируется как /app/db/olymp.db).
+#
+# Переменные stack environment (обязательно):
+#   TG_TOKEN — токен бота
+#
+# Опционально:
+#   BOT_IMAGE, BOT_DB_HOST_DIR (по умолчанию /var/opt/dmk)
+#   WIALON_TOKEN, WIALON_BASE_URL
+
+version: "3.9"
+
+services:
+  bot:
+    image: ${BOT_IMAGE:-recod0/dmk-logistic-bot:latest}
+    restart: unless-stopped
+    command: ["python", "app.py"]
+    environment:
+      TG_TOKEN: ${TG_TOKEN}
+      DB_PATH: ${DB_PATH:-/app/db/olymp.db}
+      WIALON_TOKEN: ${WIALON_TOKEN:-}
+      WIALON_BASE_URL: ${WIALON_BASE_URL:-http://w1.wialon.justgps.ru}
+    volumes:
+      - ${BOT_DB_HOST_DIR:-/var/opt/dmk}:/app/db

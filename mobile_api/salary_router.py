@@ -27,6 +27,7 @@ from mobile_api.salary_logic import (
     SalaryIntegrationStructuredBody,
     SalaryStructuredCreateBody,
     build_salaries_csv_bytes,
+    csv_content_disposition,
     driver_identity_keys,
     driver_salary_key,
     parse_dd_mm_yyyy,
@@ -131,6 +132,35 @@ def _get_salary_or_404(db: Session, salary_id: int) -> Salary:
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Salary not found")
     return row
+
+
+def _csv_file_response(body: bytes, filename: str) -> Response:
+    return Response(
+        content=body,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": csv_content_disposition(filename)},
+    )
+
+
+def _parse_period(date_from: str, date_to: str) -> tuple[datetime, datetime]:
+    try:
+        return parse_dd_mm_yyyy(date_from), parse_dd_mm_yyyy(date_to)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid date_from/date_to") from exc
+
+
+def _salaries_for_driver_user(
+    db: Session,
+    driver: User,
+    date_from: str | None = None,
+    date_to: str | None = None,
+) -> list[Salary]:
+    keys = driver_identity_keys(driver)
+    rows = list(db.scalars(select(Salary).where(Salary.id_driver.in_(keys)).order_by(Salary.id.desc())).all())
+    if date_from and date_to:
+        s_dt, e_dt = _parse_period(date_from, date_to)
+        rows = [s for s in rows if salary_date_in_range(s, s_dt, e_dt)]
+    return rows
 
 
 def _assert_can_view_salary(db: Session, user: User, salary: Salary) -> None:
@@ -417,11 +447,7 @@ def export_my_salaries_csv(
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only for drivers")
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only for drivers") from exc
-    try:
-        s_dt = parse_dd_mm_yyyy(date_from)
-        e_dt = parse_dd_mm_yyyy(date_to)
-    except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid date format") from exc
+    s_dt, e_dt = _parse_period(date_from, date_to)
     keys = driver_identity_keys(current_user)
     rows = list(db.scalars(select(Salary).where(Salary.id_driver.in_(keys)).order_by(Salary.id.desc())).all())
     rows = [s for s in rows if salary_date_in_range(s, s_dt, e_dt)]
@@ -429,11 +455,7 @@ def export_my_salaries_csv(
     period_info = f"с {date_from} по {date_to}"
     body = build_salaries_csv_bytes(rows, name, period_info)
     fn = f"расчеты_{name}_{date_from}_{date_to}.csv".replace(" ", "_")
-    return Response(
-        content=body,
-        media_type="text/csv; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="{fn}"'},
-    )
+    return _csv_file_response(body, fn)
 
 
 @router.get("/v1/salary/for-driver/{driver_user_id}")
@@ -449,16 +471,29 @@ def list_salaries_for_driver(
     driver = db.get(User, driver_user_id)
     if driver is None or not driver.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
-    key = driver_salary_key(driver)
-    rows = db.scalars(select(Salary).where(Salary.id_driver == key).order_by(Salary.id.desc())).all()
-    if date_from and date_to:
-        try:
-            s_dt = parse_dd_mm_yyyy(date_from)
-            e_dt = parse_dd_mm_yyyy(date_to)
-        except ValueError as exc:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid dates") from exc
-        rows = [s for s in rows if salary_date_in_range(s, s_dt, e_dt)]
+    rows = _salaries_for_driver_user(db, driver, date_from, date_to)
     return {"items": [_salary_to_dict(s) for s in rows], "driver": {"id": int(driver.id), "full_name": driver.full_name, "login": driver.login}}
+
+
+@router.get("/v1/salary/for-driver/{driver_user_id}/export.csv")
+def export_salaries_for_driver_csv(
+    driver_user_id: int,
+    date_from: str = Query(min_length=8, max_length=10),
+    date_to: str = Query(min_length=8, max_length=10),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Response:
+    if not _is_accountant_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    driver = db.get(User, driver_user_id)
+    if driver is None or not driver.is_active:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
+    rows = _salaries_for_driver_user(db, driver, date_from, date_to)
+    name = (driver.full_name or driver.login or str(driver.id)).strip()
+    period_info = f"с {date_from} по {date_to}"
+    body = build_salaries_csv_bytes(rows, name, period_info)
+    fn = f"расчеты_{name}_{date_from}_{date_to}.csv".replace(" ", "_")
+    return _csv_file_response(body, fn)
 
 
 @router.get("/v1/salary/{salary_id}")
