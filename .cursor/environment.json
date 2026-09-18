@@ -1,0 +1,21 @@
+{
+  "name": "dmk-logistic",
+  "user": "ubuntu",
+  "install": "bash .cursor/install.sh",
+  "start": "bash .cursor/start.sh",
+  "terminals": [
+    {
+      "name": "api",
+      "command": "source .cursor/env.sh && exec uvicorn api.api_server:app --host 0.0.0.0 --port 8000"
+    },
+    {
+      "name": "web",
+      "command": "source .cursor/env.sh && cd web && exec npm run dev -- --host 0.0.0.0 --port 5173"
+    },
+    {
+      "name": "nginx",
+      "command": "exec nginx -c /workspace/.cursor/nginx.dev.conf"
+    }
+  ],
+  "ports": [8080, 8000, 5173]
+}
