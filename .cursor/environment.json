@@ -10,12 +10,12 @@
     },
     {
       "name": "web",
-      "command": "source .cursor/env.sh && cd web && exec npm run dev -- --host 0.0.0.0 --port 5173"
+      "command": "source .cursor/env.sh && cd web && exec npx vite build --watch"
     },
     {
       "name": "nginx",
       "command": "exec nginx -c /workspace/.cursor/nginx.dev.conf"
     }
   ],
-  "ports": [8080, 8000, 5173]
+  "ports": [8080, 8000]
 }
