@@ -1,3 +1,4 @@
+import { plannedDateDisplay, plannedTimeDisplay } from "./plannedTime";
 import type { PointStatus } from "./types";
 
 const STATUS_CHAIN: PointStatus[] = ["new", "process", "registration", "load", "docs"];
@@ -116,13 +117,18 @@ export function formatPointSchedule(
   time?: string | null
 ): string {
   const kind = pointTypeLabel(type);
-  const when = [date, time]
-    .map((value) => (value || "").trim())
-    .filter(Boolean)
-    .join(" ");
+  const when = [plannedDateDisplay(date, time), plannedTimeDisplay(date, time)].filter(Boolean).join(" ");
   if (kind && when) {
     return `${kind}: ${when}`;
   }
   return when || kind;
+}
+
+export function formatListStatusWithFact(statusLabelText: string, factTime?: string | null): string {
+  const fact = (factTime || "").trim();
+  if (!statusLabelText) {
+    return fact;
+  }
+  return fact ? `${statusLabelText} · ${fact}` : statusLabelText;
 }
 

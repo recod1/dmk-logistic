@@ -190,6 +190,7 @@ export interface AdminRouteCreatePayload {
   route_id: string;
   driver_fio: string;
   driver_user_id?: number | null;
+  created_by_user_id?: number | null;
   number_auto?: string;
   temperature?: string;
   dispatcher_contacts?: string;
@@ -220,6 +221,7 @@ export interface AdminRoute {
   active_point_type?: string | null;
   active_point_date?: string | null;
   active_point_time?: string | null;
+  active_point_fact_time?: string | null;
   points: Array<
     {
       id: number;
@@ -328,5 +330,6 @@ export interface DriverRouteListItem {
   active_point_type?: string | null;
   active_point_date?: string | null;
   active_point_time?: string | null;
+  active_point_fact_time?: string | null;
 }
 

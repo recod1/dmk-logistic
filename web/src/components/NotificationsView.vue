@@ -46,6 +46,22 @@ function onNotificationCardClick(item: NotificationDto): void {
   emit("openFromNotification", item);
 }
 
+function chatKindLabel(item: NotificationDto): string {
+  if (item.event_type !== "chat_message") {
+    return "";
+  }
+  const p = item.payload && typeof item.payload === "object" && !Array.isArray(item.payload)
+    ? (item.payload as Record<string, unknown>)
+    : null;
+  if (payloadNumber(p, "room_id") != null) {
+    return "чат личный";
+  }
+  if (item.route_id || (typeof p?.route_id === "string" && p.route_id.trim())) {
+    return "чат рейса";
+  }
+  return "";
+}
+
 function formatExtra(item: NotificationDto): string {
   const parts: string[] = [];
   const driver = (item.driver_full_name || "").trim();
@@ -66,17 +82,21 @@ function formatExtra(item: NotificationDto): string {
 
 <template>
   <section class="notifications-wrap">
-    <div class="head-row">
-      <h1>Уведомления <span v-if="typeof unreadCount === 'number'" class="counter">({{ unreadCount }})</span></h1>
-      <div class="head-actions">
-        <button :disabled="loading" @click="emit('refresh')">Обновить</button>
-        <button v-if="canPush && !pushEnabled" :disabled="loading" @click="emit('enablePush')">Включить push</button>
-        <button v-if="canPush && pushEnabled" :disabled="loading" @click="emit('disablePush')">Выключить push</button>
-        <button :disabled="loading || !items.some((item) => !item.is_read)" @click="emit('markAllRead')">Прочитать всё</button>
+    <div class="head-sticky">
+      <div class="head-row">
+        <h2 class="page-heading">
+          Уведомления <span v-if="typeof unreadCount === 'number'" class="counter">({{ unreadCount }})</span>
+        </h2>
+        <div class="head-actions">
+          <button :disabled="loading" @click="emit('refresh')">Обновить</button>
+          <button v-if="canPush && !pushEnabled" :disabled="loading" @click="emit('enablePush')">Включить push</button>
+          <button v-if="canPush && pushEnabled" :disabled="loading" @click="emit('disablePush')">Выключить push</button>
+          <button :disabled="loading || !items.some((item) => !item.is_read)" @click="emit('markAllRead')">Прочитать всё</button>
+        </div>
       </div>
+      <p v-if="pushHint" class="hint">{{ pushHint }}</p>
     </div>
 
-    <p v-if="pushHint" class="hint">{{ pushHint }}</p>
     <p v-if="error" class="error">{{ error }}</p>
 
     <article v-if="!items.length && !loading" class="card empty-card">
@@ -93,6 +113,7 @@ function formatExtra(item: NotificationDto): string {
       >
         <div class="row-top">
           <strong>{{ item.message }}</strong>
+          <span v-if="chatKindLabel(item)" class="chat-kind">{{ chatKindLabel(item) }}</span>
         </div>
         <p v-if="formatExtra(item)" class="extra">{{ formatExtra(item) }}</p>
         <div v-if="!item.is_read" class="meta">
@@ -111,24 +132,52 @@ function formatExtra(item: NotificationDto): string {
   max-width: 720px;
   margin: 0 auto;
 }
+.head-sticky {
+  position: sticky;
+  top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+  z-index: 20;
+  margin: 0 -0.2rem;
+  padding: 0.35rem 0.2rem 0.45rem;
+  background: rgba(3, 7, 18, 0.94);
+  backdrop-filter: blur(12px);
+}
 .head-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.5rem;
 }
-.head-row h1 {
+.page-heading {
   margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 .head-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.45rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  min-width: 0;
 }
 .head-actions button {
-  min-height: 40px;
+  min-height: 36px;
   border-radius: 10px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+.chat-kind {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 0.12rem 0.45rem;
+  background: rgba(56, 189, 248, 0.16);
+  color: #7dd3fc;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 .list {
   display: grid;

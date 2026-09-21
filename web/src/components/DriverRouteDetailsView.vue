@@ -10,6 +10,7 @@ import {
   routeStatusLabel,
   statusLabel
 } from "../status";
+import { plannedScheduleDisplay } from "../plannedTime";
 import type { RouteDto } from "../types";
 
 const props = defineProps<{
@@ -200,7 +201,7 @@ function showRevert(pointId: number): boolean {
             <span v-else>—</span>
           </span>
         </div>
-        <div class="kv">
+        <div class="kv kv-contacts">
           <span class="k">Контакты логистов</span>
           <span class="v">
             <span v-if="logisticsContacts.length" class="contacts">
@@ -238,7 +239,7 @@ function showRevert(pointId: number): boolean {
             <p v-if="point.place_point" class="addr">
               <MapsAddressLink :address="point.place_point" />
             </p>
-            <small>{{ point.date_point }} {{ point.point_time || "" }}</small>
+            <small>{{ plannedScheduleDisplay(point.date_point, point.point_time) }}</small>
             <div class="stage-scroll">
               <table class="stage-table">
                 <thead>
@@ -514,11 +515,35 @@ small {
   font: inherit;
   text-align: left;
 }
+.kv-contacts {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.45rem;
+  grid-template-columns: unset;
+}
+.kv-contacts .k {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding-top: 0;
+}
+.kv-contacts :deep(.v),
+.kv-contacts .v {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-wrap: normal;
+  word-break: keep-all;
+  -webkit-overflow-scrolling: touch;
+}
 .contacts {
   display: inline-flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  flex-direction: column;
+  align-items: flex-start;
   gap: 0.35rem;
   margin-right: 0.45rem;
+  max-width: 100%;
 }
 .tel {
   border: 1px solid var(--border-strong);
@@ -529,9 +554,18 @@ small {
 }
 .tel-contact {
   display: inline-flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 0.45rem;
+  gap: 0.4rem;
   color: #d1fae5;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-size: clamp(0.72rem, 3.5vw, 0.85rem);
+}
+.tel-name,
+.tel-phone {
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 .tel-name {
   color: #86efac;

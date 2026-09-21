@@ -85,6 +85,7 @@ import {
   prefetchDriverAssignedRoutes,
   listNotifications,
   listRouteDrivers,
+  listRouteLogistics,
   login as loginRequest,
   markAllNotificationsRead,
   markNotificationRead,
@@ -201,6 +202,7 @@ const usersError = ref("");
 const adminRoutes = ref<AdminRoute[]>([]);
 const selectedAdminRoute = ref<AdminRoute | null>(null);
 const routeDrivers = ref<DriverOption[]>([]);
+const routeLogistics = ref<DriverOption[]>([]);
 const routesLoading = ref(false);
 const routesError = ref("");
 const routeFilters = ref<RouteFilters>({ status: "process" });
@@ -361,6 +363,7 @@ const accountantDriverChatRoomsDisplay = computed(() => {
 });
 
 const hasUnreadGenericChats = computed(() => {
+  if (Object.values(roomUnreadBump.value).some((count) => Number(count) > 0)) return true;
   if (chatsRoomsForDisplay.value.some((r) => (r.unread_count ?? 0) > 0)) return true;
   if (logisticDriverChatRoomsDisplay.value.some((row) => (row.room.unread_count ?? 0) > 0)) return true;
   if (accountantDriverChatRoomsDisplay.value.some((row) => (row.room.unread_count ?? 0) > 0)) return true;
@@ -368,6 +371,7 @@ const hasUnreadGenericChats = computed(() => {
 });
 
 const hasUnreadRouteChats = computed(() => Object.values(chatUnreadByRoute.value).some((count) => Number(count) > 0));
+const hasUnreadChatsNav = computed(() => hasUnreadGenericChats.value || hasUnreadRouteChats.value);
 
 const salaryChatItemsForChatView = computed(() => {
   const sid = salaryChatSalaryId.value;
@@ -1203,6 +1207,10 @@ function handleIncomingNotification(
     if (!item.is_read) {
       unreadNotificationsCount.value += 1;
     }
+  }
+
+  if (syncDriverState && item.event_type === "route_updated" && isDriver.value) {
+    void refreshDriverData();
   }
 
   if (syncDriverState && item.event_type === "route_deleted" && isDriver.value) {
@@ -2101,6 +2109,7 @@ async function refreshRouteDrivers(): Promise<void> {
   }
   try {
     routeDrivers.value = await listRouteDrivers(authToken.value);
+    routeLogistics.value = await listRouteLogistics(authToken.value);
   } catch (error) {
     routesError.value = `Ошибка загрузки водителей: ${(error as Error).message}`;
   }
@@ -2205,6 +2214,7 @@ async function doUpdateAdminRoute(
     dispatcher_contacts?: string;
     registration_number?: string;
     trailer_number?: string;
+    created_by_user_id?: number;
     points?: AdminRouteCreatePayload["points"];
   }
 ): Promise<void> {
@@ -2269,14 +2279,18 @@ function openAdminRouteList(): void {
   goBack();
 }
 
-async function doAssignAdminRoute(routeId: string, driverUserId: number): Promise<void> {
+async function doAssignAdminRoute(
+  routeId: string,
+  driverUserId: number,
+  extras?: { number_auto?: string; trailer_number?: string }
+): Promise<void> {
   if (!authToken.value || !isRouteManager.value) {
     return;
   }
   routesLoading.value = true;
   routesError.value = "";
   try {
-    await assignAdminRouteDriver(authToken.value, routeId, driverUserId);
+    await assignAdminRouteDriver(authToken.value, routeId, driverUserId, extras);
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
     await refreshAdminRoutes(routeFilters.value);
   } catch (error) {
@@ -3947,7 +3961,7 @@ onUnmounted(() => {
           v-if="showHeaderNav"
           :items="headerNavItems"
           :active-id="activeBottomNavId"
-          :chats-unread="hasUnreadGenericChats"
+          :chats-unread="hasUnreadChatsNav"
           :routes-unread="hasUnreadRouteChats"
           @select="selectBottomNav"
         />
@@ -3970,7 +3984,7 @@ onUnmounted(() => {
                 @click="selectProfileSection(item.section)"
               >
                 {{ item.label }}
-                <span v-if="item.section === 'chats' && hasUnreadGenericChats" class="notif-dot menu-dot" />
+                <span v-if="item.section === 'chats' && hasUnreadChatsNav" class="notif-dot menu-dot" />
                 <span
                   v-else-if="(item.section === 'admin_routes' || item.section === 'driver_routes') && hasUnreadRouteChats"
                   class="notif-dot menu-dot success-dot"
@@ -3994,6 +4008,9 @@ onUnmounted(() => {
       <AdminRoutesView
         :routes="adminRoutes"
         :drivers="routeDrivers"
+        :logistics="routeLogistics"
+        :logistics-contacts="logisticsContacts"
+        :current-user-id="authUser?.id ?? 0"
         :loading="routesLoading"
         :error="routesError"
         :unread-by-route="chatUnreadByRoute"
@@ -4009,6 +4026,8 @@ onUnmounted(() => {
       <AdminRouteDetailsView
         :route="selectedAdminRoute"
         :drivers="routeDrivers"
+        :logistics="routeLogistics"
+        :logistics-contacts="logisticsContacts"
         :loading="routesLoading"
         :auth-token="authToken"
         :unread-chat-count="chatUnreadByRoute[selectedAdminRoute.id] ?? 0"
@@ -4246,7 +4265,7 @@ onUnmounted(() => {
       v-if="showBottomNav && !keyboardOpen"
       :items="bottomNavItems"
       :active-id="activeBottomNavId"
-      :chats-unread="hasUnreadGenericChats"
+      :chats-unread="hasUnreadChatsNav"
       :routes-unread="hasUnreadRouteChats"
       @select="selectBottomNav"
     />

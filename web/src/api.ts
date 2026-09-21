@@ -537,6 +537,15 @@ export async function listRouteDrivers(token: string): Promise<DriverOption[]> {
   return data.items;
 }
 
+export async function listRouteLogistics(token: string): Promise<DriverOption[]> {
+  const data = await requestJson<DriversResponse>(`${API_BASE}/v1/admin/routes/logistics`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.items;
+}
+
 export async function listAdminRoutes(
   token: string,
   params?: {
@@ -603,13 +612,22 @@ export async function createAdminRouteFromOnec(
   });
 }
 
-export async function assignAdminRouteDriver(token: string, routeId: string, driverUserId: number): Promise<AdminRoute> {
+export async function assignAdminRouteDriver(
+  token: string,
+  routeId: string,
+  driverUserId: number,
+  extras?: { number_auto?: string; trailer_number?: string }
+): Promise<AdminRoute> {
   return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${encodeRouteId(routeId)}/assign`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`
     },
-    body: JSON.stringify({ driver_user_id: driverUserId })
+    body: JSON.stringify({
+      driver_user_id: driverUserId,
+      ...(extras?.number_auto != null ? { number_auto: extras.number_auto } : {}),
+      ...(extras?.trailer_number != null ? { trailer_number: extras.trailer_number } : {})
+    })
   });
 }
 
@@ -644,6 +662,7 @@ export async function updateAdminRoute(
     dispatcher_contacts?: string;
     registration_number?: string;
     trailer_number?: string;
+    created_by_user_id?: number;
     points?: AdminRouteCreatePayload["points"];
   }
 ): Promise<AdminRoute> {

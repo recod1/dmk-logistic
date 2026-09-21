@@ -3,6 +3,7 @@ import { computed } from "vue";
 
 import MapsAddressLink from "./MapsAddressLink.vue";
 import { isPointDone, routeStatusLabel, statusLabel } from "../status";
+import { plannedScheduleDisplay } from "../plannedTime";
 import type { DriverRouteListItem, RouteDto } from "../types";
 
 const props = defineProps<{
@@ -75,7 +76,7 @@ const canAdvance = computed(() => {
           <MapsAddressLink :address="activePoint.place_point" />
         </span>
         <span v-else class="plan">Адрес не указан</span>
-        <span class="plan">План: {{ activePoint.date_point || "—" }} {{ activePoint.point_time || "" }}</span>
+        <span class="plan">План: {{ plannedScheduleDisplay(activePoint.date_point, activePoint.point_time) || "—" }}</span>
       </div>
 
       <button v-if="activeRoute.status === 'new'" class="primary" @click.stop="emit('acceptActiveRoute')">Принять рейс</button>

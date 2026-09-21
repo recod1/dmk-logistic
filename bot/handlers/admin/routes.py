@@ -6,6 +6,7 @@ from datetime import datetime
 from urllib.parse import quote
 from aiogram import Router, types, F
 from utils.telegram_helpers import copy_link_fio, copy_link_text, format_point_time_display
+from utils.onec_datetime import split_onec_wall_datetime
 from aiogram.fsm.context import FSMContext
 from aiogram.filters import StateFilter
 from aiogram.utils.keyboard import InlineKeyboardBuilder
@@ -952,6 +953,9 @@ async def _onec_create_route_and_points(
                     idx += 1
                     continue
                     
+                date_s, time_s = split_onec_wall_datetime(date_time)
+                store_date = date_s or date_time
+                store_time = time_s
                 last_point_id = route_repository.get_last_point_id()
                 point_id = last_point_id + 1 if last_point_id else 1
                 points = route.points
@@ -961,8 +965,9 @@ async def _onec_create_route_and_points(
                     point_id=point_id,
                     route_id=route.id,
                     type_point=type_point,
-                    date_point=date_time,
+                    date_point=store_date,
                     place_point=place,
+                    point_time=store_time,
                 )
                 route = route_repository.get_by_id_str(route.id) or route
                 created_points += 1

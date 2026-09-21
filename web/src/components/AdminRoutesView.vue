@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref } from "vue";
 
-import { formatPointSchedule, listPointStatusLabel } from "../status";
+import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel } from "../status";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, RouteWorkflowStatus } from "../types";
 
 type RouteSearchFilters = {
@@ -22,6 +22,9 @@ type PointForm = {
 const props = defineProps<{
   routes: AdminRoute[];
   drivers: DriverOption[];
+  logistics?: DriverOption[];
+  logisticsContacts?: Array<{ name: string; phone: string }>;
+  currentUserId?: number;
   loading: boolean;
   error: string;
   unreadByRoute?: Record<string, number>;
@@ -35,6 +38,7 @@ const emit = defineEmits<{
       route_id: string;
       driver_fio: string;
       driver_user_id?: number | null;
+      created_by_user_id?: number | null;
       number_auto?: string;
       temperature?: string;
       dispatcher_contacts?: string;
@@ -125,7 +129,7 @@ function currentListPoint(route: AdminRoute): {
 function routeListStatus(route: AdminRoute): string {
   if (route.status === "process") {
     const stage = listPointStatusLabel(currentListPoint(route)?.status);
-    return stage || STATUS_LABELS.process;
+    return formatListStatusWithFact(stage || STATUS_LABELS.process, route.active_point_fact_time);
   }
   return STATUS_LABELS[route.status] ?? route.status;
 }
@@ -170,6 +174,7 @@ function upperOnly(value: string): string {
 const createForm = reactive({
   route_id: "",
   driver_user_id: 0,
+  created_by_user_id: 0,
   number_auto: "",
   temperature: "",
   dispatcher_contacts: "",
@@ -282,16 +287,25 @@ function scrollCreateCardIntoView(): void {
   });
 }
 
+function defaultContactsText(): string {
+  const items = (props.logisticsContacts ?? []).filter((item) => (item.name || item.phone || "").trim());
+  if (!items.length) {
+    return "";
+  }
+  return items.map((item) => `${(item.name || "").trim()} ${(item.phone || "").trim()}`.trim()).join("; ");
+}
+
 function openCreate(): void {
   showCreate.value = true;
   showCreateOnec.value = false;
   createForm.route_id = "";
   createForm.driver_user_id = 0;
+  createForm.created_by_user_id = props.currentUserId || 0;
   createDriverQuery.value = "";
   createDriverOpen.value = false;
   createForm.number_auto = "";
   createForm.temperature = "";
-  createForm.dispatcher_contacts = "";
+  createForm.dispatcher_contacts = defaultContactsText();
   createForm.registration_number = "";
   createForm.trailer_number = "";
   createForm.points = [];
@@ -363,6 +377,7 @@ function submitCreate(): void {
     route_id: createForm.route_id.trim(),
     driver_fio: driverFio,
     driver_user_id: createForm.driver_user_id,
+    created_by_user_id: createForm.created_by_user_id || undefined,
     number_auto: createForm.number_auto.trim(),
     temperature: createForm.temperature.trim(),
     dispatcher_contacts: createForm.dispatcher_contacts.trim(),
@@ -601,6 +616,15 @@ onMounted(() => {
           </div>
         </label>
         <label>
+          Логист
+          <select v-model.number="createForm.created_by_user_id">
+            <option :value="0">Не выбран</option>
+            <option v-for="person in logistics || []" :key="person.id" :value="person.id">
+              {{ person.full_name || person.login }}
+            </option>
+          </select>
+        </label>
+        <label>
           Номер авто
           <input
             v-model="createForm.number_auto"
@@ -654,11 +678,11 @@ onMounted(() => {
           </label>
           <label>
             Дата
-            <input v-model="point.date_point" type="date" />
+            <input v-model="point.date_point" type="date" lang="ru" />
           </label>
           <label>
             Время
-            <input v-model="point.point_time" type="time" step="60" />
+            <input v-model="point.point_time" type="time" step="60" lang="ru" />
           </label>
         </div>
       </article>

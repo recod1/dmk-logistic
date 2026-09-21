@@ -13,14 +13,17 @@ from mobile_api.auth import get_current_route_manager
 from mobile_api.db import get_db
 from mobile_api.models import Notification, Point, PointDocumentImage, Route, RouteEvent, RoutePoint, User
 from mobile_api.route_notification_logic import (
+    notify_driver_route_updated,
     notify_route_assigned,
     notify_route_cancelled,
     notify_route_completed,
     notify_route_deleted,
+    point_fact_datetime,
 )
 from mobile_api.onec_routes import parse_onec_message
 from mobile_api.roles import RoleCode, role_label_ru
 from mobile_api.time_formatting import format_dt_for_app
+from utils.onec_datetime import planned_wall_fields, split_onec_wall_datetime, normalize_planned_time
 
 
 router = APIRouter(prefix="/v1/admin/routes", tags=["admin-routes"])
@@ -161,6 +164,7 @@ class AdminRouteCreatePayload(BaseModel):
     route_id: str = Field(min_length=1, max_length=64)
     driver_fio: str = Field(default="", max_length=255)
     driver_user_id: int | None = None
+    created_by_user_id: int | None = None
     number_auto: str = ""
     temperature: str = ""
     dispatcher_contacts: str = ""
@@ -178,6 +182,8 @@ class AdminRouteCreateFromOnecPayload(BaseModel):
 
 class AssignDriverPayload(BaseModel):
     driver_user_id: int
+    number_auto: str | None = Field(default=None, max_length=64)
+    trailer_number: str | None = Field(default=None, max_length=64)
 
 
 class UpdateRouteStatusPayload(BaseModel):
@@ -189,6 +195,7 @@ class UpdateAdminRoutePayload(BaseModel):
     dispatcher_contacts: str | None = Field(default=None, max_length=2000)
     registration_number: str | None = Field(default=None, max_length=64)
     trailer_number: str | None = Field(default=None, max_length=64)
+    created_by_user_id: int | None = None
     points: list[AdminRoutePointCreate] | None = Field(default=None, max_items=200)
 
 
@@ -308,15 +315,16 @@ def _point_out(db: Session, point: Point, order_index: int) -> dict:
         .order_by(PointDocumentImage.id.asc())
     ).all()
     docs_images = [{"id": row.id, "content_type": row.content_type} for row in docs_rows]
+    date_point, point_time = planned_wall_fields(point.date_point, point.point_time)
     return {
         "id": point.id,
         "order_index": order_index,
         "type_point": point.type_point,
         "place_point": point.place_point,
-        "date_point": point.date_point,
+        "date_point": date_point,
         "point_name": point.point_name,
         "point_contacts": point.point_contacts,
-        "point_time": point.point_time,
+        "point_time": point_time,
         "point_note": point.point_note,
         "status": point.status,
         "time_accepted": _format_datetime_ru(point.time_accepted),
@@ -369,6 +377,10 @@ def _route_out(
         current_point = _pick_active_point(_route_points(db, route.id))
     place = (current_point.place_point or "").strip() if current_point else ""
     name = (current_point.point_name or "").strip() if current_point else ""
+    active_date, active_time = planned_wall_fields(
+        current_point.date_point if current_point else "",
+        current_point.point_time if current_point else "",
+    ) if current_point else ("", "")
     return {
         "id": route.id,
         "status": route.status,
@@ -387,8 +399,11 @@ def _route_out(
         "active_point_place": place or None,
         "active_point_name": name or None,
         "active_point_type": current_point.type_point if current_point else None,
-        "active_point_date": ((current_point.date_point or "").strip() or None) if current_point else None,
-        "active_point_time": ((current_point.point_time or "").strip() or None) if current_point else None,
+        "active_point_date": (active_date or None) if current_point else None,
+        "active_point_time": (active_time or None) if current_point else None,
+        "active_point_fact_time": (
+            _format_datetime_ru(point_fact_datetime(current_point)) if current_point else None
+        ),
         "points": [_point_out(db, point, idx) for idx, point in enumerate(points)] if include_points else None,
     }
 
@@ -442,19 +457,50 @@ def _try_find_driver_by_fio(db: Session, fio: str) -> User | None:
     return None
 
 
+def _normalize_point_plan(date_raw: str, time_raw: str) -> tuple[str, str]:
+    return planned_wall_fields(date_raw, time_raw)
+
+
 def _point_meta_from_payload(point_in: AdminRoutePointCreate) -> tuple[str, str, str, str, str, str, str]:
     type_point = (point_in.type_point or "").strip().lower()
     if type_point not in {"loading", "unloading"}:
         type_point = "loading"
+    date_point, point_time = _normalize_point_plan(point_in.date_point or "", point_in.point_time or "")
     return (
         type_point,
         (point_in.place_point or "").strip(),
-        (point_in.date_point or "").strip(),
+        date_point,
         (point_in.point_name or "").strip(),
         (point_in.point_contacts or "").strip(),
-        (point_in.point_time or "").strip(),
+        point_time,
         (point_in.point_note or "").strip(),
     )
+
+
+LOGISTIC_SELECT_ROLES = {
+    RoleCode.LOGISTIC.value,
+    RoleCode.ADMIN.value,
+    RoleCode.SUPERADMIN.value,
+}
+
+
+def _ensure_logistic(db: Session, user_id: int) -> User:
+    user = db.get(User, user_id)
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Логист не найден")
+    if user.role_code not in LOGISTIC_SELECT_ROLES:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Пользователь не может быть логистом рейса")
+    return user
+
+
+def _changed_text(label: str, old: str | None, new: str | None) -> str | None:
+    prev = (old or "").strip()
+    nxt = (new or "").strip()
+    if prev == nxt:
+        return None
+    if prev and nxt:
+        return f"{label}: {prev} → {nxt}"
+    return f"{label}: {nxt or '—'}"
 
 
 def _apply_points_replace(
@@ -563,6 +609,19 @@ def list_drivers(
     return {"items": [_driver_out(driver) for driver in drivers]}
 
 
+@router.get("/logistics")
+def list_logistics(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_route_manager),
+) -> dict:
+    rows = db.scalars(
+        select(User)
+        .where(User.role_code.in_(list(LOGISTIC_SELECT_ROLES)), User.is_active.is_(True))
+        .order_by(User.full_name.asc(), User.login.asc(), User.id.asc())
+    ).all()
+    return {"items": [_driver_out(user) for user in rows]}
+
+
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_route(
     payload: AdminRouteCreatePayload,
@@ -589,11 +648,15 @@ def create_route(
             )
     legacy_driver_tg_id = int(driver.legacy_tg_id) if (driver.legacy_tg_id or "").isdigit() else None
 
+    creator = current_user
+    if payload.created_by_user_id:
+        creator = _ensure_logistic(db, payload.created_by_user_id)
+
     route = Route(
         id=route_id,
         legacy_driver_tg_id=legacy_driver_tg_id,
         assigned_user_id=driver.id,
-        created_by_user_id=current_user.id,
+        created_by_user_id=creator.id,
         status="new",
         number_auto=(payload.number_auto or "").strip(),
         temperature=(payload.temperature or "").strip(),
@@ -667,7 +730,7 @@ def create_route_from_onec(
                 date_point=p.date_point,
                 point_name="",
                 point_contacts="",
-                point_time="",
+                point_time=p.point_time,
                 point_note="",
                 order_index=i,
             )
@@ -741,19 +804,29 @@ def update_route_point(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Point not found")
 
     data = payload.model_dump(exclude_unset=True)
+    before = {
+        "type_point": point.type_point,
+        "place_point": point.place_point,
+        "date_point": point.date_point,
+        "point_time": point.point_time,
+        "status": point.status,
+    }
 
     if "type_point" in data and payload.type_point is not None:
         _apply_str_edit(point, "type_point", _normalize_type_point(payload.type_point), current_user)
     if "place_point" in data and payload.place_point is not None:
         _apply_str_edit(point, "place_point", payload.place_point.strip(), current_user)
     if "date_point" in data and payload.date_point is not None:
-        _apply_str_edit(point, "date_point", payload.date_point.strip(), current_user)
+        date_s, time_from_date = split_onec_wall_datetime(payload.date_point.strip())
+        _apply_str_edit(point, "date_point", date_s or payload.date_point.strip(), current_user)
+        if time_from_date and "point_time" not in data:
+            _apply_str_edit(point, "point_time", time_from_date, current_user)
     if "point_name" in data and payload.point_name is not None:
         _apply_str_edit(point, "point_name", payload.point_name.strip(), current_user)
     if "point_contacts" in data and payload.point_contacts is not None:
         _apply_str_edit(point, "point_contacts", payload.point_contacts.strip(), current_user)
     if "point_time" in data and payload.point_time is not None:
-        _apply_str_edit(point, "point_time", payload.point_time.strip(), current_user)
+        _apply_str_edit(point, "point_time", normalize_planned_time(payload.point_time.strip()) or payload.point_time.strip(), current_user)
     if "point_note" in data and payload.point_note is not None:
         _apply_str_edit(point, "point_note", payload.point_note.strip(), current_user)
 
@@ -815,14 +888,26 @@ def update_route_point(
         point.status = original_status
 
     db.add(point)
+    route_id = _route_id_by_point_id(db, point.id)
+    route = db.get(Route, route_id) if route_id else None
+    if route is not None and "status" in data and payload.status is not None:
+        _sync_route_status_from_points(db, route)
+    changes: list[str] = []
+    kind = "Загрузка" if (point.type_point or "") == "loading" else "Выгрузка"
+    prefix = f"Точка {kind}"
+    for key, label in (
+        ("place_point", "адрес"),
+        ("date_point", "дата"),
+        ("point_time", "время"),
+        ("status", "статус"),
+    ):
+        item = _changed_text(f"{prefix} · {label}", before.get(key), getattr(point, key, None))
+        if item:
+            changes.append(item)
+    if route is not None:
+        notify_driver_route_updated(db, route=route, actor_user=current_user, changes=changes)
     db.commit()
     db.refresh(point)
-    route_id = _route_id_by_point_id(db, point.id)
-    if route_id:
-        route = db.get(Route, route_id)
-        if route is not None and "status" in data and payload.status is not None:
-            _sync_route_status_from_points(db, route)
-            db.commit()
     order_index = _point_order_index(db, route_id, point.id) if route_id else 0
     return _point_out(db, point, order_index)
 
@@ -877,17 +962,32 @@ def assign_route_driver(
     if route is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
     driver = _ensure_driver(db, payload.driver_user_id)
-    if route.assigned_user_id != driver.id:
+    driver_changed = route.assigned_user_id != driver.id
+    vehicle_changes: list[str] = []
+    if payload.number_auto is not None:
+        item = _changed_text("ТС", route.number_auto, payload.number_auto)
+        route.number_auto = payload.number_auto.strip().upper()
+        if item:
+            vehicle_changes.append(item)
+    if payload.trailer_number is not None:
+        item = _changed_text("Прицеп", route.trailer_number, payload.trailer_number)
+        route.trailer_number = payload.trailer_number.strip().upper()
+        if item:
+            vehicle_changes.append(item)
+    if driver_changed:
         route.driver_received_at = None
     route.assigned_user_id = driver.id
     route.legacy_driver_tg_id = int(driver.legacy_tg_id) if (driver.legacy_tg_id or "").isdigit() else None
     db.add(route)
-    notify_route_assigned(
-        db,
-        route=route,
-        assigned_user=driver,
-        actor_user=current_user,
-    )
+    if driver_changed:
+        notify_route_assigned(
+            db,
+            route=route,
+            assigned_user=driver,
+            actor_user=current_user,
+        )
+    elif vehicle_changes:
+        notify_driver_route_updated(db, route=route, actor_user=current_user, changes=vehicle_changes)
     db.commit()
     db.refresh(route)
     return _route_out(db, route, include_points=True)
@@ -1008,21 +1108,47 @@ def update_route(
     if route is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
 
+    changes: list[str] = []
     if payload.number_auto is not None:
+        item = _changed_text("ТС", route.number_auto, payload.number_auto)
         route.number_auto = payload.number_auto.strip()
+        if item:
+            changes.append(item)
     if payload.temperature is not None:
+        item = _changed_text("Температура", route.temperature, payload.temperature)
         route.temperature = payload.temperature.strip()
+        if item:
+            changes.append(item)
     if payload.dispatcher_contacts is not None:
+        item = _changed_text("Контакты диспетчера", route.dispatcher_contacts, payload.dispatcher_contacts)
         route.dispatcher_contacts = payload.dispatcher_contacts.strip()
+        if item:
+            changes.append(item)
     if payload.registration_number is not None:
+        item = _changed_text("Рег. номер", route.registration_number, payload.registration_number)
         route.registration_number = payload.registration_number.strip()
+        if item:
+            changes.append(item)
     if payload.trailer_number is not None:
+        item = _changed_text("Прицеп", route.trailer_number, payload.trailer_number)
         route.trailer_number = payload.trailer_number.strip()
+        if item:
+            changes.append(item)
+    if payload.created_by_user_id:
+        creator = _ensure_logistic(db, payload.created_by_user_id)
+        if route.created_by_user_id != creator.id:
+            old_creator = db.get(User, route.created_by_user_id) if route.created_by_user_id else None
+            old_name = (old_creator.full_name or old_creator.login) if old_creator else "—"
+            new_name = creator.full_name or creator.login
+            route.created_by_user_id = creator.id
+            changes.append(f"Логист: {old_name} → {new_name}")
     if payload.points is not None:
         _apply_points_replace(db, route, payload.points, preserve_progress=True)
         _sync_route_status_from_points(db, route)
+        changes.append("Точки рейса")
 
     db.add(route)
+    notify_driver_route_updated(db, route=route, actor_user=current_user, changes=changes)
     db.commit()
     db.refresh(route)
     return _route_out(db, route, include_points=True)

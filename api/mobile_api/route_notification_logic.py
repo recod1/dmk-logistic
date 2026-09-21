@@ -202,6 +202,42 @@ def build_point_status_reverted_notifications(
     ]
 
 
+def point_fact_datetime(point: Point, status_value: str | None = None):
+    return _point_event_time(point, status_value or (point.status or ""))
+
+
+def notify_driver_route_updated(
+    db: Session,
+    *,
+    route: Route,
+    actor_user: User,
+    changes: list[str],
+) -> None:
+    assigned_id = route.assigned_user_id
+    if not assigned_id or not changes:
+        return
+    if actor_user.id == assigned_id:
+        return
+    detail = "; ".join(item for item in changes if item)
+    if not detail:
+        return
+    persist_notifications(
+        db,
+        [
+            {
+                "user_ids": [assigned_id],
+                "skip_user_ids": [actor_user.id],
+                "event_type": "route_updated",
+                "title": "Рейс изменён",
+                "message": f"Рейс {route.id} изменён: {detail}",
+                "route_id": route.id,
+                "point_id": None,
+                "payload": {"route_id": route.id, "changes": changes},
+            }
+        ],
+    )
+
+
 def persist_notifications(db: Session, notifications: list[dict]) -> None:
     for item in notifications:
         skip_raw = item.get("skip_user_ids") or []

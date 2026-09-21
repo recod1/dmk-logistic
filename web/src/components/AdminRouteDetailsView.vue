@@ -5,6 +5,7 @@ import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
 import PointDocLinks from "./PointDocLinks.vue";
 import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
+import { plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
 import { listPointStatusLabel } from "../status";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, ManualEditMeta, RouteWorkflowStatus } from "../types";
 
@@ -48,6 +49,8 @@ type PointForm = {
 const props = defineProps<{
   route: AdminRoute;
   drivers: DriverOption[];
+  logistics?: DriverOption[];
+  logisticsContacts?: Array<{ name: string; phone: string }>;
   loading: boolean;
   authToken: string;
   unreadChatCount?: number;
@@ -56,7 +59,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   back: [];
-  assignDriver: [routeId: string, driverUserId: number];
+  assignDriver: [routeId: string, driverUserId: number, extras?: { number_auto?: string; trailer_number?: string }];
   cancelRoute: [routeId: string];
   deleteRoute: [routeId: string];
   updateRoute: [
@@ -67,6 +70,7 @@ const emit = defineEmits<{
       dispatcher_contacts?: string;
       registration_number?: string;
       trailer_number?: string;
+      created_by_user_id?: number;
       points?: AdminRoutePointPayload[];
     }
   ];
@@ -77,6 +81,8 @@ const emit = defineEmits<{
 const showReassign = ref(false);
 const showEdit = ref(false);
 const reassignDriverId = ref(0);
+const reassignNumberAuto = ref("");
+const reassignTrailerNumber = ref("");
 const editingPointId = ref<number | null>(null);
 
 const editForm = reactive({
@@ -85,8 +91,23 @@ const editForm = reactive({
   dispatcher_contacts: "",
   registration_number: "",
   trailer_number: "",
+  created_by_user_id: 0,
   points: [] as PointForm[]
 });
+
+function formatPlannedLine(date?: string | null, time?: string | null): string {
+  const dateText = plannedDateDisplay(date, time) || "—";
+  const timeText = plannedTimeDisplay(date, time) || "—";
+  return `${dateText} · ${timeText}`;
+}
+
+function defaultContactsText(): string {
+  const items = (props.logisticsContacts ?? []).filter((item) => (item.name || item.phone || "").trim());
+  if (!items.length) {
+    return "";
+  }
+  return items.map((item) => `${(item.name || "").trim()} ${(item.phone || "").trim()}`.trim()).join("; ");
+}
 
 function statusLabel(status: RouteWorkflowStatus): string {
   const labels: Record<RouteWorkflowStatus, string> = {
@@ -228,11 +249,11 @@ function changedText(form: string, original?: string | null): string | undefined
 
 function changedDate(form: string, original?: string | null): string | undefined {
   const next = form.trim();
-  const prev = (original || "").trim();
-  if (next === prev) {
+  const prevInput = plannedDateInputValue(original, null);
+  if (next === prevInput) {
     return undefined;
   }
-  if (!next && prev && !/^\d{4}-\d{2}-\d{2}$/.test(prev)) {
+  if (!next && original && !/^\d{4}-\d{2}-\d{2}$/.test((original || "").trim())) {
     return undefined;
   }
   return next;
@@ -287,8 +308,8 @@ function fillPointStageEdit(point: AdminRoutePoint): void {
   Object.assign(pointEdit, emptyPointStageEdit(), {
     type_point: point.type_point || "loading",
     place_point: point.place_point || "",
-    date_point: point.date_point || "",
-    point_time: point.point_time || "",
+    date_point: plannedDateInputValue(point.date_point, point.point_time),
+    point_time: plannedTimeInputValue(point.date_point, point.point_time),
     point_name: point.point_name || "",
     point_contacts: point.point_contacts || "",
     point_note: point.point_note || "",
@@ -328,7 +349,7 @@ function submitPointEdit(point: AdminRoutePoint): void {
   const datePoint = changedDate(pointEdit.date_point, point.date_point);
   const pointName = changedText(pointEdit.point_name, point.point_name);
   const pointContacts = changedText(pointEdit.point_contacts, point.point_contacts);
-  const pointTime = changedText(pointEdit.point_time, point.point_time);
+  const pointTime = changedText(pointEdit.point_time, plannedTimeInputValue(point.date_point, point.point_time));
   const pointNote = changedText(pointEdit.point_note, point.point_note);
   const departureTime = changedTimeIso(pointEdit.departure_time, point.departure_time || point.time_accepted);
   const departureOdometer = changedOdometer(pointEdit.departure_odometer, point.departure_odometer);
@@ -400,14 +421,17 @@ watch(
     editForm.dispatcher_contacts = route.dispatcher_contacts || "";
     editForm.registration_number = route.registration_number || "";
     editForm.trailer_number = route.trailer_number || "";
+    editForm.created_by_user_id = route.created_by?.id ?? 0;
     editForm.points = (route.points || []).map((point) => ({
       id: point.id,
       type_point: point.type_point || "loading",
       place_point: point.place_point || "",
-      date_point: point.date_point || "",
-      point_time: point.point_time || ""
+      date_point: plannedDateInputValue(point.date_point, point.point_time),
+      point_time: plannedTimeInputValue(point.date_point, point.point_time)
     }));
     reassignDriverId.value = route.driver?.id ?? 0;
+    reassignNumberAuto.value = route.number_auto || "";
+    reassignTrailerNumber.value = route.trailer_number || "";
     if (editingPointId.value != null) {
       const current = (route.points || []).find((item) => item.id === editingPointId.value);
       if (!current) {
@@ -429,6 +453,9 @@ function closeReassign(): void {
 }
 
 function openEdit(): void {
+  if (!editForm.dispatcher_contacts.trim()) {
+    editForm.dispatcher_contacts = defaultContactsText();
+  }
   showEdit.value = true;
 }
 
@@ -451,6 +478,7 @@ function submitEdit(): void {
     dispatcher_contacts: editForm.dispatcher_contacts.trim(),
     registration_number: editForm.registration_number.trim(),
     trailer_number: editForm.trailer_number.trim(),
+    created_by_user_id: editForm.created_by_user_id || undefined,
     points: toPointPayload(editForm.points).filter((point) => point.place_point && point.date_point)
   });
 }
@@ -459,7 +487,11 @@ function submitReassign(): void {
   if (!canAssign.value) {
     return;
   }
-  emit("assignDriver", props.route.id, reassignDriverId.value);
+  emit("assignDriver", props.route.id, reassignDriverId.value, {
+    number_auto: upperOnly(reassignNumberAuto.value.trim()),
+    trailer_number: upperOnly(reassignTrailerNumber.value.trim())
+  });
+  showReassign.value = false;
 }
 
 function removeRoute(): void {
@@ -487,6 +519,10 @@ function removeRoute(): void {
         <div class="kv">
           <span class="k">Водитель</span>
           <span class="v">{{ route.driver?.full_name || route.driver?.login || "—" }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">Логист</span>
+          <span class="v">{{ route.created_by?.full_name || route.created_by?.login || "—" }}</span>
         </div>
         <div class="kv">
           <span class="k">ТС</span>
@@ -539,6 +575,20 @@ function removeRoute(): void {
               {{ driver.full_name || driver.login }}
             </option>
           </select>
+          <input
+            v-model="reassignNumberAuto"
+            class="upper"
+            placeholder="ТС"
+            autocapitalize="characters"
+            @input="(e) => (reassignNumberAuto = upperOnly((e.target as HTMLInputElement).value))"
+          />
+          <input
+            v-model="reassignTrailerNumber"
+            class="upper"
+            placeholder="Прицеп"
+            autocapitalize="characters"
+            @input="(e) => (reassignTrailerNumber = upperOnly((e.target as HTMLInputElement).value))"
+          />
           <button class="secondary" type="button" :disabled="loading || !canAssign" @click="submitReassign">Сохранить</button>
           <button class="ghost" type="button" @click="closeReassign">Отмена</button>
         </div>
@@ -581,6 +631,15 @@ function removeRoute(): void {
               @input="(e) => (editForm.trailer_number = upperOnly((e.target as HTMLInputElement).value))"
             />
           </label>
+          <label>
+            Логист
+            <select v-model.number="editForm.created_by_user_id">
+              <option :value="0">Не выбран</option>
+              <option v-for="person in logistics || []" :key="person.id" :value="person.id">
+                {{ person.full_name || person.login }}
+              </option>
+            </select>
+          </label>
         </div>
         <div class="actions">
           <button class="secondary" :disabled="loading" @click="submitEdit">Сохранить изменения</button>
@@ -598,7 +657,7 @@ function removeRoute(): void {
             <strong>{{ pointTypeLabel(point.type_point) }}</strong>
             <button class="danger soft" @click="removeEditPoint(idx)">Удалить</button>
           </div>
-          <p class="muted">{{ point.date_point || "—" }} · {{ point.point_time || "—" }}</p>
+          <p class="muted">{{ formatPlannedLine(point.date_point, point.point_time) }}</p>
           <p class="muted">{{ point.place_point || "—" }}</p>
           <div class="point-edit-grid">
             <label>
@@ -610,11 +669,11 @@ function removeRoute(): void {
             </label>
             <label>
               Дата
-              <input v-model="point.date_point" type="date" />
+              <input v-model="point.date_point" type="date" lang="ru" />
             </label>
             <label>
               Время
-              <input v-model="point.point_time" type="time" step="60" />
+              <input v-model="point.point_time" type="time" step="60" lang="ru" />
             </label>
             <label>
               Адрес
@@ -636,7 +695,7 @@ function removeRoute(): void {
             </strong>
             <span class="status-chip">{{ pointStatusLabel(point.status) }}</span>
           </div>
-          <p class="meta-line">{{ point.date_point || "—" }} · {{ point.point_time || "—" }}</p>
+          <p class="meta-line">{{ formatPlannedLine(point.date_point, point.point_time) }}</p>
           <p v-if="point.point_name || point.point_contacts" class="meta-line">
             {{ point.point_name || "—" }}{{ point.point_contacts ? ` · ${point.point_contacts}` : "" }}
           </p>
@@ -669,12 +728,12 @@ function removeRoute(): void {
               </label>
               <label>
                 Дата
-                <input v-model="pointEdit.date_point" type="date" />
+                <input v-model="pointEdit.date_point" type="date" lang="ru" />
                 <small v-if="editHint(point.manual_edits, 'date_point')" class="edit-hint">{{ editHint(point.manual_edits, 'date_point') }}</small>
               </label>
               <label>
                 Время плана
-                <input v-model="pointEdit.point_time" type="time" step="60" />
+                <input v-model="pointEdit.point_time" type="time" step="60" lang="ru" />
                 <small v-if="editHint(point.manual_edits, 'point_time')" class="edit-hint">{{ editHint(point.manual_edits, 'point_time') }}</small>
               </label>
               <label class="full">

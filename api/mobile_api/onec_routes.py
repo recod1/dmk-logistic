@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from utils.onec_datetime import split_onec_wall_datetime
+
 
 @dataclass(frozen=True)
 class OnecPoint:
     type_point: str
     date_point: str
+    point_time: str
     place_point: str
 
 
@@ -120,7 +123,15 @@ def parse_onec_message(raw: str) -> OnecParsedRoute:
             place = " ".join(place.split())
 
             if date_time and place:
-                points.append(OnecPoint(type_point=type_point, date_point=date_time, place_point=place))
+                date_point, point_time = split_onec_wall_datetime(date_time)
+                points.append(
+                    OnecPoint(
+                        type_point=type_point,
+                        date_point=date_point or date_time,
+                        point_time=point_time,
+                        place_point=place,
+                    )
+                )
 
             i += 1
 

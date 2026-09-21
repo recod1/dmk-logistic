@@ -185,17 +185,30 @@ class RouteRepository(BaseRepository):
     
     # Методы для работы с точками
     def create_point(self, point_id: int, route_id: str, type_point: str, 
-                     date_point: str, place_point: str) -> Optional[Point]:
+                     date_point: str, place_point: str, point_time: str = "") -> Optional[Point]:
         """Создать точку и вернуть её объект"""
         with get_db_cursor() as cursor:
-            cursor.execute(
-                '''INSERT INTO Point 
-                (id, id_route, type_point, place_point, date_point, time_accepted, 
-                 time_departure, time_registration, time_put_on_gate, time_docs, photo_docs, status) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                (point_id, route_id, type_point, place_point, date_point, 
-                 "0", "0", "0", "0", "0", "0", "new")
-            )
+            cursor.execute('PRAGMA table_info(Point)')
+            columns = [row[1] for row in cursor.fetchall()]
+            if "point_time" in columns:
+                cursor.execute(
+                    '''INSERT INTO Point 
+                    (id, id_route, type_point, place_point, date_point, point_time, time_accepted, 
+                     time_departure, time_registration, time_put_on_gate, time_docs, photo_docs, status) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (point_id, route_id, type_point, place_point, date_point, point_time or "",
+                     "0", "0", "0", "0", "0", "0", "new")
+                )
+            else:
+                combined = f"{date_point} {point_time}".strip() if point_time else date_point
+                cursor.execute(
+                    '''INSERT INTO Point 
+                    (id, id_route, type_point, place_point, date_point, time_accepted, 
+                     time_departure, time_registration, time_put_on_gate, time_docs, photo_docs, status) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                    (point_id, route_id, type_point, place_point, combined, 
+                     "0", "0", "0", "0", "0", "0", "new")
+                )
             # Получаем созданную точку
             cursor.execute('SELECT * FROM Point WHERE id = ?', (point_id,))
             row = cursor.fetchone()

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import { formatPointSchedule, listPointStatusLabel } from "../status";
+import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel } from "../status";
 import type { DriverRouteListItem } from "../types";
 
 const props = defineProps<{
@@ -43,7 +43,8 @@ function routeStatusLabel(status: string): string {
 }
 
 function processStageLabel(item: DriverRouteListItem): string {
-  return listPointStatusLabel(item.active_point_status) || routeStatusLabel(item.status);
+  const stage = listPointStatusLabel(item.active_point_status) || routeStatusLabel(item.status);
+  return formatListStatusWithFact(stage, item.active_point_fact_time);
 }
 
 function processPointName(item: DriverRouteListItem): string {

@@ -21,9 +21,11 @@ from mobile_api.route_notification_logic import (
     notify_point_status_reverted,
     notify_route_accepted_by_driver,
     notify_route_completed,
+    point_fact_datetime,
 )
 from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.roles import role_label_ru
+from utils.onec_datetime import planned_wall_fields
 from services.wialon_service import (
     WIALON_ENABLED,
     get_vehicle_location_data,
@@ -115,15 +117,16 @@ def _point_to_dict(
     time_sources: dict[str, str] | None = None,
 ) -> dict:
     sources = time_sources or {}
+    date_point, point_time = planned_wall_fields(point.date_point, point.point_time)
     return {
         "id": point.id,
         "route_id": point.route_id,
         "type_point": point.type_point,
         "place_point": point.place_point,
-        "date_point": point.date_point,
+        "date_point": date_point,
         "point_name": point.point_name,
         "point_contacts": point.point_contacts,
-        "point_time": point.point_time,
+        "point_time": point_time,
         "point_note": point.point_note,
         "status": point.status,
         "time_accepted": _format_datetime_ru(point.time_accepted),
@@ -285,6 +288,7 @@ def _route_summary(db: Session, route: Route) -> dict:
         (point for point in points if point.status not in COMPLETED_POINT_STATUSES),
         points[-1] if points else None,
     )
+    planned = planned_wall_fields(active_point.date_point, active_point.point_time) if active_point else ("", "")
     return {
         "id": route.id,
         "status": route.status,
@@ -301,8 +305,9 @@ def _route_summary(db: Session, route: Route) -> dict:
         "active_point_place": ((active_point.place_point or "").strip() or None) if active_point else None,
         "active_point_name": ((active_point.point_name or "").strip() or None) if active_point else None,
         "active_point_type": active_point.type_point if active_point else None,
-        "active_point_date": ((active_point.date_point or "").strip() or None) if active_point else None,
-        "active_point_time": ((active_point.point_time or "").strip() or None) if active_point else None,
+        "active_point_date": planned[0] or None,
+        "active_point_time": planned[1] or None,
+        "active_point_fact_time": _format_datetime_ru(point_fact_datetime(active_point)) if active_point else None,
     }
 
 

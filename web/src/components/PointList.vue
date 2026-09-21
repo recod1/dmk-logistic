@@ -9,6 +9,7 @@ import {
   nextStatusLabel,
   statusLabel
 } from "../status";
+import { plannedDateDisplay, plannedTimeDisplay } from "../plannedTime";
 import type { PointDto } from "../types";
 
 const props = defineProps<{
@@ -61,11 +62,11 @@ function showRevert(point: PointDto): boolean {
         <MapsAddressLink :address="point.place_point" />
       </p>
       <p v-else class="addr-muted">Адрес не указан</p>
-      <small>{{ point.date_point }}</small>
-      <small v-if="point.point_name || point.point_contacts || point.point_time || point.point_note" class="point-meta">
+      <small>{{ plannedDateDisplay(point.date_point, point.point_time) }}</small>
+      <small v-if="point.point_name || point.point_contacts || plannedTimeDisplay(point.date_point, point.point_time) || point.point_note" class="point-meta">
         {{ point.point_name || "Без названия" }}
         <span v-if="point.point_contacts"> · {{ point.point_contacts }}</span>
-        <span v-if="point.point_time"> · {{ point.point_time }}</span>
+        <span v-if="plannedTimeDisplay(point.date_point, point.point_time)"> · {{ plannedTimeDisplay(point.date_point, point.point_time) }}</span>
       </small>
       <small v-if="point.point_note" class="point-note">{{ point.point_note }}</small>
       <div class="btn-row">
