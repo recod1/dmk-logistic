@@ -246,16 +246,21 @@ let syncWatchdogTimer: number | null = null;
 let syncIntervalId: number | null = null;
 let notificationsWs: WebSocket | null = null;
 let notificationsWsReconnectTimer: number | null = null;
+let notificationsWsHandshakeTimer: number | null = null;
 let notificationsPingInterval: number | null = null;
 let notificationsPollInterval: number | null = null;
+let notificationsWsBackoffMs = 4000;
 let refreshAdminRoutesInFlight: Promise<void> | null = null;
 
 let chatWs: WebSocket | null = null;
 let chatWsReconnectTimer: number | null = null;
+let chatWsHandshakeTimer: number | null = null;
 let chatPingInterval: number | null = null;
 let chatPollInterval: number | null = null;
 let roomChatPollInterval: number | null = null;
 let salaryChatPollInterval: number | null = null;
+let chatWsBackoffMs = 4000;
+let realtimeSocketsAllowed = false;
 
 // Generic chats hub
 const chatsRooms = ref<Array<{ id: number; kind: "direct" | "group"; title: string; unread_count?: number }>>([]);
@@ -779,7 +784,70 @@ async function registerDriverBackgroundSync(): Promise<void> {
   }
 }
 
+function isCoarseUi(): boolean {
+  return Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+}
+
+function wsHandshakeTimeoutMs(): number {
+  return isCoarseUi() ? 5000 : 8000;
+}
+
+function allowRealtimeSockets(): void {
+  realtimeSocketsAllowed = true;
+}
+
+function denyRealtimeSockets(): void {
+  realtimeSocketsAllowed = false;
+}
+
+function wsBusy(ws: WebSocket | null): boolean {
+  return Boolean(ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING));
+}
+
+function clearNotificationsHandshakeTimer(): void {
+  if (notificationsWsHandshakeTimer !== null) {
+    window.clearTimeout(notificationsWsHandshakeTimer);
+    notificationsWsHandshakeTimer = null;
+  }
+}
+
+function clearChatHandshakeTimer(): void {
+  if (chatWsHandshakeTimer !== null) {
+    window.clearTimeout(chatWsHandshakeTimer);
+    chatWsHandshakeTimer = null;
+  }
+}
+
+function armWsHandshakeTimer(ws: WebSocket, kind: "notifications" | "chat"): void {
+  const arm = (setter: (id: number | null) => void) => {
+    setter(
+      window.setTimeout(() => {
+        setter(null);
+        if (ws.readyState === WebSocket.CONNECTING) {
+          try {
+            ws.close();
+          } catch {
+            // handshake stuck on cellular/HTTP2
+          }
+        }
+      }, wsHandshakeTimeoutMs())
+    );
+  };
+  if (kind === "notifications") {
+    clearNotificationsHandshakeTimer();
+    arm((id) => {
+      notificationsWsHandshakeTimer = id;
+    });
+    return;
+  }
+  clearChatHandshakeTimer();
+  arm((id) => {
+    chatWsHandshakeTimer = id;
+  });
+}
+
 function closeNotificationsSocket(): void {
+  clearNotificationsHandshakeTimer();
   if (notificationsPingInterval !== null) {
     window.clearInterval(notificationsPingInterval);
     notificationsPingInterval = null;
@@ -804,7 +872,7 @@ function stopNotificationsPolling(): void {
 
 function startNotificationsPolling(): void {
   stopNotificationsPolling();
-  const coarse = window.matchMedia?.("(pointer: coarse)")?.matches;
+  const coarse = isCoarseUi();
   notificationsPollInterval = window.setInterval(() => {
     if (!authToken.value) {
       stopNotificationsPolling();
@@ -813,17 +881,16 @@ function startNotificationsPolling(): void {
     if (!hasNetwork()) {
       return;
     }
-    if (!notificationsWs || notificationsWs.readyState === WebSocket.CLOSED) {
-      connectNotificationsSocket();
-    }
-    if (!chatWs || chatWs.readyState === WebSocket.CLOSED) {
-      connectChatSocket();
+    const nState = notificationsWs?.readyState;
+    if (nState === WebSocket.OPEN || nState === WebSocket.CONNECTING) {
+      return;
     }
     void refreshNotifications();
-  }, coarse ? 12000 : 5000);
+  }, coarse ? 20000 : 8000);
 }
 
 function closeChatSocket(): void {
+  clearChatHandshakeTimer();
   if (chatPingInterval !== null) {
     window.clearInterval(chatPingInterval);
     chatPingInterval = null;
@@ -896,16 +963,18 @@ function startChatPolling(): void {
 }
 
 function scheduleChatReconnect(): void {
-  if (!authToken.value) {
+  if (!authToken.value || !realtimeSocketsAllowed) {
     return;
   }
   if (chatWsReconnectTimer !== null) {
     return;
   }
+  const delay = chatWsBackoffMs;
+  chatWsBackoffMs = Math.min(Math.round(delay * 1.8), isCoarseUi() ? 30_000 : 15_000);
   chatWsReconnectTimer = window.setTimeout(() => {
     chatWsReconnectTimer = null;
     connectChatSocket();
-  }, 2500);
+  }, delay);
 }
 
 type ChatReadReceipt = {
@@ -951,14 +1020,24 @@ function applyIncomingReadReceipt(item: ChatReadReceipt): void {
 }
 
 function connectChatSocket(): void {
-  if (!authToken.value) {
+  if (!authToken.value || !realtimeSocketsAllowed) {
+    return;
+  }
+  if (notificationsWs?.readyState === WebSocket.CONNECTING) {
+    return;
+  }
+  if (wsBusy(chatWs)) {
     return;
   }
   closeChatSocket();
   try {
     const ws = new WebSocket(chatWebSocketUrl(authToken.value));
     chatWs = ws;
+    setChatWsState("connecting");
+    armWsHandshakeTimer(ws, "chat");
     ws.onopen = () => {
+      clearChatHandshakeTimer();
+      chatWsBackoffMs = isCoarseUi() ? 4000 : 2500;
       setChatWsState("open");
       if (chatPingInterval !== null) {
         window.clearInterval(chatPingInterval);
@@ -1044,11 +1123,27 @@ function connectChatSocket(): void {
       }
     };
     ws.onclose = () => {
+      if (chatWs !== ws) {
+        return;
+      }
+      clearChatHandshakeTimer();
+      if (chatPingInterval !== null) {
+        window.clearInterval(chatPingInterval);
+        chatPingInterval = null;
+      }
       chatWs = null;
       setChatWsState("closed");
       scheduleChatReconnect();
     };
     ws.onerror = () => {
+      if (chatWs !== ws) {
+        return;
+      }
+      clearChatHandshakeTimer();
+      if (chatPingInterval !== null) {
+        window.clearInterval(chatPingInterval);
+        chatPingInterval = null;
+      }
       chatWs = null;
       setChatWsState("closed");
       scheduleChatReconnect();
@@ -1059,14 +1154,11 @@ function connectChatSocket(): void {
 }
 
 watch(connectionServerOk, (ok) => {
-  if (!ok || !authToken.value) {
+  if (!ok || !authToken.value || !realtimeSocketsAllowed) {
     return;
   }
-  if (!notificationsWs || notificationsWs.readyState === WebSocket.CLOSED) {
+  if (!wsBusy(notificationsWs)) {
     connectNotificationsSocket();
-  }
-  if (!chatWs || chatWs.readyState === WebSocket.CLOSED) {
-    connectChatSocket();
   }
 });
 
@@ -1162,27 +1254,36 @@ function playNotificationSound(): void {
 }
 
 function scheduleNotificationsSocketReconnect(): void {
-  if (!authToken.value) {
+  if (!authToken.value || !realtimeSocketsAllowed) {
     return;
   }
   if (notificationsWsReconnectTimer !== null) {
     return;
   }
+  const delay = notificationsWsBackoffMs;
+  notificationsWsBackoffMs = Math.min(Math.round(delay * 1.8), isCoarseUi() ? 30_000 : 15_000);
   notificationsWsReconnectTimer = window.setTimeout(() => {
     notificationsWsReconnectTimer = null;
     connectNotificationsSocket();
-  }, 2500);
+  }, delay);
 }
 
 function connectNotificationsSocket(): void {
-  if (!authToken.value) {
+  if (!authToken.value || !realtimeSocketsAllowed) {
+    return;
+  }
+  if (wsBusy(notificationsWs)) {
     return;
   }
   closeNotificationsSocket();
   try {
     const ws = new WebSocket(notificationsWebSocketUrl(authToken.value));
     notificationsWs = ws;
+    setNotificationsWsState("connecting");
+    armWsHandshakeTimer(ws, "notifications");
     ws.onopen = () => {
+      clearNotificationsHandshakeTimer();
+      notificationsWsBackoffMs = isCoarseUi() ? 4000 : 2500;
       setNotificationsWsState("open");
       if (notificationsPingInterval !== null) {
         window.clearInterval(notificationsPingInterval);
@@ -1194,6 +1295,9 @@ function connectNotificationsSocket(): void {
           // noop
         }
       }, 20000);
+      if (!wsBusy(chatWs)) {
+        connectChatSocket();
+      }
     };
     ws.onmessage = (event) => {
       try {
@@ -1216,13 +1320,30 @@ function connectNotificationsSocket(): void {
       }
     };
     ws.onclose = () => {
-      clearNotificationsSocketTimers();
+      if (notificationsWs !== ws) {
+        return;
+      }
+      clearNotificationsHandshakeTimer();
+      if (notificationsPingInterval !== null) {
+        window.clearInterval(notificationsPingInterval);
+        notificationsPingInterval = null;
+      }
       notificationsWs = null;
       setNotificationsWsState("closed");
+      if (realtimeSocketsAllowed && !wsBusy(chatWs)) {
+        connectChatSocket();
+      }
       scheduleNotificationsSocketReconnect();
     };
     ws.onerror = () => {
-      clearNotificationsSocketTimers();
+      if (notificationsWs !== ws) {
+        return;
+      }
+      clearNotificationsHandshakeTimer();
+      if (notificationsPingInterval !== null) {
+        window.clearInterval(notificationsPingInterval);
+        notificationsPingInterval = null;
+      }
       notificationsWs = null;
       setNotificationsWsState("closed");
       scheduleNotificationsSocketReconnect();
@@ -1234,6 +1355,7 @@ function connectNotificationsSocket(): void {
 
 function clearAuth(): void {
   authToken.value = "";
+  denyRealtimeSockets();
   clearNotificationsSocketTimers();
   stopBackgroundSyncLoop();
   closeNotificationsSocket();
@@ -1696,7 +1818,6 @@ function onVisibilityChange(): void {
   if (document.visibilityState !== "visible") {
     return;
   }
-  void pingServer();
   void refreshNotifications();
   if (isDriver.value) {
     void hydrateDriverRoutesFromCache();
@@ -1716,12 +1837,12 @@ function onPageHide(): void {
 
 function onOnline(): void {
   syncMessage.value = "Онлайн: синхронизация возобновлена";
-  void pingServer();
   if (authToken.value) {
-    connectNotificationsSocket();
     void refreshNotifications();
-    void refreshWebPushSubscriptionState();
     startNotificationsPolling();
+    if (realtimeSocketsAllowed) {
+      connectNotificationsSocket();
+    }
   }
   if (isDriver.value) {
     void (async () => {
@@ -2413,11 +2534,11 @@ async function refreshRouteChatUnread(): Promise<void> {
 }
 
 async function bootstrapByRole(user: AuthUser): Promise<void> {
-  connectNotificationsSocket();
-  connectChatSocket();
-  startNotificationsPolling();
+  denyRealtimeSockets();
+  closeNotificationsSocket();
+  closeChatSocket();
+  stopNotificationsPolling();
   void refreshWebPushSubscriptionState();
-  void refreshRouteChatUnread();
   if (isAdminRole(user.role_code)) {
     resetToSection("admin_routes");
     await refreshAdminUsers();
@@ -2431,6 +2552,7 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
     resetToSection("driver_home");
     await refreshDriverRoutes();
     await refreshRoute();
+    await refreshRouteChatUnread();
     await syncOutboxInBackground();
     startBackgroundSyncLoop();
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
@@ -2439,6 +2561,9 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
   }
   await refreshNotifications();
   await refreshLogisticsContacts();
+  allowRealtimeSockets();
+  connectNotificationsSocket();
+  startNotificationsPolling();
 }
 
 function openRoleMainSection(section: AppSection): void {
@@ -3578,6 +3703,7 @@ async function resetConnections(): Promise<void> {
   resettingConnections.value = true;
   syncMessage.value = "Переподключение…";
   try {
+    denyRealtimeSockets();
     stopNotificationsPolling();
     stopChatPolling();
     stopRoomChatPolling();
@@ -3585,10 +3711,17 @@ async function resetConnections(): Promise<void> {
     stopBackgroundSyncLoop();
     closeNotificationsSocket();
     closeChatSocket();
+    await new Promise((resolve) => window.setTimeout(resolve, 400));
     restartConnectionWatch(API_BASE);
-    connectNotificationsSocket();
-    connectChatSocket();
-    startNotificationsPolling();
+    await pingServer();
+    await refreshNotifications();
+    void refreshRouteChatUnread();
+    if (isRouteManager.value) {
+      await refreshAdminRoutes(routeFilters.value);
+    }
+    if (isDriver.value) {
+      startBackgroundSyncLoop();
+    }
     if (currentSection.value === "chat" && chatRouteId.value) {
       startChatPolling();
     }
@@ -3598,10 +3731,9 @@ async function resetConnections(): Promise<void> {
     if (currentSection.value === "salary_chat" && salaryChatSalaryId.value) {
       startSalaryChatPolling();
     }
-    startBackgroundSyncLoop();
-    void refreshNotifications();
-    void refreshRouteChatUnread();
-    await pingServer();
+    allowRealtimeSockets();
+    connectNotificationsSocket();
+    startNotificationsPolling();
     syncMessage.value = "Соединения сброшены";
   } finally {
     resettingConnections.value = false;

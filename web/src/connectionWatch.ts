@@ -3,7 +3,7 @@ import { computed, ref } from "vue";
 import { connectionNetInfo, reportDebugError } from "./debugLog";
 
 export type ConnectionTone = "ok" | "warn" | "bad";
-export type WsState = "idle" | "open" | "closed";
+export type WsState = "idle" | "connecting" | "open" | "closed";
 
 const apiBaseRef = ref("/api");
 const online = ref(typeof navigator === "undefined" ? true : navigator.onLine);
@@ -23,13 +23,20 @@ let healthInFlight = false;
 let healthFailStreak = 0;
 let lastReportedHealthFail = false;
 let unhandledBound = false;
+let apiBusy = false;
+let apiQueued = false;
 
 function healthTimeoutMs(): number {
   if (typeof window === "undefined") {
-    return 20_000;
+    return 12_000;
   }
   const coarse = window.matchMedia?.("(pointer: coarse)")?.matches;
-  return coarse ? 22_000 : 12_000;
+  return coarse ? 10_000 : 8_000;
+}
+
+export function setApiLoad(busy: boolean, queued: boolean): void {
+  apiBusy = busy;
+  apiQueued = queued;
 }
 
 export const connectionOnline = online;
@@ -97,6 +104,7 @@ export const connectionHint = computed(() => {
 
 function wsLabel(state: WsState): string {
   if (state === "open") return "подключены";
+  if (state === "connecting") return "подключение";
   if (state === "closed") return "нет";
   return "—";
 }
@@ -168,6 +176,9 @@ export function noteApiReachable(): void {
 
 export async function pingServer(): Promise<boolean> {
   if (healthInFlight) {
+    return serverOk.value !== false;
+  }
+  if (apiBusy || apiQueued) {
     return serverOk.value !== false;
   }
   if (lastApiOkAt > 0 && Date.now() - lastApiOkAt < 20_000) {
@@ -288,7 +299,9 @@ export function startConnectionWatch(apiBase: string): void {
   if (healthTimer !== null) {
     window.clearInterval(healthTimer);
   }
-  void pingServer();
+  window.setTimeout(() => {
+    void pingServer();
+  }, 2000);
   healthTimer = window.setInterval(() => {
     if (typeof document !== "undefined" && document.visibilityState === "hidden") {
       return;

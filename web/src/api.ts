@@ -1,5 +1,5 @@
 import { reportDebugError } from "./debugLog";
-import { noteApiReachable } from "./connectionWatch";
+import { noteApiReachable, setApiLoad } from "./connectionWatch";
 import type {
   ActiveRouteResponse,
   AdminRoute,
@@ -48,12 +48,60 @@ export class ApiError extends Error {
   }
 }
 
+function isCoarsePointer(): boolean {
+  return typeof window !== "undefined" && Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
+}
+
 function defaultFetchTimeoutMs(): number {
   if (typeof window === "undefined") {
     return 20_000;
   }
-  const coarse = window.matchMedia?.("(pointer: coarse)")?.matches;
-  return coarse ? 28_000 : 18_000;
+  return isCoarsePointer() ? 16_000 : 18_000;
+}
+
+function maxApiConcurrency(): number {
+  return isCoarsePointer() ? 1 : 3;
+}
+
+let apiRunning = 0;
+const apiWaiters: Array<() => void> = [];
+
+function syncApiLoad(): void {
+  setApiLoad(apiRunning > 0, apiWaiters.length > 0);
+}
+
+function acquireApiSlot(): Promise<void> {
+  return new Promise((resolve) => {
+    const enqueue = (): void => {
+      if (apiRunning < maxApiConcurrency()) {
+        apiRunning += 1;
+        syncApiLoad();
+        resolve();
+        return;
+      }
+      apiWaiters.push(enqueue);
+    };
+    enqueue();
+  });
+}
+
+function releaseApiSlot(): void {
+  apiRunning = Math.max(0, apiRunning - 1);
+  const next = apiWaiters.shift();
+  if (next) {
+    next();
+  } else {
+    syncApiLoad();
+  }
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => globalThis.setTimeout(resolve, ms));
+}
+
+function isAbortLike(error: unknown): boolean {
+  const name = (error as { name?: string } | null)?.name || "";
+  return name === "AbortError" || name === "TimeoutError";
 }
 
 function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): AbortSignal | undefined {
@@ -94,7 +142,14 @@ async function requestJson<T>(url: string, init?: RequestInit & { timeoutMs?: nu
       return existing as Promise<T>;
     }
   }
-  const pending = requestJsonInner<T>(url, init);
+  const pending = (async () => {
+    await acquireApiSlot();
+    try {
+      return await requestJsonInner<T>(url, init);
+    } finally {
+      releaseApiSlot();
+    }
+  })();
   if (canCoalesce) {
     getInflight.set(url, pending);
     void pending.finally(() => {
@@ -106,10 +161,32 @@ async function requestJson<T>(url: string, init?: RequestInit & { timeoutMs?: nu
   return pending;
 }
 
-async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
-  const timeoutMs = init?.timeoutMs ?? defaultFetchTimeoutMs();
+async function fetchWithTimeout(
+  url: string,
+  init: (RequestInit & { timeoutMs?: number }) | undefined,
+  headers: Record<string, string>,
+  timeoutMs: number
+): Promise<Response> {
   const timeoutCtrl = new AbortController();
   const timer = globalThis.setTimeout(() => timeoutCtrl.abort(), timeoutMs);
+  const { timeoutMs: _timeout, ...fetchInit } = init ?? {};
+  void _timeout;
+  try {
+    return await fetch(url, {
+      ...fetchInit,
+      cache: "no-store",
+      credentials: fetchInit.credentials ?? "same-origin",
+      keepalive: false,
+      signal: mergeAbortSignals([fetchInit.signal, timeoutCtrl.signal]),
+      headers
+    });
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
+}
+
+async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const timeoutMs = init?.timeoutMs ?? defaultFetchTimeoutMs();
   const method = (init?.method || "GET").toUpperCase();
   const headers: Record<string, string> = {
     Accept: "application/json",
@@ -119,19 +196,22 @@ async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs
   if (init?.body != null && !headers["Content-Type"] && !headers["content-type"]) {
     headers["Content-Type"] = "application/json";
   }
+  const canRetry = (method === "GET" || method === "HEAD") && !init?.signal;
   let response: Response;
   try {
-    response = await fetch(url, {
-      ...init,
-      cache: "no-store",
-      credentials: init?.credentials ?? "same-origin",
-      signal: mergeAbortSignals([init?.signal, timeoutCtrl.signal]),
-      headers
-    });
+    try {
+      response = await fetchWithTimeout(url, init, headers, timeoutMs);
+    } catch (error) {
+      if (!canRetry || !isAbortLike(error)) {
+        throw error;
+      }
+      await sleep(isCoarsePointer() ? 600 : 350);
+      response = await fetchWithTimeout(url, init, headers, timeoutMs);
+    }
   } catch (error) {
     const name = (error as { name?: string } | null)?.name || "";
     const apiError =
-      name === "AbortError" || name === "TimeoutError"
+      isAbortLike(error)
         ? new ApiError("Нет связи с сервером. Проверьте интернет.", {
             status: 0,
             bodyText: "",
@@ -145,14 +225,12 @@ async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs
       error: apiError,
       url,
       method,
-      extra: { timeout_ms: timeoutMs, name }
+      extra: { timeout_ms: timeoutMs, name, retried: canRetry }
     });
     if (apiError instanceof ApiError) {
       throw apiError;
     }
     throw error;
-  } finally {
-    globalThis.clearTimeout(timer);
   }
 
   if (!response.ok) {
