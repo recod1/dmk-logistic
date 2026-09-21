@@ -17,5 +17,6 @@ After finishing work that changed files:
    - `recod0/dmk-logistic-web`
    - `recod0/dmk-logistic-bot`
 5. If CI fails, fetch the failed job log, fix, commit, push, and watch again.
+6. Then send the Telegram summary (see `telegram-summary.mdc`), including the CI line.
 
 Do not force-push `main`.

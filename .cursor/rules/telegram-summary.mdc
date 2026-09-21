@@ -1,0 +1,21 @@
+---
+description: After finishing work, send a short Russian summary via the Telegram MCP bot
+alwaysApply: true
+---
+
+# Telegram summary via MCP
+
+After a task is finished, notify the owner through the **already running Telegram MCP** (`telegram` / `user-telegram`), the same bot as in TG-Cursor. Do **not** call Telegram HTTP APIs, `.env` tokens, or `scripts/send_dev_summary.py`.
+
+1. Send after GitHub push/CI if those ran; otherwise at the end of the task.
+2. Text in Russian, 3–6 short bullets. No file dumps, no secrets.
+3. If CI ran, add `CI: success|failure` and the Actions URL.
+4. Discover tools, then send to the default bound chat (omit `chat_id`):
+
+```
+GetDynamicTools namespace=user-telegram toolName=telegram_send
+CallDynamicTool namespace=user-telegram toolName=telegram_send
+  arguments: { "text": "ДМК — сводка\n• …" }
+```
+
+If the namespace is `telegram` rather than `user-telegram`, use that. If MCP is missing, say so and still write the summary in the chat reply. Do not invent a fallback bot token.

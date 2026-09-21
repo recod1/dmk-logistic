@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "telegram": {
+      "url": "http://194.87.148.114:8787/mcp",
+      "headers": {
+        "Authorization": "Bearer ${env:TG_CURSOR_MCP_TOKEN}"
+      }
+    }
+  }
+}
