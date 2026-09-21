@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref, watch } from "vue";
 
 const props = defineProps<{
   open: boolean;
@@ -9,6 +9,7 @@ const props = defineProps<{
   odometer?: string;
   odometerPrefillSource?: "wialon" | null;
   initialOdometer?: string;
+  telemetryLoading?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -17,6 +18,8 @@ const emit = defineEmits<{
   "update:datetimeLocal": [value: string];
   "update:odometer": [value: string];
 }>();
+
+const odometerMode = ref<"ask" | "edit" | "manual">("manual");
 
 const localValue = computed({
   get: () => props.datetimeLocal,
@@ -28,12 +31,52 @@ const odometerValue = computed({
   set: (v: string) => emit("update:odometer", v)
 });
 
+watch(
+  () => [props.open, props.odometerPrefillSource, props.initialOdometer, props.telemetryLoading] as const,
+  () => {
+    if (!props.open) {
+      odometerMode.value = "manual";
+      return;
+    }
+    if (props.telemetryLoading) {
+      return;
+    }
+    if (props.odometerPrefillSource === "wialon" && (props.initialOdometer || "").trim()) {
+      odometerMode.value = "ask";
+      return;
+    }
+    odometerMode.value = "manual";
+  }
+);
+
+const odometerReady = computed(() => {
+  if (!props.showOdometer) {
+    return true;
+  }
+  if (props.telemetryLoading) {
+    return false;
+  }
+  return Boolean((odometerValue.value || "").trim());
+});
+
+function acceptWialon(): void {
+  odometerMode.value = "ask";
+  confirm();
+}
+
+function editWialon(): void {
+  odometerMode.value = "edit";
+}
+
 function confirm(): void {
+  if (!odometerReady.value) {
+    return;
+  }
   const odo = (props.showOdometer ? (odometerValue.value || "").trim() : "").trim();
   const initial = (props.initialOdometer || "").trim();
   let source: "manual" | "wialon" | null = null;
   if (props.showOdometer) {
-    if (odo && props.odometerPrefillSource === "wialon" && odo === initial) {
+    if (odo && props.odometerPrefillSource === "wialon" && odo === initial && odometerMode.value !== "edit") {
       source = "wialon";
     } else if (odo) {
       source = "manual";
@@ -46,24 +89,36 @@ function confirm(): void {
 <template>
   <div v-if="open" class="overlay" @click.self="emit('cancel')">
     <article class="dialog" role="dialog" aria-modal="true">
-      <h2 class="title">Подтвердите время</h2>
+      <h2 class="title">Подтвердите этап</h2>
       <p class="desc">
-        Следующий этап: <strong>{{ nextStatusLabel }}</strong>. Проверьте дату и время события (время устройства). При
-        необходимости скорректируйте вручную.
+        Следующий этап: <strong>{{ nextStatusLabel }}</strong>. Проверьте время и показания одометра.
       </p>
       <label class="field">
         Дата и время
         <input v-model="localValue" type="datetime-local" step="60" />
       </label>
-      <label v-if="showOdometer" class="field">
-        Одометр
-        <input v-model="odometerValue" inputmode="text" placeholder="Например: 123456 или 123456 км" />
-        <small v-if="odometerPrefillSource === 'wialon'" class="hint">Подставлено из Wialon — можно подтвердить или исправить.</small>
-        <small v-else class="hint">Если связи с Wialon нет — введите вручную.</small>
-      </label>
+      <div v-if="showOdometer" class="odo-block">
+        <p class="field-label">Одометр</p>
+        <p v-if="telemetryLoading" class="hint">Запрашиваем показания из Wialon…</p>
+        <template v-else-if="odometerMode === 'ask'">
+          <p class="wialon-value">{{ odometerValue || "—" }}</p>
+          <p class="hint">Данные подтянуты из Wialon. Они верны или их нужно исправить?</p>
+          <div class="ask-actions">
+            <button type="button" class="primary" @click="acceptWialon">Верны</button>
+            <button type="button" class="secondary" @click="editWialon">Исправить</button>
+          </div>
+        </template>
+        <label v-else class="field nested">
+          <input v-model="odometerValue" inputmode="text" placeholder="Например: 123456 или 123456 км" />
+          <small v-if="odometerPrefillSource === 'wialon'" class="hint">Исправьте значение из Wialon и сохраните.</small>
+          <small v-else class="hint">Если Wialon не ответил — введите показания вручную.</small>
+        </label>
+      </div>
       <div class="actions">
         <button type="button" class="secondary" @click="emit('cancel')">Отмена</button>
-        <button type="button" class="primary" @click="confirm">Подтвердить</button>
+        <button v-if="odometerMode !== 'ask'" type="button" class="primary" :disabled="!odometerReady" @click="confirm">
+          Сохранить
+        </button>
       </div>
     </article>
   </div>
@@ -74,26 +129,40 @@ function confirm(): void {
   position: fixed;
   inset: 0;
   z-index: 100;
+  width: 100%;
+  height: 100%;
   background: rgba(2, 6, 23, 0.72);
-  display: grid;
-  place-items: center;
-  padding: 1rem;
+  backdrop-filter: blur(8px);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: max(1rem, env(safe-area-inset-top, 0px)) 1rem max(1rem, env(safe-area-inset-bottom, 0px));
+  box-sizing: border-box;
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+}
+:global(html.keyboard-open) .overlay {
+  height: var(--vv-height, 100%);
+  transform: translate3d(0, var(--vv-offset, 0px), 0);
 }
 .dialog {
   width: min(420px, 100%);
-  border-radius: 16px;
-  border: 1px solid #334155;
-  background: #0b1220;
-  padding: 1.1rem;
-  box-shadow: 0 20px 50px rgba(2, 6, 23, 0.55);
+  max-width: 100%;
+  margin: auto 0;
+  border-radius: 18px;
+  border: 1px solid var(--border);
+  background: var(--bg-elevated);
+  padding: 1.15rem;
+  box-shadow: var(--shadow);
+  animation: dialog-in 0.2s ease;
 }
 .title {
   margin: 0 0 0.5rem;
-  font-size: 1.05rem;
+  font-size: 1.08rem;
 }
 .desc {
   margin: 0 0 0.75rem;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.92rem;
   line-height: 1.45;
 }
@@ -104,16 +173,44 @@ function confirm(): void {
   font-size: 0.88rem;
   color: #cbd5e1;
 }
+.field.nested {
+  margin-bottom: 0;
+}
+.field-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.88rem;
+  color: #cbd5e1;
+}
+.odo-block {
+  margin-bottom: 1rem;
+}
+.wialon-value {
+  margin: 0 0 0.4rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-heading);
+}
+.ask-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.55rem;
+}
 input[type="datetime-local"],
 input {
-  border-radius: 10px;
-  border: 1px solid #334155;
-  background: #111827;
-  color: #f8fafc;
-  padding: 0.55rem 0.65rem;
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0.6rem 0.7rem;
+  font-size: 16px;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 .hint {
-  color: #94a3b8;
+  margin: 0;
+  color: var(--text-muted);
   font-size: 0.8rem;
   line-height: 1.35;
 }
@@ -123,18 +220,24 @@ input {
   gap: 0.5rem;
   justify-content: flex-end;
 }
+.primary,
+.secondary {
+  min-height: 42px;
+  border-radius: 12px;
+  padding: 0.5rem 0.9rem;
+  font-weight: 650;
+}
 .primary {
   border: none;
-  border-radius: 10px;
-  background: #2563eb;
+  background: linear-gradient(180deg, #3b82f6, #2563eb);
   color: #fff;
-  padding: 0.5rem 0.85rem;
+}
+.primary:disabled {
+  opacity: 0.48;
 }
 .secondary {
-  border: 1px solid #334155;
-  border-radius: 10px;
+  border: 1px solid var(--border-strong);
   background: transparent;
   color: #e2e8f0;
-  padding: 0.5rem 0.85rem;
 }
 </style>

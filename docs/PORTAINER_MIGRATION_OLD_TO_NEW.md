@@ -19,7 +19,7 @@
   - новый сервер: Postgres volume (`pg_data` в `deploy/portainer/docker-compose.portainer.yml`).
 - Достаточно места на диске под dump (часто от 100 МБ до нескольких ГБ).
 
-Также: если используете скрипты/алембик, полезно прочитать `MIGRATION.md`, но ниже все команды уже прописаны.
+Также: если используете скрипты/алембик, полезно прочитать `docs/MIGRATION.md`, но ниже все команды уже прописаны.
 
 ## 1) Общий безопасный план (для обоих сценариев)
 
@@ -262,7 +262,7 @@ alembic upgrade head
 
 ## 6) Импорт SQLite → Postgres (на новом сервере)
 
-В репозитории уже есть поддерживаемый скрипт: `scripts/migrate_sqlite_to_postgres.py`.
+В репозитории уже есть поддерживаемый скрипт: `api/scripts/migrate_sqlite_to_postgres.py`.
 
 ### 6.1) Решите, “чистим ли” целевую базу
 
@@ -277,12 +277,12 @@ alembic upgrade head
 - DSN до Postgres (`POSTGRES_DSN`/`DATABASE_URL`);
 - Python и зависимости проекта.
 
-Пример запуска (как в `MIGRATION.md`):
+Пример запуска (как в `docs/MIGRATION.md`):
 
 ```bash
 export POSTGRES_DSN="postgresql+psycopg://postgres:postgres@localhost:5432/dmk_logistic"
 
-python scripts/migrate_sqlite_to_postgres.py \
+python api/scripts/migrate_sqlite_to_postgres.py \
   --sqlite-path "./backups/olymp_YYYYMMDD_HHMMSS.db" \
   --pg-dsn "$POSTGRES_DSN" \
   --default-password "ChangeMe123!" \
@@ -298,7 +298,7 @@ python scripts/migrate_sqlite_to_postgres.py \
 
 ### 7.1) Сравнить counts SQLite vs Postgres
 
-Используйте проверку из `MIGRATION.md` (она сравнивает `Users/Route/Point/Salary/Repair`).
+Используйте проверку из `docs/MIGRATION.md` (она сравнивает `Users/Route/Point/Salary/Repair`).
 
 ### 7.2) Проверить привязки точек
 

@@ -245,6 +245,9 @@ function removeUser(user: AdminUser): void {
 .users-wrap {
   display: grid;
   gap: 0.8rem;
+  width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
 }
 .head-row {
   display: flex;
@@ -263,6 +266,9 @@ function removeUser(user: AdminUser): void {
   display: grid;
   gap: 0.6rem;
   overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: rgba(17, 24, 39, 0.72);
 }
 table {
   width: 100%;
@@ -271,8 +277,8 @@ table {
 }
 th,
 td {
-  padding: 0.55rem;
-  border-bottom: 1px solid #1f2937;
+  padding: 0.65rem;
+  border-bottom: 1px solid var(--border);
   text-align: left;
   white-space: normal;
   overflow-wrap: anywhere;

@@ -1,9 +1,18 @@
 # dmk-logistic
 
-Репозиторий содержит:
+Репозиторий разложен по сервисам:
+
+```
+bot/      Telegram-бот (aiogram, SQLite)
+api/      FastAPI (Postgres, Alembic, JWT, PWA REST и legacy /api /admin)
+web/      PWA (Vue 3 + Vite + nginx)
+shared/   Общий Python-код (config, SQLite-модели, Wialon, уведомления)
+deploy/   Portainer compose
+docs/     Документация
+```
 
 1. Legacy-бот + старые endpoints/админку (`/api/route`, `/admin/*`) на SQLite.
-2. Новый стек рядом с legacy:
+2. Новый стек:
    - FastAPI + Postgres + Alembic
    - JWT auth (`/auth/login`)
    - Mobile API (`/v1/mobile/*`)
@@ -13,7 +22,7 @@
 
 - [PWA возможности и роли](./docs/PWA.md)
 - [Структура БД и связи](./docs/DATABASE.md)
-- [Перенос SQLite -> Postgres](./MIGRATION.md)
+- [Перенос SQLite -> Postgres](./docs/MIGRATION.md)
 
 ## Быстрый запуск нового стека (docker-compose)
 
@@ -27,6 +36,36 @@ docker compose up -d
 - web (nginx + PWA): http://localhost:8080
 - api (fastapi): http://localhost:8000
 - db (postgres): localhost:5432
+
+Telegram-бот в этот compose не входит. Отдельно:
+
+```bash
+docker compose -f docker-compose.bot.yml up -d --build
+```
+
+## Локальный запуск без Docker
+
+Из корня репозитория, с заполненным `.env`:
+
+```bash
+pip install -r api/requirements.txt   # API (+ общий код)
+pip install -r bot/requirements.txt   # только бот
+
+# Telegram-бот
+python bot/app.py
+
+# API (из каталога api/, чтобы находились alembic.ini и пакет api)
+cd api && uvicorn api.api_server:app --reload --host 0.0.0.0 --port 8000
+
+# PWA
+cd web && npm install && npm run dev
+```
+
+Тесты API:
+
+```bash
+pytest
+```
 
 Nginx проксирует backend как `/api/*`:
 
@@ -56,13 +95,14 @@ Nginx проксирует backend как `/api/*`:
 Workflow: `.github/workflows/docker-publish.yml`
 
 - запускается на `push` в `main` и на push тега;
-- собирает и пушит **два образа**:
+- собирает и пушит **три образа**:
   - `recod0/dmk-logistic-api`
   - `recod0/dmk-logistic-web`
+  - `recod0/dmk-logistic-bot`
 - публикует теги:
   - `latest`
   - `sha-<короткий_sha>`
-- использует Buildx cache (`cache-from/cache-to` type=gha).
+- итог смотреть в GitHub Actions, job **Build result**.
 
 Обязательные GitHub Secrets:
 
@@ -72,11 +112,14 @@ Workflow: `.github/workflows/docker-publish.yml`
 ### Ручная публикация (опционально)
 
 ```bash
-docker build -f docker/api/Dockerfile -t recod0/dmk-logistic-api:latest .
+docker build -f api/Dockerfile -t recod0/dmk-logistic-api:latest .
 docker push recod0/dmk-logistic-api:latest
 
-docker build -f docker/web/Dockerfile -t recod0/dmk-logistic-web:latest .
+docker build -f web/Dockerfile -t recod0/dmk-logistic-web:latest .
 docker push recod0/dmk-logistic-web:latest
+
+docker build -f bot/Dockerfile -t recod0/dmk-logistic-bot:latest .
+docker push recod0/dmk-logistic-bot:latest
 ```
 
 ### Portainer stack (без curl API деплоя)
@@ -132,17 +175,17 @@ docker run --rm --network host \
 
 ```bash
 export POSTGRES_DSN="postgresql+psycopg://postgres:postgres@localhost:5432/dmk_logistic"
-alembic upgrade head
+cd api && alembic upgrade head
 ```
 
 ## Миграция данных SQLite -> Postgres
 
-Полная инструкция: [MIGRATION.md](./MIGRATION.md)
+Полная инструкция: [MIGRATION.md](./docs/MIGRATION.md)
 
 Коротко:
 
 ```bash
-python scripts/migrate_sqlite_to_postgres.py \
+python api/scripts/migrate_sqlite_to_postgres.py \
   --sqlite-path ./db/olymp.db \
   --pg-dsn "$POSTGRES_DSN" \
   --default-password "ChangeMe123!" \
@@ -152,7 +195,7 @@ python scripts/migrate_sqlite_to_postgres.py \
 ## Ручное создание пользователя для mobile API
 
 ```bash
-python scripts/create_mobile_user.py \
+python api/scripts/create_mobile_user.py \
   --pg-dsn "$POSTGRES_DSN" \
   --login driver1 \
   --password StrongPass123! \
@@ -164,7 +207,7 @@ python scripts/create_mobile_user.py \
 Создание администратора:
 
 ```bash
-python scripts/create_mobile_user.py \
+python api/scripts/create_mobile_user.py \
   --pg-dsn "$POSTGRES_DSN" \
   --login admin1 \
   --password StrongAdminPass123! \
@@ -257,7 +300,7 @@ API:
 Исправлено:
 
 - явный `<link rel="manifest" href="/manifest.webmanifest">` в `web/index.html`;
-- в `nginx.conf` добавлены отдельные `location` для `/manifest.webmanifest` и `/sw.js`, чтобы они не попадали в SPA fallback;
+- в `web/nginx.conf` добавлены отдельные `location` для `/manifest.webmanifest` и `/sw.js`, чтобы они не попадали в SPA fallback;
 - раздача `manifest.webmanifest` с `Content-Type: application/manifest+json`;
 - для `sw.js` установлен корректный JS mime-type и no-cache;
 - явный заголовок `Content-Disposition: inline` для `manifest.webmanifest` и `sw.js`.

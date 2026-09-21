@@ -45,15 +45,16 @@ function submit(): void {
 
 <template>
   <section class="wrap">
-    <header class="head">
-      <h1>Контакты логистов</h1>
-      <div class="actions">
-        <button type="button" class="ghost" :disabled="loading" @click="emit('refresh')">Обновить</button>
-      </div>
-    </header>
-    <p class="hint">Эти контакты показываются водителям в карточке рейса. Можно менять имена, телефоны и количество строк.</p>
     <p v-if="error" class="error">{{ error }}</p>
     <div class="card">
+      <div class="card-head">
+        <h2>Контакты логистов</h2>
+        <button type="button" class="ghost" :disabled="loading" @click="emit('refresh')">Обновить</button>
+      </div>
+      <p class="hint">
+        Эти контакты показываются водителям в карточке рейса. Можно менять имена, телефоны и количество строк. Изменения
+        применяются только к новым рейсам — уже созданные рейсы сохраняют прежний список контактов.
+      </p>
       <div v-if="!localItems.length" class="empty">Контактов нет. Добавьте хотя бы одну строку или оставьте список пустым.</div>
       <div v-for="(item, index) in localItems" :key="index" class="row">
         <label class="field">
@@ -76,21 +77,22 @@ function submit(): void {
 
 <style scoped>
 .wrap {
+  width: 100%;
   max-width: 720px;
   margin: 0 auto;
   display: grid;
   gap: 0.75rem;
 }
-.head {
+.card-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
   flex-wrap: wrap;
 }
-h1 {
+h2 {
   margin: 0;
-  font-size: 1.05rem;
+  font-size: 1.02rem;
 }
 .hint {
   margin: 0;
@@ -98,16 +100,17 @@ h1 {
   font-size: 0.88rem;
 }
 .card {
-  border: 1px solid #243043;
-  border-radius: 14px;
-  padding: 0.85rem;
-  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 0.95rem;
+  background: rgba(15, 23, 42, 0.72);
   display: grid;
   gap: 0.65rem;
+  box-shadow: var(--shadow-sm);
 }
 .row {
   display: grid;
-  grid-template-columns: 1fr 1.2fr auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) auto;
   gap: 0.45rem;
   align-items: end;
 }
@@ -115,8 +118,11 @@ h1 {
   display: grid;
   gap: 0.2rem;
   font-size: 0.85rem;
+  min-width: 0;
 }
 input {
+  width: 100%;
+  min-width: 0;
   border-radius: 8px;
   border: 1px solid #334155;
   background: #0b1220;

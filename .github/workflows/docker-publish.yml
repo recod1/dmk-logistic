@@ -1,4 +1,4 @@
-name: Docker publish (api + web)
+name: Docker publish (api + web + bot)
 
 on:
   push:
@@ -10,9 +10,11 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   docker-publish:
+    name: Build ${{ matrix.service }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -20,12 +22,16 @@ jobs:
         include:
           - service: api
             image: recod0/dmk-logistic-api
-            dockerfile: docker/api/Dockerfile
-            context: .
+            dockerfile: api/Dockerfile
+            cache: none
           - service: web
             image: recod0/dmk-logistic-web
-            dockerfile: docker/web/Dockerfile
-            context: .
+            dockerfile: web/Dockerfile
+            cache: gha
+          - service: bot
+            image: recod0/dmk-logistic-bot
+            dockerfile: bot/Dockerfile
+            cache: gha
 
     steps:
       - name: Checkout repository
@@ -48,11 +54,11 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push api (no cache)
-        if: matrix.service == 'api'
+      - name: Build and push (no cache)
+        if: matrix.cache == 'none'
         uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.context }}
+          context: .
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
@@ -61,13 +67,13 @@ jobs:
           no-cache: true
           build-args: |
             CACHE_BUST=${{ github.sha }}
-            REQUIREMENTS_HASH=${{ hashFiles('requirements.txt') }}
+            REQUIREMENTS_HASH=${{ hashFiles('api/requirements.txt') }}
 
-      - name: Build and push web (with cache)
-        if: matrix.service == 'web'
+      - name: Build and push (gha cache)
+        if: matrix.cache == 'gha'
         uses: docker/build-push-action@v6
         with:
-          context: ${{ matrix.context }}
+          context: .
           file: ${{ matrix.dockerfile }}
           push: true
           tags: |
@@ -75,3 +81,46 @@ jobs:
             ${{ matrix.image }}:sha-${{ steps.meta.outputs.short_sha }}
           cache-from: type=gha,scope=${{ matrix.service }}
           cache-to: type=gha,mode=max,scope=${{ matrix.service }}
+          build-args: |
+            CACHE_BUST=${{ github.sha }}
+            REQUIREMENTS_HASH=${{ hashFiles('api/requirements.txt') }}
+
+      - name: Write job summary
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "### ${{ matrix.service }}"
+            echo "- image: \`${{ matrix.image }}:latest\`"
+            echo "- tag: \`${{ matrix.image }}:sha-${{ steps.meta.outputs.short_sha }}\`"
+            echo "- dockerfile: \`${{ matrix.dockerfile }}\`"
+            echo "- result: **${{ job.status }}**"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  docker-result:
+    name: Build result
+    needs: docker-publish
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish overall result
+        shell: bash
+        run: |
+          set -euo pipefail
+          result="${{ needs.docker-publish.result }}"
+          sha="${GITHUB_SHA::7}"
+          {
+            echo "## Docker publish result"
+            echo
+            echo "- status: **${result}**"
+            echo "- commit: \`${GITHUB_SHA}\`"
+            echo "- images:"
+            echo "  - \`recod0/dmk-logistic-api:latest\` / \`:sha-${sha}\`"
+            echo "  - \`recod0/dmk-logistic-web:latest\` / \`:sha-${sha}\`"
+            echo "  - \`recod0/dmk-logistic-bot:latest\` / \`:sha-${sha}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$result" != "success" ]; then
+            echo "Docker publish failed: ${result}" >&2
+            exit 1
+          fi
+          echo "All Docker images published."

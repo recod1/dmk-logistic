@@ -1,8 +1,32 @@
 /** Ужимает снимки перед отправкой: меньше тело запроса, ниже шанс 413 на прокси. */
 
-const MAX_EDGE_PX = 2560;
-const JPEG_QUALITY = 0.82;
-const SKIP_CANVAS_MAX_BYTES = 2.5 * 1024 * 1024;
+const MAX_EDGE_PX = 1600;
+const JPEG_QUALITY = 0.74;
+const SKIP_CANVAS_MAX_BYTES = 1.2 * 1024 * 1024;
+const BITMAP_TIMEOUT_MS = 6000;
+const ENCODE_TIMEOUT_MS = 8000;
+
+function yieldToUi(): Promise<void> {
+  return new Promise((resolve) => {
+    globalThis.setTimeout(resolve, 0);
+  });
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = globalThis.setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        globalThis.clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        globalThis.clearTimeout(timer);
+        reject(error);
+      }
+    );
+  });
+}
 
 async function imageToScaledJpegBlob(bitmap: ImageBitmap, maxEdge: number, quality: number): Promise<Blob> {
   let { width, height } = bitmap;
@@ -17,9 +41,15 @@ async function imageToScaledJpegBlob(bitmap: ImageBitmap, maxEdge: number, quali
     throw new Error("Canvas недоступен");
   }
   ctx.drawImage(bitmap, 0, 0, w, h);
-  const blob = await new Promise<Blob | null>((resolve) => {
-    canvas.toBlob((b) => resolve(b), "image/jpeg", quality);
-  });
+  const blob = await withTimeout(
+    new Promise<Blob | null>((resolve) => {
+      canvas.toBlob((b) => resolve(b), "image/jpeg", quality);
+    }),
+    ENCODE_TIMEOUT_MS,
+    "timeout-encode"
+  );
+  canvas.width = 1;
+  canvas.height = 1;
   if (!blob) {
     throw new Error("Не удалось сжать изображение");
   }
@@ -36,13 +66,18 @@ export async function prepareDocumentImageBlobs(blobs: Blob[]): Promise<Blob[]> 
 export async function prepareDocumentImageFiles(files: File[]): Promise<Blob[]> {
   const out: Blob[] = [];
   for (const file of files) {
-    if (!file.type.startsWith("image/")) {
+    await yieldToUi();
+    if (!file.type.startsWith("image/") && file.type !== "") {
+      out.push(file);
+      continue;
+    }
+    if ((file.type === "image/jpeg" || file.type === "image/jpg") && file.size <= SKIP_CANVAS_MAX_BYTES) {
       out.push(file);
       continue;
     }
     let bitmap: ImageBitmap | null = null;
     try {
-      bitmap = await createImageBitmap(file);
+      bitmap = await withTimeout(createImageBitmap(file), BITMAP_TIMEOUT_MS, "timeout-bitmap");
     } catch {
       out.push(file);
       continue;

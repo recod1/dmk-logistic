@@ -3,6 +3,8 @@
 import { clientsClaim } from "workbox-core";
 import { precacheAndRoute } from "workbox-precaching";
 
+import { DRIVER_PREFETCH_SYNC_TAG, prefetchAssignedRoutesFromSession } from "./offlinePrefetch";
+
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: string[] };
 
 precacheAndRoute(self.__WB_MANIFEST);
@@ -11,9 +13,23 @@ self.addEventListener("install", () => {
   self.skipWaiting();
 });
 
-self.addEventListener("activate", (event) => {
-  event.waitUntil(clientsClaim());
+self.addEventListener("activate", () => {
+  clientsClaim();
 });
+
+async function notifyClientsPrefetched(): Promise<void> {
+  const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+  for (const client of windows) {
+    client.postMessage({ type: "DMK_ROUTES_PREFETCHED" });
+  }
+}
+
+async function prefetchDriverRoutesInBackground(): Promise<void> {
+  const ok = await prefetchAssignedRoutesFromSession();
+  if (ok) {
+    await notifyClientsPrefetched();
+  }
+}
 
 self.addEventListener("push", (event: PushEvent) => {
   let title = "ДМК";
@@ -21,10 +37,15 @@ self.addEventListener("push", (event: PushEvent) => {
   let badgeCount: number | null = null;
   try {
     if (event.data) {
-      const parsed = event.data.json() as { title?: string; body?: string; badge?: number; badgeCount?: number };
+      const parsed = event.data.json() as {
+        title?: string;
+        body?: string;
+        badge?: number;
+        badgeCount?: number;
+        sync?: string;
+      };
       title = parsed.title || title;
       body = parsed.body || body;
-      // support both "badge" and "badgeCount" keys (if backend starts sending it later)
       const rawBadge = typeof parsed.badgeCount === "number" ? parsed.badgeCount : parsed.badge;
       badgeCount = typeof rawBadge === "number" && Number.isFinite(rawBadge) ? rawBadge : null;
     }
@@ -38,8 +59,6 @@ self.addEventListener("push", (event: PushEvent) => {
 
   const tasks: Array<Promise<unknown>> = [];
 
-  // iOS PWA: setAppBadge is available only for installed web apps with notifications permission.
-  // Use an "empty" badge (dot) when count is unknown; use numeric badge when count is provided.
   const nav = self.navigator as Navigator & {
     setAppBadge?: (count?: number) => Promise<void>;
     clearAppBadge?: () => Promise<void>;
@@ -59,6 +78,7 @@ self.addEventListener("push", (event: PushEvent) => {
       badge: "/pwa-192.png"
     })
   );
+  tasks.push(prefetchDriverRoutesInBackground());
 
   event.waitUntil(Promise.all(tasks));
 });
@@ -69,9 +89,41 @@ self.addEventListener("notificationclick", (event: NotificationEvent) => {
     clearAppBadge?: () => Promise<void>;
     setAppBadge?: (count?: number) => Promise<void>;
   };
-  if (typeof nav?.clearAppBadge === "function") {
-    event.waitUntil(nav.clearAppBadge());
-  } else if (typeof nav?.setAppBadge === "function") {
-    event.waitUntil(nav.setAppBadge(0));
+  const openApp = self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientsArr) => {
+    const existing = clientsArr.find((client) => "focus" in client) as WindowClient | undefined;
+    if (existing) {
+      return existing.focus();
+    }
+    return self.clients.openWindow("/");
+  });
+  const clearBadge =
+    typeof nav?.clearAppBadge === "function"
+      ? nav.clearAppBadge()
+      : typeof nav?.setAppBadge === "function"
+        ? nav.setAppBadge(0)
+        : Promise.resolve();
+  event.waitUntil(Promise.all([clearBadge, openApp, prefetchDriverRoutesInBackground()]));
+});
+
+self.addEventListener("sync", (event) => {
+  const syncEvent = event as ExtendableEvent & { tag?: string };
+  if (syncEvent.tag !== DRIVER_PREFETCH_SYNC_TAG) {
+    return;
+  }
+  syncEvent.waitUntil(prefetchDriverRoutesInBackground());
+});
+
+self.addEventListener("periodicsync", (event) => {
+  const periodicEvent = event as ExtendableEvent & { tag?: string };
+  if (periodicEvent.tag !== DRIVER_PREFETCH_SYNC_TAG) {
+    return;
+  }
+  periodicEvent.waitUntil(prefetchDriverRoutesInBackground());
+});
+
+self.addEventListener("message", (event: ExtendableMessageEvent) => {
+  const type = (event.data as { type?: string } | null)?.type;
+  if (type === "DMK_PREFETCH") {
+    event.waitUntil(prefetchDriverRoutesInBackground());
   }
 });

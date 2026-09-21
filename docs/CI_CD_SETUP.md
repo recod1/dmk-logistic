@@ -4,49 +4,35 @@
 
 Файл `.github/workflows/docker-publish.yml`:
 
-1. Запускается при:
-   - `push` в `main`,
-   - `push` тега,
-   - ручном запуске (`workflow_dispatch`).
-2. Логинится в Docker Hub.
-3. Собирает и пушит два образа:
-   - `recod0/dmk-logistic-api` (`docker/api/Dockerfile`),
-   - `recod0/dmk-logistic-web` (`docker/web/Dockerfile`).
-4. Публикует теги:
-   - `latest`,
-   - `sha-<short_sha>`.
-5. Использует кэш сборки Buildx (`cache-from/cache-to`, `type=gha`).
+1. Запускается при `push` в `main`, push тега или ручном `workflow_dispatch`.
+2. Логинится в Docker Hub (`DOCKERHUB_USERNAME` / `DOCKERHUB_TOKEN`).
+3. Собирает и пушит три образа:
+   - `recod0/dmk-logistic-api` (`api/Dockerfile`),
+   - `recod0/dmk-logistic-web` (`web/Dockerfile`),
+   - `recod0/dmk-logistic-bot` (`bot/Dockerfile`).
+4. Публикует теги `latest` и `sha-<short_sha>`.
+5. Пишет итог в job **Build result** и в GitHub Step Summary.
+
+Проверка запуска:
+
+```bash
+gh run list --workflow="Docker publish (api + web + bot)" --branch main --limit 5
+gh run watch <run-id>
+```
 
 ## GitHub Secrets
 
-Добавляются в Settings → Secrets and variables → Actions → **Secrets**.
+Settings → Secrets and variables → Actions → **Secrets**.
 
 | Имя | Назначение |
 |---|---|
 | `DOCKERHUB_USERNAME` | Логин Docker Hub |
 | `DOCKERHUB_TOKEN` | Docker Hub Access Token |
 
-## Portainer deploy (без curl/API вызовов)
+## Portainer
 
-Stack обновляется в самом Portainer за счёт pull новых образов, а не через API-скрипты.
+Stack обновляется pull'ом новых образов.
 
-Рекомендуемая схема:
-
-1. Создать/обновить stack в Portainer из Git-репозитория.
-2. Использовать compose-файл: `deploy/portainer/docker-compose.portainer.yml`.
-3. Настроить переменные stack environment:
-   - `API_IMAGE`, `WEB_IMAGE`;
-   - `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`;
-   - `JWT_SECRET`, а также при необходимости `API_KEY`, `TG_TOKEN`, `WIALON_TOKEN`, `ADMIN_PASSWORD`.
-4. Включить автообновление:
-   - через webhook update, или
-   - через periodic pull / re-pull image + redeploy.
-
-## Проверка после публикации
-
-1. Убедиться, что в Docker Hub появились теги:
-   - `recod0/dmk-logistic-api:latest`,
-   - `recod0/dmk-logistic-api:sha-<...>`,
-   - `recod0/dmk-logistic-web:latest`,
-   - `recod0/dmk-logistic-web:sha-<...>`.
-2. В Portainer выполнить pull/redeploy (или дождаться автообновления).
+1. Compose: `deploy/portainer/docker-compose.portainer.yml`.
+2. Переменные: `API_IMAGE`, `WEB_IMAGE`, `BOT_IMAGE`, Postgres/JWT и токены.
+3. Автообновление: webhook или periodic pull + redeploy.

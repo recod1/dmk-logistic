@@ -73,7 +73,7 @@ Dexie/IndexedDB хранит:
 
 Иконки манифеста:
 
-- `web/public/icons/icon-192.png`
-- `web/public/icons/icon-512.png`
+- `web/public/pwa-192.png`
+- `web/public/pwa-512.png`
 - `web/public/logo.jpg` (дополнительная иконка).
 

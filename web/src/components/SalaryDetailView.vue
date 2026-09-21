@@ -2,10 +2,12 @@
 import { computed, ref } from "vue";
 
 import type { SalaryRecord } from "../api";
+import { salaryCommentText, salaryStatusKey, salaryStatusLabel } from "../salaryDisplay";
 
 const props = defineProps<{
   record: SalaryRecord;
   isDriver: boolean;
+  canDelete: boolean;
   busy: boolean;
 }>();
 
@@ -14,18 +16,13 @@ const emit = defineEmits<{
   confirm: [];
   comment: [text: string];
   openChat: [];
+  remove: [];
 }>();
 
 const commentText = ref("");
+const confirmDelete = ref(false);
 
 type DetailRow = { label: string; value: string };
-
-function statusLabel(s: string): string {
-  const t = (s || "").trim();
-  if (t === "confirmed") return "Подтверждено";
-  if (t === "commented") return "С комментарием";
-  return "Ожидает подтверждения";
-}
 
 function isNonZeroNumber(v: number): boolean {
   return typeof v === "number" && Number.isFinite(v) && v !== 0;
@@ -35,6 +32,11 @@ function isNonEmptyText(v: string | null | undefined): boolean {
   const t = (v || "").trim();
   return Boolean(t) && t !== "0";
 }
+
+const statusKey = computed(() => salaryStatusKey(props.record.status_driver));
+const statusText = computed(() => salaryStatusLabel(props.record.status_driver));
+const driverComment = computed(() => salaryCommentText(props.record.comment_driver));
+const isConfirmed = computed(() => statusKey.value === "confirmed");
 
 const detailRows = computed<DetailRow[]>(() => {
   const r = props.record;
@@ -87,6 +89,13 @@ const detailRows = computed<DetailRow[]>(() => {
   text("№ рейса", r.route_number);
   return rows;
 });
+
+function submitComment(): void {
+  const text = commentText.value.trim();
+  if (!text) return;
+  emit("comment", text);
+  commentText.value = "";
+}
 </script>
 
 <template>
@@ -97,8 +106,15 @@ const detailRows = computed<DetailRow[]>(() => {
       <button type="button" class="secondary" @click="emit('openChat')">Чат расчёта</button>
     </header>
     <div class="card">
-      <p class="meta">{{ record.date_salary }} · {{ statusLabel(record.status_driver) }}</p>
+      <p class="meta">{{ record.date_salary }}</p>
+      <p class="status-banner" :class="`status-banner--${statusKey}`" role="status">
+        {{ statusText }}
+      </p>
       <p class="sum">Итого: {{ record.total.toFixed(2) }} ₽</p>
+      <aside v-if="driverComment" class="comment-card">
+        <h2>Комментарий водителя</h2>
+        <p class="comment-text">{{ driverComment }}</p>
+      </aside>
       <dl v-if="detailRows.length" class="grid">
         <template v-for="row in detailRows" :key="row.label">
           <dt>{{ row.label }}</dt>
@@ -106,20 +122,30 @@ const detailRows = computed<DetailRow[]>(() => {
         </template>
       </dl>
       <p v-else class="empty">Все значения равны нулю</p>
-      <p v-if="record.comment_driver && record.comment_driver.trim()" class="comment">
-        Комментарий водителя: {{ record.comment_driver }}
-      </p>
     </div>
     <div v-if="isDriver" class="card">
       <h2>Действия водителя</h2>
-      <button type="button" class="primary" :disabled="busy || record.status_driver === 'confirmed'" @click="emit('confirm')">Подтвердить расчёт</button>
+      <p v-if="isConfirmed" class="confirmed-note">Расчёт подтверждён. Кнопка подтверждения скрыта.</p>
+      <button v-else type="button" class="primary" :disabled="busy" @click="emit('confirm')">Подтвердить расчёт</button>
       <label class="field">
         Комментарий бухгалтеру
         <textarea v-model="commentText" rows="3" placeholder="Текст комментария" />
       </label>
-      <button type="button" class="secondary" :disabled="busy || !commentText.trim()" @click="emit('comment', commentText.trim())">
+      <button type="button" class="secondary" :disabled="busy || !commentText.trim()" @click="submitComment">
         Отправить комментарий
       </button>
+    </div>
+    <div v-if="canDelete" class="card danger-card">
+      <h2>Удаление</h2>
+      <p class="hint">Расчёт будет удалён без возможности восстановления.</p>
+      <template v-if="!confirmDelete">
+        <button type="button" class="danger" :disabled="busy" @click="confirmDelete = true">Удалить расчёт</button>
+      </template>
+      <div v-else class="delete-confirm">
+        <p class="warn">Удалить расчёт #{{ record.id }}?</p>
+        <button type="button" class="ghost" :disabled="busy" @click="confirmDelete = false">Отмена</button>
+        <button type="button" class="danger" :disabled="busy" @click="emit('remove')">Да, удалить</button>
+      </div>
     </div>
   </section>
 </template>
@@ -127,6 +153,7 @@ const detailRows = computed<DetailRow[]>(() => {
 <style scoped>
 .wrap {
   max-width: 720px;
+  width: 100%;
   margin: 0 auto;
   display: grid;
   gap: 0.75rem;
@@ -149,44 +176,96 @@ h2 {
   font-size: 0.95rem;
 }
 .card {
-  border: 1px solid #243043;
-  border-radius: 14px;
-  padding: 0.85rem;
-  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 0.95rem;
+  background: rgba(15, 23, 42, 0.72);
+  box-shadow: var(--shadow-sm);
 }
 .meta {
-  color: #94a3b8;
-  margin: 0 0 0.35rem;
+  color: var(--text-muted);
+  margin: 0 0 0.45rem;
+}
+.status-banner {
+  margin: 0 0 0.65rem;
+  padding: 0.55rem 0.7rem;
+  border-radius: 12px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+.status-banner--pending {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fcd34d;
+  border: 1px solid rgba(245, 158, 11, 0.35);
+}
+.status-banner--commented {
+  background: rgba(56, 189, 248, 0.16);
+  color: #7dd3fc;
+  border: 1px solid rgba(56, 189, 248, 0.35);
+}
+.status-banner--confirmed {
+  background: rgba(34, 197, 94, 0.18);
+  color: #86efac;
+  border: 1px solid rgba(34, 197, 94, 0.4);
 }
 .sum {
-  font-size: 1.15rem;
-  font-weight: 700;
-  margin: 0 0 0.65rem;
+  font-size: 1.25rem;
+  font-weight: 750;
+  margin: 0 0 0.75rem;
   color: #fde68a;
+  letter-spacing: -0.02em;
+}
+.comment-card {
+  margin: 0 0 0.85rem;
+  padding: 0.75rem 0.8rem;
+  border-radius: 12px;
+  background: rgba(251, 191, 36, 0.12);
+  border: 1px solid rgba(251, 191, 36, 0.38);
+}
+.comment-card h2 {
+  margin: 0 0 0.35rem;
+  color: #fde68a;
+  font-size: 0.82rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.comment-text {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #fff7ed;
+  font-size: 0.95rem;
+  line-height: 1.4;
 }
 .grid {
   display: grid;
-  grid-template-columns: minmax(8rem, 1fr) 1.2fr;
-  gap: 0.4rem 0.65rem;
-  font-size: 0.85rem;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.2fr);
+  gap: 0.5rem 0.75rem;
+  font-size: 0.88rem;
   margin: 0;
 }
 dt {
-  color: #94a3b8;
+  color: var(--text-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 dd {
   margin: 0;
   word-break: break-word;
+  overflow-wrap: anywhere;
+  min-width: 0;
 }
 .empty {
   margin: 0;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.88rem;
 }
-.comment {
-  margin-top: 0.65rem;
-  color: #fca5a5;
-  font-size: 0.9rem;
+.confirmed-note {
+  margin: 0 0 0.65rem;
+  padding: 0.55rem 0.65rem;
+  border-radius: 10px;
+  background: rgba(34, 197, 94, 0.16);
+  color: #86efac;
+  font-weight: 650;
 }
 .field {
   display: grid;
@@ -195,32 +274,64 @@ dd {
   font-size: 0.88rem;
 }
 textarea {
-  border-radius: 8px;
-  border: 1px solid #334155;
-  background: #0b1220;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
   color: #fff;
-  padding: 0.45rem;
+  padding: 0.5rem;
+}
+.hint {
+  margin: 0 0 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+}
+.danger-card {
+  border-color: rgba(239, 68, 68, 0.35);
+}
+.delete-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  align-items: center;
+}
+.warn {
+  margin: 0;
+  flex: 1 1 100%;
+  color: #fecaca;
+  font-weight: 650;
+}
+.ghost,
+.secondary,
+.primary,
+.danger {
+  min-height: 40px;
+  border-radius: 10px;
 }
 .ghost {
-  border: 1px solid #334155;
-  border-radius: 8px;
+  border: 1px solid var(--border-strong);
   background: transparent;
   color: #cbd5e1;
   padding: 0.35rem 0.55rem;
 }
 .secondary {
   border: none;
-  border-radius: 8px;
-  background: #3b82f6;
+  background: var(--primary);
   color: #fff;
   padding: 0.4rem 0.65rem;
 }
 .primary {
   border: none;
-  border-radius: 8px;
-  background: #16a34a;
+  background: var(--success-strong);
   color: #fff;
   padding: 0.45rem 0.65rem;
   margin-bottom: 0.5rem;
+  font-weight: 650;
+}
+.danger {
+  border: none;
+  background: var(--danger);
+  color: #fff;
+  padding: 0.45rem 0.65rem;
+  font-weight: 650;
 }
 </style>

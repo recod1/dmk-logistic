@@ -107,6 +107,6 @@
 Применяются через Alembic:
 
 ```bash
-alembic upgrade head
+cd api && alembic upgrade head
 ```
 

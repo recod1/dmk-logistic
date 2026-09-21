@@ -16,6 +16,13 @@ export interface LoginResponse {
   user: AuthUser;
 }
 
+export interface ManualEditMeta {
+  user_id: number;
+  login: string;
+  full_name: string;
+  at: string;
+}
+
 export interface PointDto {
   id: number;
   route_id: string;
@@ -70,6 +77,7 @@ export interface PointDto {
     lng: number | null;
   } | null;
   docs_images?: Array<{ id: number; content_type: string }>;
+  manual_edits?: Record<string, ManualEditMeta> | null;
 }
 
 export interface RouteDto {
@@ -83,6 +91,7 @@ export interface RouteDto {
   created_at: string | null;
   accepted_at: string | null;
   points: PointDto[];
+  logistics_contacts?: Array<{ name: string; phone: string }>;
 }
 
 export interface ActiveRouteResponse {
@@ -166,6 +175,7 @@ export interface DriverOption {
 }
 
 export interface AdminRoutePointPayload {
+  id?: number;
   type_point: string;
   place_point: string;
   date_point: string;
@@ -200,9 +210,16 @@ export interface AdminRoute {
   trailer_number: string;
   accepted_at: string | null;
   created_at: string | null;
+  driver_received_at?: string | null;
   driver: DriverOption | null;
   created_by: DriverOption | null;
   points_count: number;
+  active_point_status?: string | null;
+  active_point_place?: string | null;
+  active_point_name?: string | null;
+  active_point_type?: string | null;
+  active_point_date?: string | null;
+  active_point_time?: string | null;
   points: Array<
     {
       id: number;
@@ -254,6 +271,7 @@ export interface AdminRoute {
         lng: number | null;
       } | null;
       docs_images?: Array<{ id: number; content_type: string }>;
+      manual_edits?: Record<string, ManualEditMeta> | null;
     }
   > | null;
 }
@@ -305,5 +323,10 @@ export interface DriverRouteListItem {
   points_count: number;
   active_point_id: number | null;
   active_point_status: PointStatus | null;
+  active_point_place?: string | null;
+  active_point_name?: string | null;
+  active_point_type?: string | null;
+  active_point_date?: string | null;
+  active_point_time?: string | null;
 }
 

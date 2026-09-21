@@ -16,7 +16,7 @@ services:
     image: ${BOT_IMAGE:-recod0/dmk-logistic-bot:latest}
     build:
       context: .
-      dockerfile: docker/bot/Dockerfile
+      dockerfile: bot/Dockerfile
     restart: unless-stopped
     environment:
       TG_TOKEN: ${TG_TOKEN:?Задайте TG_TOKEN в .env}

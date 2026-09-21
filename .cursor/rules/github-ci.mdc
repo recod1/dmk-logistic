@@ -1,0 +1,21 @@
+---
+description: After project changes, commit, push to GitHub, wait for Docker Actions, report the result
+alwaysApply: true
+---
+
+# GitHub commit + Docker CI
+
+This repo expects changes to land on GitHub and be built by Actions.
+
+After finishing work that changed files:
+
+1. Commit (this project authorizes it). Do not commit `.env`, `db/self`, credentials, or secrets.
+2. Push the current branch to `origin` (`git push -u origin HEAD`).
+3. Wait for workflow `Docker publish (api + web + bot)` on the pushed SHA (`gh run watch` or `gh run list`).
+4. Report to the user: conclusion, run URL, and image tags `latest` plus `sha-<7>`.
+   - `recod0/dmk-logistic-api`
+   - `recod0/dmk-logistic-web`
+   - `recod0/dmk-logistic-bot`
+5. If CI fails, fetch the failed job log, fix, commit, push, and watch again.
+
+Do not force-push `main`.

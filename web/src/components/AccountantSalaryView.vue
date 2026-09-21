@@ -2,6 +2,7 @@
 import { ref } from "vue";
 
 import type { SalaryRecord } from "../api";
+import { salaryCommentText, salaryStatusKey, salaryStatusLabel } from "../salaryDisplay";
 
 const props = defineProps<{
   drivers: Array<{ id: number; login: string; full_name: string | null; legacy_tg_id: string | null }>;
@@ -56,10 +57,7 @@ function doExport(): void {
 
 <template>
   <section class="wrap">
-    <header class="head">
-      <button type="button" class="ghost" @click="emit('back')">← Назад</button>
-      <h1>Зарплата</h1>
-    </header>
+    <button class="ghost back" type="button" @click="emit('back')">← Назад</button>
     <p v-if="error" class="error">{{ error }}</p>
     <div class="card">
       <h2>Водитель</h2>
@@ -82,19 +80,23 @@ function doExport(): void {
     </div>
     <div v-if="selectedDriver" class="card">
       <h2>Расчёты водителя</h2>
-      <div class="row">
+      <div class="period">
         <input v-model="dateFrom" placeholder="дд.мм.гггг с" />
         <input v-model="dateTo" placeholder="дд.мм.гггг по" />
-        <button type="button" class="ghost" @click="applyMonth">Месяц</button>
-        <button type="button" class="secondary" :disabled="loading" @click="emit('refreshList', dateFrom || undefined, dateTo || undefined)">
-          Загрузить
-        </button>
-        <button type="button" class="primary" :disabled="!dateFrom || !dateTo" @click="doExport">CSV за период</button>
+        <div class="period-actions">
+          <button type="button" class="ghost" @click="applyMonth">Месяц</button>
+          <button type="button" class="secondary" :disabled="loading" @click="emit('refreshList', dateFrom || undefined, dateTo || undefined)">
+            Загрузить
+          </button>
+          <button type="button" class="primary" :disabled="!dateFrom || !dateTo" @click="doExport">CSV за период</button>
+        </div>
       </div>
       <div class="list">
         <button v-for="r in items" :key="r.id" type="button" class="row-item" @click="emit('select', r)">
           <span class="t1">#{{ r.id }} · {{ r.date_salary }}</span>
           <span class="t2">{{ r.total.toFixed(2) }} ₽</span>
+          <span class="status" :class="`status--${salaryStatusKey(r.status_driver)}`">{{ salaryStatusLabel(r.status_driver) }}</span>
+          <span v-if="salaryCommentText(r.comment_driver)" class="comment">Комментарий: {{ salaryCommentText(r.comment_driver) }}</span>
         </button>
       </div>
     </div>
@@ -103,10 +105,12 @@ function doExport(): void {
 
 <style scoped>
 .wrap {
-  max-width: 720px;
+  max-width: 880px;
+  width: 100%;
   margin: 0 auto;
   display: grid;
   gap: 0.75rem;
+  min-width: 0;
 }
 .head {
   display: flex;
@@ -119,27 +123,49 @@ h1 {
 }
 h2 {
   margin: 0 0 0.4rem;
-  font-size: 0.95rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-label);
 }
 .card {
-  border: 1px solid #243043;
-  border-radius: 14px;
-  padding: 0.85rem;
-  background: rgba(15, 23, 42, 0.6);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 0.95rem;
+  background: rgba(15, 23, 42, 0.72);
+  box-shadow: var(--shadow-sm);
 }
 .row {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
   align-items: center;
+  min-width: 0;
+}
+.row input {
+  flex: 1 1 12rem;
+  min-width: 0;
 }
 input {
+  width: 100%;
   border-radius: 8px;
   border: 1px solid #334155;
   background: #0b1220;
   color: #fff;
   padding: 0.45rem 0.55rem;
-  min-width: 140px;
+  min-width: 0;
+}
+.period {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.45rem;
+}
+.period-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 .ta {
   width: 100%;
@@ -199,6 +225,33 @@ input {
   font-size: 0.85rem;
   color: #94a3b8;
 }
+.status {
+  display: inline-flex;
+  width: fit-content;
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 650;
+}
+.status--pending {
+  background: rgba(245, 158, 11, 0.16);
+  color: #fcd34d;
+}
+.status--commented {
+  background: rgba(56, 189, 248, 0.16);
+  color: #7dd3fc;
+}
+.status--confirmed {
+  background: rgba(34, 197, 94, 0.16);
+  color: #86efac;
+}
+.comment {
+  font-size: 0.82rem;
+  color: #fde68a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .hint {
   white-space: pre-wrap;
   color: #94a3b8;
@@ -228,5 +281,10 @@ input {
 }
 .error {
   color: #fca5a5;
+}
+@media (max-width: 420px) {
+  .period {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

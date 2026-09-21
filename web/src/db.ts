@@ -1,6 +1,6 @@
 import Dexie, { type EntityTable } from "dexie";
 
-import type { EventPayload, PointStatus, RouteDto } from "./types";
+import type { EventPayload, PointStatus, RouteDto, DriverRouteListItem } from "./types";
 
 export interface ActiveRouteSnapshot {
   key: "active";
@@ -32,11 +32,42 @@ export interface PointStatusOverlay {
   updated_at: string;
 }
 
+export interface DriverRoutesCacheRow {
+  key: "driver";
+  assigned: DriverRouteListItem[];
+  history: DriverRouteListItem[];
+  active_route_id: string | null;
+  updatedAt: string;
+}
+
+export interface RouteSnapshotRow {
+  id: string;
+  route: RouteDto;
+  updatedAt: string;
+}
+
+export interface PendingAcceptRow {
+  route_id: string;
+  created_at: string;
+}
+
+export interface AuthSessionRow {
+  key: "current";
+  token: string;
+  apiBase: string;
+  roleCode: string;
+  updatedAt: string;
+}
+
 const db = new Dexie("dmk-mobile-db") as Dexie & {
   activeRoute: EntityTable<ActiveRouteSnapshot, "key">;
   outbox: EntityTable<OutboxEvent, "id">;
   pointOverlay: EntityTable<PointStatusOverlay, "id">;
   pendingDocBlobs: EntityTable<PendingDocBlob, "local_key">;
+  driverRoutesCache: EntityTable<DriverRoutesCacheRow, "key">;
+  routeSnapshots: EntityTable<RouteSnapshotRow, "id">;
+  pendingAccepts: EntityTable<PendingAcceptRow, "route_id">;
+  authSession: EntityTable<AuthSessionRow, "key">;
 };
 
 db.version(1).stores({
@@ -61,6 +92,27 @@ db.version(4).stores({
   outbox: "++id,client_event_id,point_id,created_at",
   pointOverlay: "++id,route_id,point_id,[route_id+point_id],updated_at",
   pendingDocBlobs: "local_key,point_id,route_id,created_at"
+});
+
+db.version(5).stores({
+  activeRoute: "key",
+  outbox: "++id,client_event_id,point_id,created_at",
+  pointOverlay: "++id,route_id,point_id,[route_id+point_id],updated_at",
+  pendingDocBlobs: "local_key,point_id,route_id,created_at",
+  driverRoutesCache: "key",
+  routeSnapshots: "id",
+  pendingAccepts: "route_id,created_at"
+});
+
+db.version(6).stores({
+  activeRoute: "key",
+  outbox: "++id,client_event_id,point_id,created_at",
+  pointOverlay: "++id,route_id,point_id,[route_id+point_id],updated_at",
+  pendingDocBlobs: "local_key,point_id,route_id,created_at",
+  driverRoutesCache: "key",
+  routeSnapshots: "id",
+  pendingAccepts: "route_id,created_at",
+  authSession: "key"
 });
 
 function toPlainObject<T>(value: T): T {
@@ -171,6 +223,84 @@ export async function removePointOverlays(routeId: string, pointIds: number[]): 
     return;
   }
   await db.pointOverlay.bulkDelete(idsToDelete);
+}
+
+export async function saveDriverRoutesCache(row: Omit<DriverRoutesCacheRow, "key" | "updatedAt">): Promise<void> {
+  await db.driverRoutesCache.put({
+    key: "driver",
+    assigned: toPlainObject(row.assigned),
+    history: toPlainObject(row.history),
+    active_route_id: row.active_route_id,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+export async function loadDriverRoutesCache(): Promise<DriverRoutesCacheRow | undefined> {
+  return db.driverRoutesCache.get("driver");
+}
+
+export async function saveRouteSnapshot(route: RouteDto): Promise<void> {
+  await db.routeSnapshots.put({
+    id: route.id,
+    route: toPlainObject(route),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+export async function loadRouteSnapshot(routeId: string): Promise<RouteDto | null> {
+  const row = await db.routeSnapshots.get(routeId);
+  return row?.route ?? null;
+}
+
+export async function addPendingAccept(routeId: string): Promise<void> {
+  await db.pendingAccepts.put({
+    route_id: routeId,
+    created_at: new Date().toISOString()
+  });
+}
+
+export async function getPendingAccepts(): Promise<PendingAcceptRow[]> {
+  return db.pendingAccepts.orderBy("created_at").toArray();
+}
+
+export async function removePendingAccept(routeId: string): Promise<void> {
+  await db.pendingAccepts.delete(routeId);
+}
+
+export async function hasPendingAccept(routeId: string): Promise<boolean> {
+  const row = await db.pendingAccepts.get(routeId);
+  return Boolean(row);
+}
+
+export async function saveAuthSession(row: Omit<AuthSessionRow, "key" | "updatedAt">): Promise<void> {
+  await db.authSession.put({
+    key: "current",
+    token: row.token,
+    apiBase: row.apiBase,
+    roleCode: row.roleCode,
+    updatedAt: new Date().toISOString()
+  });
+}
+
+export async function loadAuthSession(): Promise<AuthSessionRow | undefined> {
+  return db.authSession.get("current");
+}
+
+export async function clearAuthSession(): Promise<void> {
+  await db.authSession.delete("current");
+}
+
+export async function getDriverQueueCounts(deviceId: string): Promise<{ outbox: number; docs: number; accepts: number }> {
+  const [outboxRows, docs, accepts] = await Promise.all([
+    db.outbox.toArray(),
+    db.pendingDocBlobs.count(),
+    db.pendingAccepts.count()
+  ]);
+  return {
+    outbox: outboxRows.filter((item) => item.device_id === deviceId).length,
+    docs,
+    accepts
+  };
 }
 
 export default db;

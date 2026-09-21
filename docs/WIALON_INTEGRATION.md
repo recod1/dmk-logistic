@@ -36,4 +36,4 @@ WIALON_BASE_URL=http://w1.wialon.justgps.ru
 - `timezonefinder`
 - `pytz`
 
-Устанавливаются через `pip install -r requirements.txt`.
+Устанавливаются через `pip install -r api/requirements.txt`.

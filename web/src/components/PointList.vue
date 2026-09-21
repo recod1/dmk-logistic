@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import MapsAddressLink from "./MapsAddressLink.vue";
 import {
   canRevertPointStatus,
   isPointDone,
-  mapsSearchUrl,
   nextStatus,
   nextStatusLabel,
   statusLabel
@@ -58,9 +58,7 @@ function showRevert(point: PointDto): boolean {
         <span class="status">{{ statusLabel(point.status) }}</span>
       </div>
       <p v-if="point.place_point" class="addr">
-        <a class="maps-link" :href="mapsSearchUrl(point.place_point)" target="_blank" rel="noopener noreferrer">{{
-          point.place_point
-        }}</a>
+        <MapsAddressLink :address="point.place_point" />
       </p>
       <p v-else class="addr-muted">Адрес не указан</p>
       <small>{{ point.date_point }}</small>
@@ -71,14 +69,13 @@ function showRevert(point: PointDto): boolean {
       </small>
       <small v-if="point.point_note" class="point-note">{{ point.point_note }}</small>
       <div class="btn-row">
-        <button :disabled="!canAdvance(point) || syncing" @click="emit('advanceStatus', point.id)">
+        <button :disabled="!canAdvance(point)" @click="emit('advanceStatus', point.id)">
           {{ nextLabel(point) }}
         </button>
         <button
           v-if="showRevert(point)"
           class="revert"
           type="button"
-          :disabled="syncing"
           @click="emit('revertStatus', point.id)"
         >
           Вернуть предыдущий статус
@@ -94,12 +91,13 @@ function showRevert(point: PointDto): boolean {
   gap: 0.7rem;
 }
 .point-card {
-  padding: 0.8rem;
-  border: 1px solid #374151;
-  border-radius: 12px;
-  background: #111827;
+  padding: 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
   display: grid;
   gap: 0.45rem;
+  box-shadow: var(--shadow-sm);
 }
 .title-row {
   display: flex;

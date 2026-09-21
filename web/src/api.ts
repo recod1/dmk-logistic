@@ -1,3 +1,5 @@
+import { reportDebugError } from "./debugLog";
+import { noteApiReachable } from "./connectionWatch";
 import type {
   ActiveRouteResponse,
   AdminRoute,
@@ -29,24 +31,129 @@ export class ApiError extends Error {
   status: number;
   bodyText: string;
   detail: string | null;
+  url: string | null;
+  method: string | null;
 
-  constructor(message: string, opts: { status: number; bodyText: string; detail?: string | null }) {
+  constructor(
+    message: string,
+    opts: { status: number; bodyText: string; detail?: string | null; url?: string | null; method?: string | null }
+  ) {
     super(message);
     this.name = "ApiError";
     this.status = opts.status;
     this.bodyText = opts.bodyText;
     this.detail = opts.detail ?? null;
+    this.url = opts.url ?? null;
+    this.method = opts.method ?? null;
   }
 }
 
-async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, {
-    ...init,
-    headers: {
-      "Content-Type": "application/json",
-      ...(init?.headers ?? {})
+function defaultFetchTimeoutMs(): number {
+  if (typeof window === "undefined") {
+    return 20_000;
+  }
+  const coarse = window.matchMedia?.("(pointer: coarse)")?.matches;
+  return coarse ? 28_000 : 18_000;
+}
+
+function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): AbortSignal | undefined {
+  const real = signals.filter((item): item is AbortSignal => Boolean(item));
+  if (!real.length) {
+    return undefined;
+  }
+  const anyFn = (AbortSignal as typeof AbortSignal & { any?: (items: AbortSignal[]) => AbortSignal }).any;
+  if (typeof anyFn === "function") {
+    return anyFn(real);
+  }
+  return real[0];
+}
+
+export function isOfflineLikeError(error: unknown): boolean {
+  if (error instanceof ApiError && (error.status === 0 || error.detail === "timeout")) {
+    return true;
+  }
+  const name = (error as { name?: string } | null)?.name || "";
+  const message = ((error as Error | null)?.message || "").toLowerCase();
+  return (
+    name === "AbortError" ||
+    name === "TimeoutError" ||
+    message.includes("failed to fetch") ||
+    message.includes("networkerror") ||
+    message.includes("нет связи")
+  );
+}
+
+const getInflight = new Map<string, Promise<unknown>>();
+
+async function requestJson<T>(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const method = (init?.method || "GET").toUpperCase();
+  const canCoalesce = method === "GET" && !init?.signal;
+  if (canCoalesce) {
+    const existing = getInflight.get(url);
+    if (existing) {
+      return existing as Promise<T>;
     }
-  });
+  }
+  const pending = requestJsonInner<T>(url, init);
+  if (canCoalesce) {
+    getInflight.set(url, pending);
+    void pending.finally(() => {
+      if (getInflight.get(url) === pending) {
+        getInflight.delete(url);
+      }
+    });
+  }
+  return pending;
+}
+
+async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+  const timeoutMs = init?.timeoutMs ?? defaultFetchTimeoutMs();
+  const timeoutCtrl = new AbortController();
+  const timer = globalThis.setTimeout(() => timeoutCtrl.abort(), timeoutMs);
+  const method = (init?.method || "GET").toUpperCase();
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    "Cache-Control": "no-cache",
+    ...((init?.headers as Record<string, string> | undefined) ?? {})
+  };
+  if (init?.body != null && !headers["Content-Type"] && !headers["content-type"]) {
+    headers["Content-Type"] = "application/json";
+  }
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      cache: "no-store",
+      credentials: init?.credentials ?? "same-origin",
+      signal: mergeAbortSignals([init?.signal, timeoutCtrl.signal]),
+      headers
+    });
+  } catch (error) {
+    const name = (error as { name?: string } | null)?.name || "";
+    const apiError =
+      name === "AbortError" || name === "TimeoutError"
+        ? new ApiError("Нет связи с сервером. Проверьте интернет.", {
+            status: 0,
+            bodyText: "",
+            detail: "timeout",
+            url,
+            method
+          })
+        : error;
+    reportDebugError({
+      source: "api.fetch",
+      error: apiError,
+      url,
+      method,
+      extra: { timeout_ms: timeoutMs, name }
+    });
+    if (apiError instanceof ApiError) {
+      throw apiError;
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
 
   if (!response.ok) {
     const bodyText = await response.text();
@@ -60,8 +167,18 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
       // ignore non-json body
     }
     const message = detail || bodyText || `HTTP ${response.status}`;
-    throw new ApiError(message, { status: response.status, bodyText, detail });
+    const apiError = new ApiError(message, { status: response.status, bodyText, detail, url, method });
+    if (response.status !== 401) {
+      reportDebugError({
+        source: "api.http",
+        error: apiError,
+        url,
+        method
+      });
+    }
+    throw apiError;
   }
+  noteApiReachable();
   return response.json() as Promise<T>;
 }
 
@@ -97,6 +214,23 @@ export async function listDriverRoutes(
   );
 }
 
+export async function prefetchDriverAssignedRoutes(token: string): Promise<{
+  items: RouteDto[];
+  active_route_id: string | null;
+  logistics_contacts?: Array<{ name: string; phone: string }>;
+}> {
+  return requestJson<{
+    items: RouteDto[];
+    active_route_id: string | null;
+    logistics_contacts?: Array<{ name: string; phone: string }>;
+  }>(`${API_BASE}/v1/mobile/routes/prefetch`, {
+    cache: "no-store",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}
+
 export async function getDriverRoute(token: string, routeId: string): Promise<RouteDto> {
   const data = await requestJson<{ route: RouteDto }>(`${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}`, {
     headers: {
@@ -108,11 +242,13 @@ export async function getDriverRoute(token: string, routeId: string): Promise<Ro
 
 export async function getPointTelemetry(
   token: string,
-  pointId: number
+  pointId: number,
+  options?: { timeoutMs?: number }
 ): Promise<{ odometer: string | null; odometer_source: "wialon" | null }> {
   return requestJson<{ odometer: string | null; odometer_source: "wialon" | null }>(
     `${API_BASE}/v1/mobile/points/${pointId}/telemetry`,
     {
+      timeoutMs: options?.timeoutMs,
       headers: {
         Authorization: `Bearer ${token}`
       }
@@ -151,30 +287,98 @@ export async function uploadPointDocuments(
   token: string,
   pointId: number,
   blobs: Blob[],
-  opts?: { signal?: AbortSignal }
+  opts?: { signal?: AbortSignal; timeoutMs?: number }
 ): Promise<{ file_ids: number[] }> {
   const fd = new FormData();
   blobs.forEach((b, i) => {
     fd.append("files", b, `document-${i}.jpg`);
   });
   const url = `${API_BASE}/v1/mobile/points/${pointId}/documents`;
-  const response = await fetch(url, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`
-    },
-    body: fd,
-    signal: opts?.signal
-  });
+  const timeoutMs = opts?.timeoutMs ?? 45_000;
+  const timeoutCtrl = new AbortController();
+  const timer = globalThis.setTimeout(() => timeoutCtrl.abort(), timeoutMs);
+  let raceTimer: number | null = null;
+  let response: Response;
+  try {
+    const fetchPromise = fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      body: fd,
+      signal: mergeAbortSignals([opts?.signal, timeoutCtrl.signal])
+    });
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      raceTimer = globalThis.setTimeout(() => {
+        timeoutCtrl.abort();
+        reject(
+          new ApiError("Нет связи с сервером. Документы сохранены на телефоне и уйдут позже.", {
+            status: 0,
+            bodyText: "",
+            detail: "timeout",
+            url,
+            method: "POST"
+          })
+        );
+      }, timeoutMs + 250);
+    });
+    response = await Promise.race([fetchPromise, timeoutPromise]);
+  } catch (error) {
+    const name = (error as { name?: string } | null)?.name || "";
+    const apiError =
+      error instanceof ApiError
+        ? error
+        : name === "AbortError" || name === "TimeoutError"
+          ? new ApiError("Нет связи с сервером. Документы сохранены на телефоне и уйдут позже.", {
+              status: 0,
+              bodyText: "",
+              detail: "timeout",
+              url,
+              method: "POST"
+            })
+          : error;
+    reportDebugError({
+      source: "api.upload-docs",
+      error: apiError,
+      url,
+      method: "POST",
+      extra: { point_id: pointId, files: blobs.length, timeout_ms: timeoutMs, name }
+    });
+    if (apiError instanceof Error) {
+      throw apiError;
+    }
+    throw error;
+  } finally {
+    globalThis.clearTimeout(timer);
+    if (raceTimer !== null) {
+      globalThis.clearTimeout(raceTimer);
+    }
+  }
   if (!response.ok) {
     const text = await response.text();
     if (response.status === 413) {
-      throw new Error(
+      const err = new Error(
         "Сервер отклонил файл как слишком большой (413). Уже ужато на устройстве: попробуйте меньше фото за раз или обратитесь к администратору — на nginx нужен client_max_body_size."
       );
+      reportDebugError({
+        source: "api.upload-docs",
+        error: err,
+        url,
+        method: "POST",
+        extra: { status: 413, point_id: pointId, files: blobs.length }
+      });
+      throw err;
     }
     const trimmed = text.length > 280 ? `${text.slice(0, 280)}…` : text;
-    throw new Error(trimmed || `HTTP ${response.status}`);
+    const err = new ApiError(trimmed || `HTTP ${response.status}`, {
+      status: response.status,
+      bodyText: text,
+      detail: trimmed,
+      url,
+      method: "POST"
+    });
+    reportDebugError({ source: "api.upload-docs", error: err, url, method: "POST" });
+    throw err;
   }
   return response.json() as Promise<{ file_ids: number[] }>;
 }
@@ -385,6 +589,19 @@ export async function updateAdminRoutePoint(
     point_contacts: string;
     point_time: string;
     point_note: string;
+    departure_time: string;
+    departure_odometer: string;
+    departure_coordinates: { lat: number | null; lng: number | null };
+    registration_time: string;
+    registration_odometer: string;
+    registration_coordinates: { lat: number | null; lng: number | null };
+    gate_time: string;
+    gate_odometer: string;
+    gate_coordinates: { lat: number | null; lng: number | null };
+    docs_time: string;
+    docs_odometer: string;
+    docs_coordinates: { lat: number | null; lng: number | null };
+    status: string;
   }>
 ): Promise<PointDto> {
   return requestJson<PointDto>(`${API_BASE}/v1/admin/routes/points/${pointId}`, {
@@ -517,6 +734,7 @@ export async function listRouteChatMessages(
     author_name: string;
     text: string;
     created_at: string;
+    read?: boolean;
     attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
   }>
 > {
@@ -528,6 +746,7 @@ export async function listRouteChatMessages(
       author_name: string;
       text: string;
       created_at: string;
+      read?: boolean;
       attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
     }>;
   }>(`${API_BASE}/v1/chat/routes/${encodeRouteId(routeId)}/messages`, {
@@ -1005,18 +1224,20 @@ export type LogisticsContact = {
 
 export async function listLogisticsContacts(token: string): Promise<LogisticsContact[]> {
   const data = await requestJson<{ items: LogisticsContact[] }>(`${API_BASE}/v1/logistics-contacts`, {
+    cache: "no-store",
     headers: { Authorization: `Bearer ${token}` }
   });
-  return data.items;
+  return data.items ?? [];
 }
 
 export async function saveLogisticsContacts(token: string, items: Array<{ name: string; phone: string }>): Promise<LogisticsContact[]> {
   const data = await requestJson<{ items: LogisticsContact[] }>(`${API_BASE}/v1/admin/logistics-contacts`, {
     method: "PUT",
+    cache: "no-store",
     headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify({ items })
   });
-  return data.items;
+  return data.items ?? [];
 }
 
 export async function listSalariesForDriver(
@@ -1054,6 +1275,13 @@ export async function commentSalary(token: string, salaryId: number, text: strin
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify({ text })
+  });
+}
+
+export async function deleteSalary(token: string, salaryId: number): Promise<{ ok: boolean; id: number }> {
+  return requestJson<{ ok: boolean; id: number }>(`${API_BASE}/v1/salary/${salaryId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
   });
 }
 
@@ -1121,5 +1349,19 @@ export async function getChatUnreadSummary(
     },
     body: JSON.stringify({ route_ids: routeIds })
   });
+  return data.items;
+}
+
+export async function getMyChatUnreadSummary(
+  token: string
+): Promise<Array<{ route_id: string; unread_count: number }>> {
+  const data = await requestJson<{ items: Array<{ route_id: string; unread_count: number }> }>(
+    `${API_BASE}/v1/chat/unread-summary`,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    }
+  );
   return data.items;
 }

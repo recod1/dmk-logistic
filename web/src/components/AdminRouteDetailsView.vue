@@ -1,10 +1,44 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 
+import MapsAddressLink from "./MapsAddressLink.vue";
+import MapsCoordsLink from "./MapsCoordsLink.vue";
 import PointDocLinks from "./PointDocLinks.vue";
-import type { AdminRoute, AdminRoutePointPayload, DriverOption, RouteWorkflowStatus } from "../types";
+import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
+import { listPointStatusLabel } from "../status";
+import type { AdminRoute, AdminRoutePointPayload, DriverOption, ManualEditMeta, RouteWorkflowStatus } from "../types";
+
+type AdminRoutePoint = NonNullable<AdminRoute["points"]>[number];
+
+type PointStageEdit = {
+  type_point: string;
+  place_point: string;
+  date_point: string;
+  point_time: string;
+  point_name: string;
+  point_contacts: string;
+  point_note: string;
+  departure_time: string;
+  departure_odometer: string;
+  departure_lat: string;
+  departure_lng: string;
+  registration_time: string;
+  registration_odometer: string;
+  registration_lat: string;
+  registration_lng: string;
+  gate_time: string;
+  gate_odometer: string;
+  gate_lat: string;
+  gate_lng: string;
+  docs_time: string;
+  docs_odometer: string;
+  docs_lat: string;
+  docs_lng: string;
+  status: string;
+};
 
 type PointForm = {
+  id?: number;
   type_point: string;
   place_point: string;
   date_point: string;
@@ -17,6 +51,7 @@ const props = defineProps<{
   loading: boolean;
   authToken: string;
   unreadChatCount?: number;
+  error?: string;
 }>();
 
 const emit = defineEmits<{
@@ -36,11 +71,13 @@ const emit = defineEmits<{
     }
   ];
   openChat: [routeId: string];
+  updatePoint: [pointId: number, payload: Record<string, unknown>];
 }>();
 
 const showReassign = ref(false);
 const showEdit = ref(false);
 const reassignDriverId = ref(0);
+const editingPointId = ref<number | null>(null);
 
 const editForm = reactive({
   number_auto: "",
@@ -112,6 +149,24 @@ function canCancel(status: RouteWorkflowStatus): boolean {
   return status === "new" || status === "process";
 }
 
+function phoneReceiptLabel(route: AdminRoute): string {
+  if (!route.driver?.id) {
+    return "—";
+  }
+  return route.driver_received_at ? "Получен" : "Не получен";
+}
+
+function phoneReceiptHint(route: AdminRoute): string {
+  if (!route.driver_received_at) {
+    return "Водитель ещё не получил рейс на телефон";
+  }
+  try {
+    return `Скачан на телефон: ${new Date(route.driver_received_at).toLocaleString()}`;
+  } catch {
+    return "Рейс скачан приложением на телефоне водителя";
+  }
+}
+
 function makeEmptyPoint(): PointForm {
   return {
     type_point: "loading",
@@ -121,8 +176,211 @@ function makeEmptyPoint(): PointForm {
   };
 }
 
+function emptyPointStageEdit(): PointStageEdit {
+  return {
+    type_point: "loading",
+    place_point: "",
+    date_point: "",
+    point_time: "",
+    point_name: "",
+    point_contacts: "",
+    point_note: "",
+    departure_time: "",
+    departure_odometer: "",
+    departure_lat: "",
+    departure_lng: "",
+    registration_time: "",
+    registration_odometer: "",
+    registration_lat: "",
+    registration_lng: "",
+    gate_time: "",
+    gate_odometer: "",
+    gate_lat: "",
+    gate_lng: "",
+    docs_time: "",
+    docs_odometer: "",
+    docs_lat: "",
+    docs_lng: "",
+    status: "new"
+  };
+}
+
+const pointEdit = reactive<PointStageEdit>(emptyPointStageEdit());
+
+function coordText(value?: number | null): string {
+  return typeof value === "number" && Number.isFinite(value) ? String(value) : "";
+}
+
+function parseCoord(value: string): number | null {
+  const trimmed = value.trim().replace(",", ".");
+  if (!trimmed) {
+    return null;
+  }
+  const num = Number(trimmed);
+  return Number.isFinite(num) ? num : null;
+}
+
+function changedText(form: string, original?: string | null): string | undefined {
+  const next = form.trim();
+  const prev = (original || "").trim();
+  return next === prev ? undefined : next;
+}
+
+function changedDate(form: string, original?: string | null): string | undefined {
+  const next = form.trim();
+  const prev = (original || "").trim();
+  if (next === prev) {
+    return undefined;
+  }
+  if (!next && prev && !/^\d{4}-\d{2}-\d{2}$/.test(prev)) {
+    return undefined;
+  }
+  return next;
+}
+
+function changedTimeIso(formLocal: string, originalDisplay?: string | null): string | undefined {
+  const next = formLocal.trim();
+  const originalLocal = displayRuToDatetimeLocal(originalDisplay);
+  if (!next) {
+    if (!originalDisplay?.trim() || !originalLocal) {
+      return undefined;
+    }
+    return "";
+  }
+  if (next === originalLocal) {
+    return undefined;
+  }
+  return fromDatetimeLocalToIso(next);
+}
+
+function changedOdometer(form: string, original?: string | null): string | undefined {
+  const next = form.trim();
+  const prev = (original || "").trim();
+  return next === prev ? undefined : next;
+}
+
+function changedCoords(
+  latForm: string,
+  lngForm: string,
+  original?: { lat?: number | null; lng?: number | null } | null
+): { lat: number | null; lng: number | null } | undefined {
+  const lat = parseCoord(latForm);
+  const lng = parseCoord(lngForm);
+  const prevLat = typeof original?.lat === "number" && Number.isFinite(original.lat) ? original.lat : null;
+  const prevLng = typeof original?.lng === "number" && Number.isFinite(original.lng) ? original.lng : null;
+  if (lat === prevLat && lng === prevLng) {
+    return undefined;
+  }
+  return { lat, lng };
+}
+
+function editHint(edits: Record<string, ManualEditMeta> | null | undefined, key: string): string {
+  const meta = edits?.[key];
+  if (!meta) {
+    return "";
+  }
+  const name = (meta.full_name || meta.login || "").trim();
+  return name ? `изменено: ${name}` : "";
+}
+
+function fillPointStageEdit(point: AdminRoutePoint): void {
+  Object.assign(pointEdit, emptyPointStageEdit(), {
+    type_point: point.type_point || "loading",
+    place_point: point.place_point || "",
+    date_point: point.date_point || "",
+    point_time: point.point_time || "",
+    point_name: point.point_name || "",
+    point_contacts: point.point_contacts || "",
+    point_note: point.point_note || "",
+    departure_time: displayRuToDatetimeLocal(point.departure_time || point.time_accepted),
+    departure_odometer: point.departure_odometer || "",
+    departure_lat: coordText(point.departure_coordinates?.lat),
+    departure_lng: coordText(point.departure_coordinates?.lng),
+    registration_time: displayRuToDatetimeLocal(point.registration_time || point.time_registration),
+    registration_odometer: point.registration_odometer || "",
+    registration_lat: coordText(point.registration_coordinates?.lat),
+    registration_lng: coordText(point.registration_coordinates?.lng),
+    gate_time: displayRuToDatetimeLocal(point.gate_time || point.time_put_on_gate),
+    gate_odometer: point.gate_odometer || "",
+    gate_lat: coordText(point.gate_coordinates?.lat),
+    gate_lng: coordText(point.gate_coordinates?.lng),
+    docs_time: displayRuToDatetimeLocal(point.docs_time || point.time_docs),
+    docs_odometer: point.docs_odometer || "",
+    docs_lat: coordText(point.docs_coordinates?.lat),
+    docs_lng: coordText(point.docs_coordinates?.lng),
+    status: point.status === "success" ? "docs" : point.status || "new"
+  });
+}
+
+function openPointEdit(point: AdminRoutePoint): void {
+  editingPointId.value = point.id;
+  fillPointStageEdit(point);
+}
+
+function closePointEdit(): void {
+  editingPointId.value = null;
+}
+
+function submitPointEdit(point: AdminRoutePoint): void {
+  const payload: Record<string, unknown> = {};
+  const typePoint = changedText(pointEdit.type_point, point.type_point);
+  const placePoint = changedText(pointEdit.place_point, point.place_point);
+  const datePoint = changedDate(pointEdit.date_point, point.date_point);
+  const pointName = changedText(pointEdit.point_name, point.point_name);
+  const pointContacts = changedText(pointEdit.point_contacts, point.point_contacts);
+  const pointTime = changedText(pointEdit.point_time, point.point_time);
+  const pointNote = changedText(pointEdit.point_note, point.point_note);
+  const departureTime = changedTimeIso(pointEdit.departure_time, point.departure_time || point.time_accepted);
+  const departureOdometer = changedOdometer(pointEdit.departure_odometer, point.departure_odometer);
+  const departureCoordinates = changedCoords(pointEdit.departure_lat, pointEdit.departure_lng, point.departure_coordinates);
+  const registrationTime = changedTimeIso(pointEdit.registration_time, point.registration_time || point.time_registration);
+  const registrationOdometer = changedOdometer(pointEdit.registration_odometer, point.registration_odometer);
+  const registrationCoordinates = changedCoords(
+    pointEdit.registration_lat,
+    pointEdit.registration_lng,
+    point.registration_coordinates
+  );
+  const gateTime = changedTimeIso(pointEdit.gate_time, point.gate_time || point.time_put_on_gate);
+  const gateOdometer = changedOdometer(pointEdit.gate_odometer, point.gate_odometer);
+  const gateCoordinates = changedCoords(pointEdit.gate_lat, pointEdit.gate_lng, point.gate_coordinates);
+  const docsTime = changedTimeIso(pointEdit.docs_time, point.docs_time || point.time_docs);
+  const docsOdometer = changedOdometer(pointEdit.docs_odometer, point.docs_odometer);
+  const docsCoordinates = changedCoords(pointEdit.docs_lat, pointEdit.docs_lng, point.docs_coordinates);
+  const nextStatus = (pointEdit.status || "").trim();
+  const currentStatus = point.status === "success" ? "docs" : point.status;
+
+  if (typePoint !== undefined) payload.type_point = typePoint;
+  if (placePoint !== undefined) payload.place_point = placePoint;
+  if (datePoint !== undefined) payload.date_point = datePoint;
+  if (pointName !== undefined) payload.point_name = pointName;
+  if (pointContacts !== undefined) payload.point_contacts = pointContacts;
+  if (pointTime !== undefined) payload.point_time = pointTime;
+  if (pointNote !== undefined) payload.point_note = pointNote;
+  if (departureTime !== undefined) payload.departure_time = departureTime;
+  if (departureOdometer !== undefined) payload.departure_odometer = departureOdometer;
+  if (departureCoordinates) payload.departure_coordinates = departureCoordinates;
+  if (registrationTime !== undefined) payload.registration_time = registrationTime;
+  if (registrationOdometer !== undefined) payload.registration_odometer = registrationOdometer;
+  if (registrationCoordinates) payload.registration_coordinates = registrationCoordinates;
+  if (gateTime !== undefined) payload.gate_time = gateTime;
+  if (gateOdometer !== undefined) payload.gate_odometer = gateOdometer;
+  if (gateCoordinates) payload.gate_coordinates = gateCoordinates;
+  if (docsTime !== undefined) payload.docs_time = docsTime;
+  if (docsOdometer !== undefined) payload.docs_odometer = docsOdometer;
+  if (docsCoordinates) payload.docs_coordinates = docsCoordinates;
+  if (nextStatus && nextStatus !== currentStatus) payload.status = nextStatus;
+
+  if (!Object.keys(payload).length) {
+    editingPointId.value = null;
+    return;
+  }
+  emit("updatePoint", point.id, payload);
+  editingPointId.value = null;
+}
+
 function toPointPayload(points: PointForm[]): AdminRoutePointPayload[] {
   return points.map((point, index) => ({
+    id: point.id,
     type_point: point.type_point || "loading",
     place_point: point.place_point.trim(),
     date_point: point.date_point.trim(),
@@ -143,14 +401,19 @@ watch(
     editForm.registration_number = route.registration_number || "";
     editForm.trailer_number = route.trailer_number || "";
     editForm.points = (route.points || []).map((point) => ({
+      id: point.id,
       type_point: point.type_point || "loading",
       place_point: point.place_point || "",
       date_point: point.date_point || "",
       point_time: point.point_time || ""
     }));
     reassignDriverId.value = route.driver?.id ?? 0;
-    showReassign.value = false;
-    showEdit.value = false;
+    if (editingPointId.value != null) {
+      const current = (route.points || []).find((item) => item.id === editingPointId.value);
+      if (!current) {
+        editingPointId.value = null;
+      }
+    }
   },
   { immediate: true }
 );
@@ -212,18 +475,53 @@ function removeRoute(): void {
     <section class="card details-card">
       <div class="head">
         <h2>Рейс {{ route.id }}</h2>
-        <button class="ghost" @click="emit('back')">← К списку</button>
+        <button class="ghost" @click="emit('back')">← Назад</button>
       </div>
+      <p v-if="error" class="error">{{ error }}</p>
 
       <div class="summary-grid">
-        <p><strong>N рейса:</strong> {{ route.id }}</p>
-        <p><strong>Водитель:</strong> {{ route.driver?.full_name || route.driver?.login || "—" }}</p>
-        <p><strong>ТС:</strong> {{ route.number_auto || "—" }}</p>
-        <p><strong>Прицеп:</strong> {{ route.trailer_number || "—" }}</p>
-        <p><strong>Статус:</strong> {{ routeStatusWithCurrentPoint(route) }}</p>
-        <p><strong>Температура:</strong> {{ route.temperature || "—" }}</p>
-        <p><strong>Контакты диспетчера:</strong> {{ route.dispatcher_contacts || "—" }}</p>
-        <p><strong>N регистрации:</strong> {{ route.registration_number || "—" }}</p>
+        <div class="kv">
+          <span class="k">N рейса</span>
+          <span class="v">{{ route.id }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">Водитель</span>
+          <span class="v">{{ route.driver?.full_name || route.driver?.login || "—" }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">ТС</span>
+          <span class="v">{{ route.number_auto || "—" }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">Прицеп</span>
+          <span class="v">{{ route.trailer_number || "—" }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">Статус</span>
+          <span class="v">{{ routeStatusWithCurrentPoint(route) }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">На телефоне</span>
+          <span
+            class="v"
+            :class="route.driver?.id && route.driver_received_at ? 'ok' : 'muted-value'"
+            :title="phoneReceiptHint(route)"
+          >
+            {{ phoneReceiptLabel(route) }}
+          </span>
+        </div>
+        <div class="kv">
+          <span class="k">Температура</span>
+          <span class="v">{{ route.temperature || "—" }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">Контакты диспетчера</span>
+          <span class="v">{{ route.dispatcher_contacts || "—" }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">N регистрации</span>
+          <span class="v">{{ route.registration_number || "—" }}</span>
+        </div>
       </div>
       <section class="actions top-actions">
         <button class="secondary chat-btn" type="button" @click="emit('openChat', route.id)">
@@ -330,10 +628,175 @@ function removeRoute(): void {
         <h3>Этапы по точкам</h3>
         <article v-for="point in route.points || []" :key="point.id" class="point-card">
           <div class="point-top">
-            <strong>{{ pointTypeLabel(point.type_point) }} · {{ point.place_point || "Без адреса" }}</strong>
+            <strong>
+              {{ pointTypeLabel(point.type_point) }}
+              ·
+              <MapsAddressLink v-if="point.place_point" :address="point.place_point" />
+              <span v-else>Без адреса</span>
+            </strong>
             <span class="status-chip">{{ pointStatusLabel(point.status) }}</span>
           </div>
-          <p class="muted">{{ point.date_point || "—" }} · {{ point.point_time || "—" }}</p>
+          <p class="meta-line">{{ point.date_point || "—" }} · {{ point.point_time || "—" }}</p>
+          <p v-if="point.point_name || point.point_contacts" class="meta-line">
+            {{ point.point_name || "—" }}{{ point.point_contacts ? ` · ${point.point_contacts}` : "" }}
+          </p>
+          <div v-if="editingPointId !== point.id" class="actions">
+            <button class="secondary" type="button" :disabled="loading" @click="openPointEdit(point)">
+              Изменить точку
+            </button>
+          </div>
+          <div v-if="editingPointId === point.id" class="point-full-edit">
+            <div class="point-edit-grid">
+              <label class="full">
+                Статус точки
+                <select v-model="pointEdit.status">
+                  <option value="new">{{ listPointStatusLabel("new") }}</option>
+                  <option value="process">{{ listPointStatusLabel("process") }}</option>
+                  <option value="registration">{{ listPointStatusLabel("registration") }}</option>
+                  <option value="load">{{ listPointStatusLabel("load") }}</option>
+                  <option value="docs">{{ listPointStatusLabel("docs") }}</option>
+                </select>
+                <small class="edit-hint">Меняется только этим полем. Правка времени, одометра и координат статус не трогает.</small>
+                <small v-if="editHint(point.manual_edits, 'status')" class="edit-hint">{{ editHint(point.manual_edits, 'status') }}</small>
+              </label>
+              <label>
+                Тип
+                <select v-model="pointEdit.type_point">
+                  <option value="loading">Загрузка</option>
+                  <option value="unloading">Выгрузка</option>
+                </select>
+                <small v-if="editHint(point.manual_edits, 'type_point')" class="edit-hint">{{ editHint(point.manual_edits, 'type_point') }}</small>
+              </label>
+              <label>
+                Дата
+                <input v-model="pointEdit.date_point" type="date" />
+                <small v-if="editHint(point.manual_edits, 'date_point')" class="edit-hint">{{ editHint(point.manual_edits, 'date_point') }}</small>
+              </label>
+              <label>
+                Время плана
+                <input v-model="pointEdit.point_time" type="time" step="60" />
+                <small v-if="editHint(point.manual_edits, 'point_time')" class="edit-hint">{{ editHint(point.manual_edits, 'point_time') }}</small>
+              </label>
+              <label class="full">
+                Адрес
+                <input v-model="pointEdit.place_point" />
+                <small v-if="editHint(point.manual_edits, 'place_point')" class="edit-hint">{{ editHint(point.manual_edits, 'place_point') }}</small>
+              </label>
+              <label>
+                Название
+                <input v-model="pointEdit.point_name" />
+                <small v-if="editHint(point.manual_edits, 'point_name')" class="edit-hint">{{ editHint(point.manual_edits, 'point_name') }}</small>
+              </label>
+              <label>
+                Контакты
+                <input v-model="pointEdit.point_contacts" />
+                <small v-if="editHint(point.manual_edits, 'point_contacts')" class="edit-hint">{{ editHint(point.manual_edits, 'point_contacts') }}</small>
+              </label>
+              <label class="full">
+                Примечание
+                <input v-model="pointEdit.point_note" />
+                <small v-if="editHint(point.manual_edits, 'point_note')" class="edit-hint">{{ editHint(point.manual_edits, 'point_note') }}</small>
+              </label>
+            </div>
+            <h4>Этапы</h4>
+            <div class="stage-edit-grid">
+              <p class="stage-edit-title">Выехал на точку</p>
+              <label>
+                Время
+                <input v-model="pointEdit.departure_time" type="datetime-local" />
+                <small v-if="editHint(point.manual_edits, 'departure_time')" class="edit-hint">{{ editHint(point.manual_edits, 'departure_time') }}</small>
+              </label>
+              <label>
+                Одометр
+                <input v-model="pointEdit.departure_odometer" />
+                <small v-if="editHint(point.manual_edits, 'departure_odometer')" class="edit-hint">{{ editHint(point.manual_edits, 'departure_odometer') }}</small>
+              </label>
+              <label>
+                Широта
+                <input v-model="pointEdit.departure_lat" inputmode="decimal" />
+              </label>
+              <label>
+                Долгота
+                <input v-model="pointEdit.departure_lng" inputmode="decimal" />
+                <small v-if="editHint(point.manual_edits, 'departure_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'departure_coordinates') }}</small>
+              </label>
+
+              <p class="stage-edit-title">Регистрация</p>
+              <label>
+                Время
+                <input v-model="pointEdit.registration_time" type="datetime-local" />
+                <small v-if="editHint(point.manual_edits, 'registration_time')" class="edit-hint">{{ editHint(point.manual_edits, 'registration_time') }}</small>
+              </label>
+              <label>
+                Одометр
+                <input v-model="pointEdit.registration_odometer" />
+                <small v-if="editHint(point.manual_edits, 'registration_odometer')" class="edit-hint">{{ editHint(point.manual_edits, 'registration_odometer') }}</small>
+              </label>
+              <label>
+                Широта
+                <input v-model="pointEdit.registration_lat" inputmode="decimal" />
+              </label>
+              <label>
+                Долгота
+                <input v-model="pointEdit.registration_lng" inputmode="decimal" />
+                <small v-if="editHint(point.manual_edits, 'registration_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'registration_coordinates') }}</small>
+              </label>
+
+              <p class="stage-edit-title">На воротах</p>
+              <label>
+                Время
+                <input v-model="pointEdit.gate_time" type="datetime-local" />
+                <small v-if="editHint(point.manual_edits, 'gate_time')" class="edit-hint">{{ editHint(point.manual_edits, 'gate_time') }}</small>
+              </label>
+              <label>
+                Одометр
+                <input v-model="pointEdit.gate_odometer" />
+                <small v-if="editHint(point.manual_edits, 'gate_odometer')" class="edit-hint">{{ editHint(point.manual_edits, 'gate_odometer') }}</small>
+              </label>
+              <label>
+                Широта
+                <input v-model="pointEdit.gate_lat" inputmode="decimal" />
+              </label>
+              <label>
+                Долгота
+                <input v-model="pointEdit.gate_lng" inputmode="decimal" />
+                <small v-if="editHint(point.manual_edits, 'gate_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'gate_coordinates') }}</small>
+              </label>
+
+              <p class="stage-edit-title">Забрал документы</p>
+              <label>
+                Время
+                <input v-model="pointEdit.docs_time" type="datetime-local" />
+                <small v-if="editHint(point.manual_edits, 'docs_time')" class="edit-hint">{{ editHint(point.manual_edits, 'docs_time') }}</small>
+              </label>
+              <label>
+                Одометр
+                <input v-model="pointEdit.docs_odometer" />
+                <small v-if="editHint(point.manual_edits, 'docs_odometer')" class="edit-hint">{{ editHint(point.manual_edits, 'docs_odometer') }}</small>
+              </label>
+              <label>
+                Широта
+                <input v-model="pointEdit.docs_lat" inputmode="decimal" />
+              </label>
+              <label>
+                Долгота
+                <input v-model="pointEdit.docs_lng" inputmode="decimal" />
+                <small v-if="editHint(point.manual_edits, 'docs_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'docs_coordinates') }}</small>
+              </label>
+            </div>
+            <div class="actions">
+              <button
+                class="secondary"
+                type="button"
+                :disabled="loading"
+                @mousedown.prevent
+                @click="submitPointEdit(point)"
+              >
+                Сохранить точку
+              </button>
+              <button class="ghost" type="button" @click="closePointEdit">Отмена</button>
+            </div>
+          </div>
           <div class="stage-scroll">
           <table class="stage-table">
             <thead>
@@ -347,27 +810,63 @@ function removeRoute(): void {
             <tbody>
               <tr>
                 <td>{{ normalizePointStageLabel("accepted") }}</td>
-                <td>{{ point.departure_time || point.time_accepted || "—" }}</td>
-                <td>{{ point.departure_odometer || "—" }}{{ odoSourceLabel(point.departure_odometer_source) }}</td>
-                <td>{{ point.departure_coordinates?.lat ?? "—" }}, {{ point.departure_coordinates?.lng ?? "—" }}</td>
+                <td>
+                  {{ point.departure_time || point.time_accepted || "—" }}
+                  <small v-if="editHint(point.manual_edits, 'departure_time')" class="edit-hint">{{ editHint(point.manual_edits, 'departure_time') }}</small>
+                </td>
+                <td>
+                  {{ point.departure_odometer || "—" }}{{ odoSourceLabel(point.departure_odometer_source) }}
+                  <small v-if="editHint(point.manual_edits, 'departure_odometer')" class="edit-hint">{{ editHint(point.manual_edits, 'departure_odometer') }}</small>
+                </td>
+                <td>
+                  <MapsCoordsLink :lat="point.departure_coordinates?.lat" :lng="point.departure_coordinates?.lng" />
+                  <small v-if="editHint(point.manual_edits, 'departure_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'departure_coordinates') }}</small>
+                </td>
               </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("registration") }}</td>
-                <td>{{ point.registration_time || point.time_registration || "—" }}</td>
-                <td>{{ point.registration_odometer || "—" }}{{ odoSourceLabel(point.registration_odometer_source) }}</td>
-                <td>{{ point.registration_coordinates?.lat ?? "—" }}, {{ point.registration_coordinates?.lng ?? "—" }}</td>
+                <td>
+                  {{ point.registration_time || point.time_registration || "—" }}
+                  <small v-if="editHint(point.manual_edits, 'registration_time')" class="edit-hint">{{ editHint(point.manual_edits, 'registration_time') }}</small>
+                </td>
+                <td>
+                  {{ point.registration_odometer || "—" }}{{ odoSourceLabel(point.registration_odometer_source) }}
+                  <small v-if="editHint(point.manual_edits, 'registration_odometer')" class="edit-hint">{{ editHint(point.manual_edits, 'registration_odometer') }}</small>
+                </td>
+                <td>
+                  <MapsCoordsLink :lat="point.registration_coordinates?.lat" :lng="point.registration_coordinates?.lng" />
+                  <small v-if="editHint(point.manual_edits, 'registration_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'registration_coordinates') }}</small>
+                </td>
               </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("load") }}</td>
-                <td>{{ point.gate_time || point.time_put_on_gate || "—" }}</td>
-                <td>{{ point.gate_odometer || "—" }}{{ odoSourceLabel(point.gate_odometer_source) }}</td>
-                <td>{{ point.gate_coordinates?.lat ?? "—" }}, {{ point.gate_coordinates?.lng ?? "—" }}</td>
+                <td>
+                  {{ point.gate_time || point.time_put_on_gate || "—" }}
+                  <small v-if="editHint(point.manual_edits, 'gate_time')" class="edit-hint">{{ editHint(point.manual_edits, 'gate_time') }}</small>
+                </td>
+                <td>
+                  {{ point.gate_odometer || "—" }}{{ odoSourceLabel(point.gate_odometer_source) }}
+                  <small v-if="editHint(point.manual_edits, 'gate_odometer')" class="edit-hint">{{ editHint(point.manual_edits, 'gate_odometer') }}</small>
+                </td>
+                <td>
+                  <MapsCoordsLink :lat="point.gate_coordinates?.lat" :lng="point.gate_coordinates?.lng" />
+                  <small v-if="editHint(point.manual_edits, 'gate_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'gate_coordinates') }}</small>
+                </td>
               </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("docs") }}</td>
-                <td>{{ point.docs_time || point.time_docs || "—" }}</td>
-                <td>{{ point.docs_odometer || "—" }}{{ odoSourceLabel(point.docs_odometer_source) }}</td>
-                <td>{{ point.docs_coordinates?.lat ?? "—" }}, {{ point.docs_coordinates?.lng ?? "—" }}</td>
+                <td>
+                  {{ point.docs_time || point.time_docs || "—" }}
+                  <small v-if="editHint(point.manual_edits, 'docs_time')" class="edit-hint">{{ editHint(point.manual_edits, 'docs_time') }}</small>
+                </td>
+                <td>
+                  {{ point.docs_odometer || "—" }}{{ odoSourceLabel(point.docs_odometer_source) }}
+                  <small v-if="editHint(point.manual_edits, 'docs_odometer')" class="edit-hint">{{ editHint(point.manual_edits, 'docs_odometer') }}</small>
+                </td>
+                <td>
+                  <MapsCoordsLink :lat="point.docs_coordinates?.lat" :lng="point.docs_coordinates?.lng" />
+                  <small v-if="editHint(point.manual_edits, 'docs_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'docs_coordinates') }}</small>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -388,7 +887,8 @@ function removeRoute(): void {
   display: grid;
   gap: 0.9rem;
   width: 100%;
-  max-width: 100%;
+  max-width: 1100px;
+  margin: 0 auto;
   min-width: 0;
 }
 .card {
@@ -444,11 +944,32 @@ function removeRoute(): void {
 }
 .summary-grid {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.45rem 0.8rem;
+  grid-template-columns: 1fr;
+  gap: 0.45rem 1rem;
+  padding: 0.15rem 0 0.25rem;
 }
-.summary-grid p {
+.head h2 {
   margin: 0;
+  font-size: 1.15rem;
+}
+.points-wrap h3,
+.edit-card h3 {
+  margin: 0;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.meta-line {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
+  line-height: 1.4;
+}
+.muted-value {
+  color: var(--text-muted) !important;
+  font-weight: 500;
 }
 .edit-card {
   border: 1px solid #243043;
@@ -485,8 +1006,41 @@ function removeRoute(): void {
   align-items: center;
   gap: 0.5rem;
 }
+.point-top strong {
+  color: var(--text-heading);
+  font-size: 0.98rem;
+  line-height: 1.35;
+}
 .point-edit-grid .full {
   grid-column: 1 / -1;
+}
+.point-full-edit {
+  display: grid;
+  gap: 0.7rem;
+  padding: 0.7rem;
+  border: 1px solid #334155;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.55);
+}
+.point-full-edit h4 {
+  margin: 0.2rem 0 0;
+  font-size: 0.92rem;
+}
+.stage-edit-grid {
+  display: grid;
+  gap: 0.5rem;
+}
+.stage-edit-title {
+  margin: 0.35rem 0 0;
+  font-weight: 700;
+  color: #cbd5e1;
+  grid-column: 1 / -1;
+}
+.edit-hint {
+  display: block;
+  margin-top: 0.15rem;
+  color: #fbbf24;
+  font-size: 0.75rem;
 }
 .stage-scroll {
   overflow-x: auto;
@@ -498,8 +1052,19 @@ function removeRoute(): void {
 }
 .stage-table th,
 .stage-table td {
-  padding: 0.45rem;
+  padding: 0.5rem 0.45rem;
   border-bottom: 1px solid #243043;
+}
+.stage-table th {
+  font-size: 0.72rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.stage-table td {
+  color: var(--text-body);
+  font-size: 0.9rem;
 }
 .status-chip {
   border: 1px solid #334155;
@@ -508,14 +1073,29 @@ function removeRoute(): void {
   font-size: 0.8rem;
   color: #c7d2fe;
 }
+.maps-link {
+  color: #93c5fd;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .muted {
   margin: 0;
   color: #94a3b8;
   font-size: 0.86rem;
 }
+.error {
+  margin: 0;
+  color: #fca5a5;
+}
+.ok {
+  color: #86efac;
+  font-weight: 650;
+}
 label {
   display: grid;
   gap: 0.26rem;
+  color: var(--text-label);
+  font-size: 0.8rem;
 }
 input,
 select,
@@ -552,13 +1132,15 @@ button {
 }
 @media (min-width: 900px) {
   .edit-grid,
-  .point-edit-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .point-edit-grid,
+  .stage-edit-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
-}
-@media (max-width: 700px) {
+  .stage-edit-title {
+    grid-column: 1 / -1;
+  }
   .summary-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 </style>

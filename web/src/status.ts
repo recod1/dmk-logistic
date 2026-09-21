@@ -33,8 +33,24 @@ export function nextStatus(current: PointStatus): Exclude<PointStatus, "new"> | 
   return STATUS_CHAIN[index + 1] as Exclude<PointStatus, "new">;
 }
 
+const LIST_POINT_STATUS_LABELS: Record<string, string> = {
+  new: "Новая",
+  process: "Выехал",
+  registration: "Зарегистрировался",
+  load: "На воротах",
+  docs: "Забрал документы",
+  success: "Забрал документы"
+};
+
 export function statusLabel(status: PointStatus): string {
   return STATUS_LABELS[status] ?? status;
+}
+
+export function listPointStatusLabel(status: string | null | undefined): string {
+  if (!status) {
+    return "";
+  }
+  return LIST_POINT_STATUS_LABELS[status] ?? status;
 }
 
 export function nextStatusLabel(current: PointStatus): string | null {
@@ -67,8 +83,46 @@ export function canRevertPointStatus(status: PointStatus): boolean {
 export function mapsSearchUrl(address: string): string {
   const trimmed = address.trim();
   const q = encodeURIComponent(trimmed);
-  // geo: opens a "choose maps app" dialog on most Android devices (instead of forcing Google Maps).
-  // Use query form to allow geocoding by address.
+  if (typeof navigator !== "undefined") {
+    const ua = navigator.userAgent || "";
+    const isiOS =
+      /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    if (isiOS) {
+      return `https://maps.apple.com/?q=${q}`;
+    }
+  }
   return `geo:0,0?q=${q}`;
+}
+
+export function mapsLinkTarget(): "_self" | "_blank" {
+  if (typeof navigator === "undefined") {
+    return "_blank";
+  }
+  const ua = navigator.userAgent || "";
+  const isiOS =
+    /iPad|iPhone|iPod/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  return isiOS ? "_self" : "_blank";
+}
+
+export function pointTypeLabel(type: string | null | undefined): string {
+  if (type === "unloading") return "Выгрузка";
+  if (type === "loading") return "Загрузка";
+  return "";
+}
+
+export function formatPointSchedule(
+  type?: string | null,
+  date?: string | null,
+  time?: string | null
+): string {
+  const kind = pointTypeLabel(type);
+  const when = [date, time]
+    .map((value) => (value || "").trim())
+    .filter(Boolean)
+    .join(" ");
+  if (kind && when) {
+    return `${kind}: ${when}`;
+  }
+  return when || kind;
 }
 

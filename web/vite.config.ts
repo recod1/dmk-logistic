@@ -11,7 +11,8 @@ export default defineConfig({
       filename: "sw.ts",
       registerType: "autoUpdate",
       injectManifest: {
-        globPatterns: ["**/*.{js,css,html,ico,png,jpg,jpeg,svg,json,webmanifest}"]
+        globPatterns: ["**/*.{js,css,html,ico,png,jpg,jpeg,svg,json,webmanifest}"],
+        maximumFileSizeToCacheInBytes: 4 * 1024 * 1024
       },
       includeAssets: ["logo.jpg", "pwa-192.png", "pwa-512.png", "apple-touch-icon.png", "screenshots/pwa-home-1280x720.png"],
       manifest: {

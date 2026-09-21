@@ -106,7 +106,10 @@ function formatExtra(item: NotificationDto): string {
 <style scoped>
 .notifications-wrap {
   display: grid;
-  gap: 0.75rem;
+  gap: 0.8rem;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
 }
 .head-row {
   display: flex;
@@ -115,10 +118,17 @@ function formatExtra(item: NotificationDto): string {
   flex-wrap: wrap;
   gap: 0.5rem;
 }
+.head-row h1 {
+  margin: 0;
+}
 .head-actions {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+}
+.head-actions button {
+  min-height: 40px;
+  border-radius: 10px;
 }
 .list {
   display: grid;
@@ -127,15 +137,17 @@ function formatExtra(item: NotificationDto): string {
 .item-card {
   display: grid;
   gap: 0.45rem;
-  border-bottom: 1px solid #334155;
-  padding-bottom: 0.7rem;
-  border-radius: 12px;
+  border: 1px solid var(--border);
+  padding: 0.85rem;
+  border-radius: 14px;
+  background: rgba(17, 24, 39, 0.8);
 }
 .item-card.clickable {
   cursor: pointer;
 }
 .item-card.unread {
-  border-color: #ef4444;
+  border-color: rgba(239, 68, 68, 0.55);
+  box-shadow: inset 3px 0 0 var(--danger);
 }
 .row-top {
   display: flex;
@@ -150,13 +162,13 @@ p {
   display: flex;
   flex-wrap: wrap;
   gap: 0.6rem;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.9rem;
   align-items: center;
 }
 .extra {
   margin: 0;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.88rem;
   line-height: 1.25;
   overflow-wrap: anywhere;
@@ -169,19 +181,23 @@ p {
 }
 .hint {
   margin: 0;
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.9rem;
 }
 .empty-card {
-  color: #94a3b8;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.1rem;
+  background: rgba(17, 24, 39, 0.72);
 }
 .link-btn {
   width: auto;
-  border: 1px solid #334155;
+  border: 1px solid var(--border-strong);
   border-radius: 8px;
   background: transparent;
   color: #bfdbfe;
-  padding: 0.2rem 0.45rem;
+  padding: 0.25rem 0.5rem;
   font-size: 0.78rem;
 }
 </style>

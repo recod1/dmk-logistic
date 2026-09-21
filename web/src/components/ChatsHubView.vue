@@ -57,7 +57,11 @@ const emit = defineEmits<{
   "admin-patch-room": [payload: { roomId: number; title: string }];
 }>();
 
-const tab = ref<HubTab>("direct");
+let lastHubTab: HubTab = "direct";
+const tab = ref<HubTab>(lastHubTab);
+watch(tab, (value) => {
+  lastHubTab = value;
+});
 const userQuery = ref("");
 
 const broadcastTitle = ref("");
@@ -207,12 +211,7 @@ watch(
 
 <template>
   <section class="wrap">
-    <header class="head">
-      <button class="ghost" type="button" @click="emit('back')">← Назад</button>
-      <h1>Чаты</h1>
-      <button class="secondary" type="button" :disabled="loading" @click="emit('refresh')">Обновить</button>
-    </header>
-
+    <button class="ghost back" type="button" @click="emit('back')">← Назад</button>
     <p v-if="error" class="error">{{ error }}</p>
 
     <div class="tabs">
@@ -415,12 +414,8 @@ watch(
   max-width: 720px;
   margin: 0 auto;
 }
-.head {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  justify-content: space-between;
-  flex-wrap: wrap;
+.back {
+  justify-self: start;
 }
 h1 {
   margin: 0;
@@ -428,7 +423,11 @@ h1 {
 }
 h2 {
   margin: 0;
-  font-size: 1rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-label);
 }
 .tabs {
   display: flex;
@@ -436,15 +435,15 @@ h2 {
   gap: 0.5rem;
 }
 .tab {
-  border: 1px solid #334155;
+  border: 1px solid var(--border-strong);
   border-radius: 999px;
-  background: #0b1220;
+  background: var(--bg-elevated);
   color: #cbd5e1;
-  padding: 0.35rem 0.7rem;
+  padding: 0.4rem 0.8rem;
 }
 .tab.active {
-  background: #4f46e5;
-  border-color: #6366f1;
+  background: var(--primary-strong);
+  border-color: #60a5fa;
   color: #fff;
 }
 .card {

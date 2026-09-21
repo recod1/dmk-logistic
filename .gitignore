@@ -8,4 +8,5 @@ web/dist/
 web/.vite/
 
 backups/
+db/self
 
