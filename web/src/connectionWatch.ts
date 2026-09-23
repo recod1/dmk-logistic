@@ -1,6 +1,7 @@
 import { computed, ref } from "vue";
 
-import { connectionNetInfo, reportDebugError } from "./debugLog";
+import { connectionNetInfo, isTransientNetworkNoise, reportDebugError } from "./debugLog";
+import { fetchWithHardTimeout } from "./hardFetch";
 
 export type ConnectionTone = "ok" | "warn" | "bad";
 export type WsState = "idle" | "connecting" | "open" | "closed";
@@ -20,6 +21,7 @@ const pendingAccepts = ref(0);
 
 let healthTimer: number | null = null;
 let healthInFlight = false;
+let healthGeneration = 0;
 let healthFailStreak = 0;
 let lastReportedHealthFail = false;
 let unhandledBound = false;
@@ -156,15 +158,19 @@ function isInstantFetchFail(error: unknown): boolean {
   return message.includes("load failed") || message.includes("failed to fetch");
 }
 
-async function fetchHealth(signal: AbortSignal): Promise<Response> {
+async function fetchHealth(signal: AbortSignal, timeoutMs: number): Promise<Response> {
   const base = apiBaseRef.value.replace(/\/$/, "");
-  return fetch(`${base}/health?t=${Date.now()}`, {
-    method: "GET",
-    cache: "no-store",
-    credentials: "same-origin",
-    signal,
-    headers: { Accept: "application/json" }
-  });
+  return fetchWithHardTimeout(
+    `${base}/health?t=${Date.now()}`,
+    {
+      method: "GET",
+      cache: "no-store",
+      credentials: "same-origin",
+      signal,
+      headers: { Accept: "application/json" }
+    },
+    timeoutMs
+  );
 }
 
 let lastApiOkAt = 0;
@@ -180,7 +186,19 @@ function isPageHidden(): boolean {
   return typeof document !== "undefined" && document.visibilityState === "hidden";
 }
 
+function bumpHealthGeneration(): void {
+  healthGeneration += 1;
+  healthInFlight = false;
+  try {
+    healthAbort?.abort();
+  } catch {
+    // ignore
+  }
+  healthAbort = null;
+}
+
 export function noteForegroundResume(): void {
+  bumpHealthGeneration();
   healthFailStreak = 0;
   lastReportedHealthFail = false;
   lastHealthError.value = null;
@@ -204,22 +222,28 @@ export async function pingServer(): Promise<boolean> {
     lastHealthError.value = null;
     return true;
   }
+  const gen = healthGeneration;
   healthInFlight = true;
   const ctrl = new AbortController();
   healthAbort = ctrl;
   const timeoutMs = healthTimeoutMs();
-  const timer = globalThis.setTimeout(() => ctrl.abort(), timeoutMs);
   const started = typeof performance !== "undefined" ? performance.now() : Date.now();
   try {
     let response: Response;
     try {
-      response = await fetchHealth(ctrl.signal);
+      response = await fetchHealth(ctrl.signal, timeoutMs);
     } catch (error) {
-      if (!isInstantFetchFail(error) || ctrl.signal.aborted) {
+      if (gen !== healthGeneration || isPageHidden() || !isInstantFetchFail(error)) {
         throw error;
       }
       await new Promise((resolve) => globalThis.setTimeout(resolve, 400));
-      response = await fetchHealth(ctrl.signal);
+      if (gen !== healthGeneration || isPageHidden()) {
+        throw error;
+      }
+      response = await fetchHealth(ctrl.signal, timeoutMs);
+    }
+    if (gen !== healthGeneration) {
+      return serverOk.value !== false;
     }
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
@@ -235,12 +259,21 @@ export async function pingServer(): Promise<boolean> {
     }
     return true;
   } catch (error) {
-    lastHealthMs.value = (typeof performance !== "undefined" ? performance.now() : Date.now()) - started;
-    lastHealthAt.value = new Date().toISOString();
-    lastHealthError.value = (error as Error)?.message || String(error);
-    if (isPageHidden() || ctrl.signal.aborted && isPageHidden()) {
+    const elapsed = (typeof performance !== "undefined" ? performance.now() : Date.now()) - started;
+    if (gen !== healthGeneration || isPageHidden()) {
       return serverOk.value !== false;
     }
+    // iOS freezes timers in background; when the tab returns the request looks
+    // like a multi-minute abort even though the radio was just asleep.
+    if (elapsed > timeoutMs + 2_000) {
+      lastHealthMs.value = Math.round(elapsed);
+      lastHealthAt.value = new Date().toISOString();
+      lastHealthError.value = null;
+      return serverOk.value !== false;
+    }
+    lastHealthMs.value = elapsed;
+    lastHealthAt.value = new Date().toISOString();
+    lastHealthError.value = (error as Error)?.message || String(error);
     if (lastApiOkAt > 0 && Date.now() - lastApiOkAt < 20_000) {
       serverOk.value = true;
       return false;
@@ -263,11 +296,12 @@ export async function pingServer(): Promise<boolean> {
     }
     return false;
   } finally {
-    globalThis.clearTimeout(timer);
     if (healthAbort === ctrl) {
       healthAbort = null;
     }
-    healthInFlight = false;
+    if (gen === healthGeneration) {
+      healthInFlight = false;
+    }
     online.value = typeof navigator === "undefined" ? true : navigator.onLine;
   }
 }
@@ -286,16 +320,13 @@ function abortHealthIfHidden(): void {
   if (!isPageHidden()) {
     return;
   }
-  try {
-    healthAbort?.abort();
-  } catch {
-    // ignore
-  }
+  bumpHealthGeneration();
 }
 
 function onUnhandledRejection(event: PromiseRejectionEvent): void {
   const reason = event.reason as { name?: string; message?: string } | null;
-  if (reason?.name === "ApiError") {
+  if (reason?.name === "ApiError" || isTransientNetworkNoise({ source: "unhandledrejection", error: event.reason })) {
+    event.preventDefault();
     return;
   }
   reportDebugError({
@@ -370,6 +401,7 @@ export function restartConnectionWatch(apiBase: string): void {
   stopConnectionWatch();
   healthFailStreak = 0;
   healthInFlight = false;
+  healthGeneration += 1;
   lastReportedHealthFail = false;
   lastHealthError.value = null;
   serverOk.value = null;

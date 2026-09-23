@@ -255,7 +255,9 @@ let notificationsWsHandshakeTimer: number | null = null;
 let notificationsPingInterval: number | null = null;
 let notificationsPollInterval: number | null = null;
 let notificationsWsBackoffMs = 4000;
+let wsWatchdogTimer: number | null = null;
 let refreshAdminRoutesInFlight: Promise<void> | null = null;
+const markReadInFlight = new Set<number>();
 
 let chatWs: WebSocket | null = null;
 let chatWsReconnectTimer: number | null = null;
@@ -799,12 +801,35 @@ function wsHandshakeTimeoutMs(): number {
   return isCoarseUi() ? 15_000 : 10_000;
 }
 
+function stopWsWatchdog(): void {
+  if (wsWatchdogTimer !== null) {
+    window.clearInterval(wsWatchdogTimer);
+    wsWatchdogTimer = null;
+  }
+}
+
+function startWsWatchdog(): void {
+  stopWsWatchdog();
+  wsWatchdogTimer = window.setInterval(() => {
+    if (!authToken.value || !realtimeSocketsAllowed || isPageHidden() || !hasNetwork()) {
+      return;
+    }
+    const state = notificationsWs?.readyState;
+    if (state === WebSocket.OPEN || state === WebSocket.CONNECTING) {
+      return;
+    }
+    forceReconnectRealtimeSockets();
+  }, isCoarseUi() ? 12_000 : 8_000);
+}
+
 function allowRealtimeSockets(): void {
   realtimeSocketsAllowed = true;
+  startWsWatchdog();
 }
 
 function denyRealtimeSockets(): void {
   realtimeSocketsAllowed = false;
+  stopWsWatchdog();
 }
 
 function wsBusy(ws: WebSocket | null): boolean {
@@ -2528,9 +2553,14 @@ async function doMarkNotificationRead(notificationId: number): Promise<void> {
   if (!authToken.value) {
     return;
   }
+  if (markReadInFlight.has(notificationId)) {
+    return;
+  }
+  markReadInFlight.add(notificationId);
   applyLocalNotificationRead(notificationId);
   if (!hasNetwork() || isPageHidden()) {
     queuePendingNotificationRead(notificationId);
+    markReadInFlight.delete(notificationId);
     return;
   }
   try {
@@ -2545,6 +2575,8 @@ async function doMarkNotificationRead(notificationId: number): Promise<void> {
       return;
     }
     notificationsError.value = `Ошибка отметки прочитанного: ${(error as Error).message}`;
+  } finally {
+    markReadInFlight.delete(notificationId);
   }
 }
 
@@ -2723,36 +2755,44 @@ async function refreshRouteChatUnread(): Promise<void> {
 }
 
 async function bootstrapByRole(user: AuthUser): Promise<void> {
-  denyRealtimeSockets();
+  void refreshWebPushSubscriptionState();
   closeNotificationsSocket();
   closeChatSocket();
-  stopNotificationsPolling();
-  void refreshWebPushSubscriptionState();
-  if (isAdminRole(user.role_code)) {
-    resetToSection("admin_routes");
-    await refreshAdminUsers();
-    await refreshRouteDrivers();
-    await refreshAdminRoutes({ status: "process" });
-  } else if (isRouteManagerRole(user.role_code)) {
-    resetToSection("admin_routes");
-    await refreshRouteDrivers();
-    await refreshAdminRoutes({ status: "process" });
-  } else {
-    resetToSection("driver_home");
-    await refreshDriverRoutes();
-    await refreshRoute();
-    await refreshRouteChatUnread();
-    await syncOutboxInBackground();
-    startBackgroundSyncLoop();
-    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-      void ensureWebPushSubscription();
-    }
-  }
-  await refreshNotifications();
-  await refreshLogisticsContacts();
   allowRealtimeSockets();
   connectNotificationsSocket();
   startNotificationsPolling();
+  try {
+    if (isAdminRole(user.role_code)) {
+      resetToSection("admin_routes");
+      await refreshAdminUsers();
+      await refreshRouteDrivers();
+      await refreshAdminRoutes({ status: "process" });
+    } else if (isRouteManagerRole(user.role_code)) {
+      resetToSection("admin_routes");
+      await refreshRouteDrivers();
+      await refreshAdminRoutes({ status: "process" });
+    } else {
+      resetToSection("driver_home");
+      await refreshDriverRoutes();
+      await refreshRoute();
+      await refreshRouteChatUnread();
+      await syncOutboxInBackground();
+      startBackgroundSyncLoop();
+      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+        void ensureWebPushSubscription();
+      }
+    }
+    await refreshNotifications();
+    await refreshLogisticsContacts();
+  } finally {
+    if (!realtimeSocketsAllowed) {
+      allowRealtimeSockets();
+    }
+    if (!wsBusy(notificationsWs)) {
+      connectNotificationsSocket();
+    }
+    startNotificationsPolling();
+  }
 }
 
 function openRoleMainSection(section: AppSection): void {
@@ -4067,6 +4107,7 @@ onUnmounted(() => {
     window.clearTimeout(syncWatchdogTimer);
   }
   stopConnectionWatch();
+  stopWsWatchdog();
   stopBackgroundSyncLoop();
   closeNotificationsSocket();
   stopNotificationsPolling();

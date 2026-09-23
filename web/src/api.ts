@@ -1,5 +1,6 @@
 import { reportDebugError } from "./debugLog";
 import { noteApiReachable, setApiLoad } from "./connectionWatch";
+import { fetchWithHardTimeout, withRetryBust } from "./hardFetch";
 import type {
   ActiveRouteResponse,
   AdminRoute,
@@ -104,18 +105,6 @@ function isAbortLike(error: unknown): boolean {
   return name === "AbortError" || name === "TimeoutError";
 }
 
-function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): AbortSignal | undefined {
-  const real = signals.filter((item): item is AbortSignal => Boolean(item));
-  if (!real.length) {
-    return undefined;
-  }
-  const anyFn = (AbortSignal as typeof AbortSignal & { any?: (items: AbortSignal[]) => AbortSignal }).any;
-  if (typeof anyFn === "function") {
-    return anyFn(real);
-  }
-  return real[0];
-}
-
 export function isPageHidden(): boolean {
   return typeof document !== "undefined" && document.visibilityState === "hidden";
 }
@@ -172,22 +161,16 @@ async function fetchWithTimeout(
   headers: Record<string, string>,
   timeoutMs: number
 ): Promise<Response> {
-  const timeoutCtrl = new AbortController();
-  const timer = globalThis.setTimeout(() => timeoutCtrl.abort(), timeoutMs);
   const { timeoutMs: _timeout, ...fetchInit } = init ?? {};
   void _timeout;
-  try {
-    return await fetch(url, {
+  return fetchWithHardTimeout(
+    url,
+    {
       ...fetchInit,
-      cache: "no-store",
-      credentials: fetchInit.credentials ?? "same-origin",
-      keepalive: false,
-      signal: mergeAbortSignals([fetchInit.signal, timeoutCtrl.signal]),
       headers
-    });
-  } finally {
-    globalThis.clearTimeout(timer);
-  }
+    },
+    timeoutMs
+  );
 }
 
 async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
@@ -202,21 +185,24 @@ async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs
     headers["Content-Type"] = "application/json";
   }
   const canRetry = (method === "GET" || method === "HEAD") && !init?.signal;
-  let response: Response;
-  try {
+  const maxAttempts = canRetry ? (isCoarsePointer() ? 3 : 2) : 1;
+  let response: Response | undefined;
+  let lastError: unknown;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     try {
-      response = await fetchWithTimeout(url, init, headers, timeoutMs);
+      response = await fetchWithTimeout(withRetryBust(url, attempt), init, headers, timeoutMs);
+      lastError = null;
+      break;
     } catch (error) {
-      if (!canRetry || !(isAbortLike(error) || isOfflineLikeError(error))) {
-        throw error;
+      lastError = error;
+      if (attempt + 1 >= maxAttempts || isPageHidden() || !(isAbortLike(error) || isOfflineLikeError(error))) {
+        break;
       }
-      if (isPageHidden()) {
-        throw error;
-      }
-      await sleep(isCoarsePointer() ? 600 : 350);
-      response = await fetchWithTimeout(url, init, headers, timeoutMs);
+      await sleep(isCoarsePointer() ? 600 + attempt * 400 : 350);
     }
-  } catch (error) {
+  }
+  if (!response) {
+    const error = lastError;
     const name = (error as { name?: string } | null)?.name || "";
     const apiError =
       isAbortLike(error) || isOfflineLikeError(error)
@@ -234,7 +220,7 @@ async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs
         error: apiError,
         url,
         method,
-        extra: { timeout_ms: timeoutMs, name, retried: canRetry }
+        extra: { timeout_ms: timeoutMs, name, retried: canRetry, attempts: maxAttempts }
       });
     }
     if (apiError instanceof ApiError) {

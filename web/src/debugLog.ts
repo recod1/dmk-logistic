@@ -60,26 +60,44 @@ export function connectionNetInfo(): {
   };
 }
 
+export function isTransientNetworkNoise(input: {
+  source?: string;
+  error?: unknown;
+  message?: string;
+}): boolean {
+  const err = input.error as { name?: string; message?: string; detail?: string | null } | null | undefined;
+  const name = (err?.name || "").toLowerCase();
+  const text = `${input.source || ""} ${input.message || ""} ${err?.message || ""} ${err?.detail || ""}`.toLowerCase();
+  if (name === "apierror" && err?.detail !== "timeout" && !text.includes("нет связи")) {
+    return false;
+  }
+  return (
+    name === "aborterror" ||
+    name === "timeouterror" ||
+    (name === "apierror" && (err?.detail === "timeout" || text.includes("нет связи"))) ||
+    (name === "typeerror" && (text.includes("load failed") || text.includes("failed to fetch"))) ||
+    text.includes("load failed") ||
+    text.includes("failed to fetch") ||
+    text.includes("fetch is aborted") ||
+    text.includes("timeout") ||
+    text.includes("нет ответа сервера") ||
+    text.includes("нет связи")
+  );
+}
+
 function isBackgroundTransientNoise(input: {
   source: string;
   error?: unknown;
   message?: string;
 }): boolean {
-  if (connectionNetInfo().visibility !== "hidden") {
+  const noise = isTransientNetworkNoise(input);
+  if (!noise) {
     return false;
   }
-  const err = input.error as { name?: string; message?: string; detail?: string | null } | null | undefined;
-  const name = (err?.name || "").toLowerCase();
-  const text = `${input.source} ${input.message || ""} ${err?.message || ""} ${err?.detail || ""}`.toLowerCase();
-  return (
-    name === "aborterror" ||
-    name === "timeouterror" ||
-    text.includes("load failed") ||
-    text.includes("failed to fetch") ||
-    text.includes("timeout") ||
-    text.includes("нет ответа сервера") ||
-    text.includes("нет связи")
-  );
+  if (input.source === "unhandledrejection") {
+    return true;
+  }
+  return connectionNetInfo().visibility === "hidden";
 }
 
 export function reportDebugError(input: {
