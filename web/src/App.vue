@@ -73,6 +73,7 @@ import {
   commentSalary,
   deleteSalary,
   isOfflineLikeError,
+  isPageHidden,
   listSalaryChatMessages,
   sendSalaryChatMessage,
   uploadSalaryChatAttachments,
@@ -135,6 +136,7 @@ import { isPointDone, nextStatus, nextStatusLabel } from "./status";
 import {
   connectionHint,
   connectionServerOk,
+  noteForegroundResume,
   pingServer,
   restartConnectionWatch,
   setChatWsState,
@@ -158,6 +160,7 @@ import type {
 } from "./types";
 
 const TOKEN_STORAGE_KEY = "dmk_mobile_token";
+const PENDING_NOTIFICATION_READS_KEY = "dmk_pending_notification_reads";
 const USER_STORAGE_KEY = "dmk_mobile_user";
 const DEVICE_ID_STORAGE_KEY = "dmk_mobile_device_id";
 
@@ -793,7 +796,7 @@ function isCoarseUi(): boolean {
 }
 
 function wsHandshakeTimeoutMs(): number {
-  return isCoarseUi() ? 5000 : 8000;
+  return isCoarseUi() ? 15_000 : 10_000;
 }
 
 function allowRealtimeSockets(): void {
@@ -827,11 +830,29 @@ function armWsHandshakeTimer(ws: WebSocket, kind: "notifications" | "chat"): voi
     setter(
       window.setTimeout(() => {
         setter(null);
-        if (ws.readyState === WebSocket.CONNECTING) {
-          try {
-            ws.close();
-          } catch {
-            // handshake stuck on cellular/HTTP2
+        if (ws.readyState === WebSocket.OPEN) {
+          return;
+        }
+        if (kind === "notifications" && notificationsWs === ws) {
+          notificationsWs = null;
+          setNotificationsWsState("closed");
+        }
+        if (kind === "chat" && chatWs === ws) {
+          chatWs = null;
+          setChatWsState("closed");
+        }
+        try {
+          ws.close();
+        } catch {
+          // handshake stuck on cellular/HTTP2
+        }
+        if (!isPageHidden() && authToken.value && realtimeSocketsAllowed) {
+          if (kind === "notifications") {
+            notificationsWsBackoffMs = isCoarseUi() ? 4000 : 2500;
+            connectNotificationsSocket();
+          } else {
+            chatWsBackoffMs = isCoarseUi() ? 4000 : 2500;
+            connectChatSocket();
           }
         }
       }, wsHandshakeTimeoutMs())
@@ -882,7 +903,7 @@ function startNotificationsPolling(): void {
       stopNotificationsPolling();
       return;
     }
-    if (!hasNetwork()) {
+    if (!hasNetwork() || isPageHidden()) {
       return;
     }
     const nState = notificationsWs?.readyState;
@@ -967,7 +988,7 @@ function startChatPolling(): void {
 }
 
 function scheduleChatReconnect(): void {
-  if (!authToken.value || !realtimeSocketsAllowed) {
+  if (!authToken.value || !realtimeSocketsAllowed || isPageHidden()) {
     return;
   }
   if (chatWsReconnectTimer !== null) {
@@ -1024,7 +1045,7 @@ function applyIncomingReadReceipt(item: ChatReadReceipt): void {
 }
 
 function connectChatSocket(): void {
-  if (!authToken.value || !realtimeSocketsAllowed) {
+  if (!authToken.value || !realtimeSocketsAllowed || isPageHidden()) {
     return;
   }
   if (notificationsWs?.readyState === WebSocket.CONNECTING) {
@@ -1261,8 +1282,41 @@ function playNotificationSound(): void {
   }
 }
 
+function forceReconnectRealtimeSockets(): void {
+  if (!authToken.value || !realtimeSocketsAllowed || !hasNetwork() || isPageHidden()) {
+    return;
+  }
+  notificationsWsBackoffMs = isCoarseUi() ? 4000 : 2500;
+  chatWsBackoffMs = isCoarseUi() ? 4000 : 2500;
+  if (notificationsWsReconnectTimer !== null) {
+    window.clearTimeout(notificationsWsReconnectTimer);
+    notificationsWsReconnectTimer = null;
+  }
+  if (chatWsReconnectTimer !== null) {
+    window.clearTimeout(chatWsReconnectTimer);
+    chatWsReconnectTimer = null;
+  }
+  if (notificationsWs?.readyState !== WebSocket.OPEN) {
+    if (notificationsWs) {
+      try {
+        notificationsWs.close();
+      } catch {
+        // replace stale handshake
+      }
+      notificationsWs = null;
+    }
+    setNotificationsWsState("closed");
+    connectNotificationsSocket();
+  } else if (chatWs?.readyState !== WebSocket.OPEN) {
+    connectChatSocket();
+  }
+}
+
 function scheduleNotificationsSocketReconnect(): void {
   if (!authToken.value || !realtimeSocketsAllowed) {
+    return;
+  }
+  if (isPageHidden()) {
     return;
   }
   if (notificationsWsReconnectTimer !== null) {
@@ -1277,7 +1331,7 @@ function scheduleNotificationsSocketReconnect(): void {
 }
 
 function connectNotificationsSocket(): void {
-  if (!authToken.value || !realtimeSocketsAllowed) {
+  if (!authToken.value || !realtimeSocketsAllowed || isPageHidden()) {
     return;
   }
   if (wsBusy(notificationsWs)) {
@@ -1536,7 +1590,20 @@ async function ensureWebPushSubscription(): Promise<void> {
     const registration = await navigator.serviceWorker.ready;
     const existing = await registration.pushManager.getSubscription();
     if (existing) {
+      const json = existing.toJSON();
+      const key = json.keys;
+      if (json.endpoint && key?.p256dh && key?.auth) {
+        try {
+          await subscribeWebPush(authToken.value, {
+            endpoint: json.endpoint,
+            keys: { p256dh: key.p256dh, auth: key.auth }
+          });
+        } catch {
+          // keep local subscription; server sync retries on next resume
+        }
+      }
       webPushSubscribed.value = true;
+      useLegacyBrowserNotification.value = false;
       return;
     }
   } catch {
@@ -1809,6 +1876,27 @@ function onServiceWorkerMessage(event: MessageEvent): void {
   void hydrateDriverRoutesFromCache();
 }
 
+function onForegroundResume(): void {
+  if (!authToken.value) {
+    return;
+  }
+  noteForegroundResume();
+  if (realtimeSocketsAllowed) {
+    forceReconnectRealtimeSockets();
+  }
+  startNotificationsPolling();
+  void refreshNotifications();
+  void flushPendingNotificationReads();
+  void refreshRouteChatUnread();
+  void ensureWebPushSubscription();
+  if (isDriver.value) {
+    void hydrateDriverRoutesFromCache();
+    void refreshDriverData();
+  } else if (isRouteManager.value) {
+    void refreshAdminRoutes(routeFilters.value);
+  }
+}
+
 function onVisibilityChange(): void {
   if (typeof document === "undefined") {
     return;
@@ -1826,12 +1914,12 @@ function onVisibilityChange(): void {
   if (document.visibilityState !== "visible") {
     return;
   }
-  void refreshNotifications();
-  if (isDriver.value) {
-    void hydrateDriverRoutesFromCache();
-    void refreshDriverData();
-  } else if (isRouteManager.value) {
-    void refreshAdminRoutes(routeFilters.value);
+  onForegroundResume();
+}
+
+function onPageShow(event: PageTransitionEvent): void {
+  if (event.persisted) {
+    onForegroundResume();
   }
 }
 
@@ -1846,11 +1934,7 @@ function onPageHide(): void {
 function onOnline(): void {
   syncMessage.value = "Онлайн: синхронизация возобновлена";
   if (authToken.value) {
-    void refreshNotifications();
-    startNotificationsPolling();
-    if (realtimeSocketsAllowed) {
-      connectNotificationsSocket();
-    }
+    onForegroundResume();
   }
   if (isDriver.value) {
     void (async () => {
@@ -2336,11 +2420,82 @@ async function doDeleteAdminRoute(routeId: string): Promise<void> {
   }
 }
 
+function loadPendingNotificationReads(): number[] {
+  try {
+    const raw = localStorage.getItem(PENDING_NOTIFICATION_READS_KEY);
+    if (!raw) {
+      return [];
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+    return parsed.filter((item): item is number => typeof item === "number" && Number.isFinite(item));
+  } catch {
+    return [];
+  }
+}
+
+function savePendingNotificationReads(ids: number[]): void {
+  const unique = Array.from(new Set(ids));
+  if (!unique.length) {
+    localStorage.removeItem(PENDING_NOTIFICATION_READS_KEY);
+    return;
+  }
+  localStorage.setItem(PENDING_NOTIFICATION_READS_KEY, JSON.stringify(unique));
+}
+
+function queuePendingNotificationRead(notificationId: number): void {
+  savePendingNotificationReads([...loadPendingNotificationReads(), notificationId]);
+}
+
+function applyLocalNotificationRead(notificationId: number): void {
+  let changed = false;
+  notifications.value = notifications.value.map((item) => {
+    if (item.id !== notificationId || item.is_read) {
+      return item;
+    }
+    changed = true;
+    return { ...item, is_read: true };
+  });
+  if (changed) {
+    unreadNotificationsCount.value = Math.max(0, unreadNotificationsCount.value - 1);
+  }
+}
+
+async function flushPendingNotificationReads(): Promise<void> {
+  if (!authToken.value || !hasNetwork() || isPageHidden()) {
+    return;
+  }
+  const pending = loadPendingNotificationReads();
+  if (!pending.length) {
+    return;
+  }
+  const leftover: number[] = [];
+  for (const notificationId of pending) {
+    try {
+      const updated = await markNotificationRead(authToken.value, notificationId);
+      notifications.value = notifications.value.map((item) => (item.id === updated.id ? updated : item));
+    } catch (error) {
+      if (handleAuthError(error)) {
+        leftover.push(notificationId, ...pending.slice(pending.indexOf(notificationId) + 1));
+        break;
+      }
+      if (isOfflineLikeError(error) || isPageHidden()) {
+        leftover.push(notificationId, ...pending.slice(pending.indexOf(notificationId) + 1));
+        break;
+      }
+      leftover.push(notificationId);
+    }
+  }
+  savePendingNotificationReads(leftover);
+}
+
 async function refreshNotifications(): Promise<void> {
   if (!authToken.value || notificationsLoading.value) {
     return;
   }
-  if (!hasNetwork()) {
+  if (!hasNetwork() || isPageHidden()) {
     return;
   }
   notificationsLoading.value = true;
@@ -2349,9 +2504,18 @@ async function refreshNotifications(): Promise<void> {
     const latestNotifications = await listNotifications(authToken.value, 50);
     latestNotifications.forEach((item) => handleIncomingNotification(item, { playEffects: false, syncDriverState: true }));
     notifications.value = latestNotifications;
-    unreadNotificationsCount.value = await getUnreadNotificationsCount(authToken.value);
+    try {
+      unreadNotificationsCount.value = await getUnreadNotificationsCount(authToken.value);
+    } catch (error) {
+      if (!isOfflineLikeError(error) && !isPageHidden()) {
+        throw error;
+      }
+    }
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы загрузить уведомления." })) {
+      return;
+    }
+    if (isOfflineLikeError(error) || isPageHidden()) {
       return;
     }
     notificationsError.value = `Ошибка загрузки уведомлений: ${(error as Error).message}`;
@@ -2364,11 +2528,22 @@ async function doMarkNotificationRead(notificationId: number): Promise<void> {
   if (!authToken.value) {
     return;
   }
+  applyLocalNotificationRead(notificationId);
+  if (!hasNetwork() || isPageHidden()) {
+    queuePendingNotificationRead(notificationId);
+    return;
+  }
   try {
     const updated = await markNotificationRead(authToken.value, notificationId);
     notifications.value = notifications.value.map((item) => (item.id === updated.id ? updated : item));
-    unreadNotificationsCount.value = Math.max(0, unreadNotificationsCount.value - 1);
   } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
+    if (isOfflineLikeError(error) || isPageHidden()) {
+      queuePendingNotificationRead(notificationId);
+      return;
+    }
     notificationsError.value = `Ошибка отметки прочитанного: ${(error as Error).message}`;
   }
 }
@@ -3871,6 +4046,7 @@ onMounted(async () => {
   window.addEventListener("offline", onOffline);
   window.addEventListener("mousedown", onDocumentClick);
   window.addEventListener("pagehide", onPageHide);
+  window.addEventListener("pageshow", onPageShow);
   window.addEventListener("resize", onViewportChange);
   window.visualViewport?.addEventListener("resize", onViewportChange);
   window.visualViewport?.addEventListener("scroll", onViewportChange);
@@ -3902,6 +4078,7 @@ onUnmounted(() => {
   window.removeEventListener("offline", onOffline);
   window.removeEventListener("mousedown", onDocumentClick);
   window.removeEventListener("pagehide", onPageHide);
+  window.removeEventListener("pageshow", onPageShow);
   window.removeEventListener("resize", onViewportChange);
   window.visualViewport?.removeEventListener("resize", onViewportChange);
   window.visualViewport?.removeEventListener("scroll", onViewportChange);

@@ -116,6 +116,10 @@ function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): Abor
   return real[0];
 }
 
+export function isPageHidden(): boolean {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
 export function isOfflineLikeError(error: unknown): boolean {
   if (error instanceof ApiError && (error.status === 0 || error.detail === "timeout")) {
     return true;
@@ -126,6 +130,7 @@ export function isOfflineLikeError(error: unknown): boolean {
     name === "AbortError" ||
     name === "TimeoutError" ||
     message.includes("failed to fetch") ||
+    message.includes("load failed") ||
     message.includes("networkerror") ||
     message.includes("нет связи")
   );
@@ -202,7 +207,10 @@ async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs
     try {
       response = await fetchWithTimeout(url, init, headers, timeoutMs);
     } catch (error) {
-      if (!canRetry || !isAbortLike(error)) {
+      if (!canRetry || !(isAbortLike(error) || isOfflineLikeError(error))) {
+        throw error;
+      }
+      if (isPageHidden()) {
         throw error;
       }
       await sleep(isCoarsePointer() ? 600 : 350);
@@ -211,7 +219,7 @@ async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs
   } catch (error) {
     const name = (error as { name?: string } | null)?.name || "";
     const apiError =
-      isAbortLike(error)
+      isAbortLike(error) || isOfflineLikeError(error)
         ? new ApiError("Нет связи с сервером. Проверьте интернет.", {
             status: 0,
             bodyText: "",
@@ -220,13 +228,15 @@ async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs
             method
           })
         : error;
-    reportDebugError({
-      source: "api.fetch",
-      error: apiError,
-      url,
-      method,
-      extra: { timeout_ms: timeoutMs, name, retried: canRetry }
-    });
+    if (!(isPageHidden() && isOfflineLikeError(apiError))) {
+      reportDebugError({
+        source: "api.fetch",
+        error: apiError,
+        url,
+        method,
+        extra: { timeout_ms: timeoutMs, name, retried: canRetry }
+      });
+    }
     if (apiError instanceof ApiError) {
       throw apiError;
     }

@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { onMounted, onUnmounted, ref } from "vue";
+
 import type { NotificationDto } from "../types";
 
 defineProps<{
@@ -62,6 +64,29 @@ function chatKindLabel(item: NotificationDto): string {
   return "";
 }
 
+const headEl = ref<HTMLElement | null>(null);
+let headObserver: ResizeObserver | null = null;
+
+function syncHeadHeight(): void {
+  const height = headEl.value?.offsetHeight ?? 0;
+  const wrap = headEl.value?.parentElement;
+  wrap?.style.setProperty("--notif-head-h", `${Math.ceil(height)}px`);
+}
+
+onMounted(() => {
+  syncHeadHeight();
+  if (typeof ResizeObserver === "undefined" || !headEl.value) {
+    return;
+  }
+  headObserver = new ResizeObserver(() => syncHeadHeight());
+  headObserver.observe(headEl.value);
+});
+
+onUnmounted(() => {
+  headObserver?.disconnect();
+  headObserver = null;
+});
+
 function formatExtra(item: NotificationDto): string {
   const parts: string[] = [];
   const driver = (item.driver_full_name || "").trim();
@@ -82,7 +107,7 @@ function formatExtra(item: NotificationDto): string {
 
 <template>
   <section class="notifications-wrap">
-    <div class="head-sticky">
+    <div ref="headEl" class="head-sticky">
       <div class="head-row">
         <h2 class="page-heading">
           Уведомления <span v-if="typeof unreadCount === 'number'" class="counter">({{ unreadCount }})</span>
@@ -134,19 +159,19 @@ function formatExtra(item: NotificationDto): string {
 }
 .head-sticky {
   position: sticky;
-  top: calc(var(--topbar-h) + env(safe-area-inset-top, 0px));
+  top: var(--topbar-h);
   z-index: 20;
   margin: 0 -0.2rem;
   padding: 0.35rem 0.2rem 0.45rem;
-  background: rgba(3, 7, 18, 0.94);
+  background: rgba(3, 7, 18, 0.96);
   backdrop-filter: blur(12px);
 }
 .head-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: nowrap;
-  gap: 0.5rem;
+  flex-wrap: wrap;
+  gap: 0.45rem;
 }
 .page-heading {
   margin: 0;
@@ -157,17 +182,41 @@ function formatExtra(item: NotificationDto): string {
 }
 .head-actions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   gap: 0.45rem;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
   min-width: 0;
 }
 .head-actions button {
   min-height: 36px;
   border-radius: 10px;
-  flex: 0 0 auto;
+  flex: 1 1 auto;
   white-space: nowrap;
+}
+.list {
+  display: grid;
+  gap: 0.7rem;
+  padding-top: 0.15rem;
+  scroll-margin-top: var(--notif-head-h, 0px);
+}
+.item-card:first-child {
+  scroll-margin-top: calc(var(--topbar-h) + var(--notif-head-h, 0px));
+}
+@media (max-width: 400px) {
+  .page-heading {
+    display: none;
+  }
+  .head-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .head-actions {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    overflow: visible;
+  }
+  .head-actions button:last-child {
+    grid-column: 1 / -1;
+  }
 }
 .chat-kind {
   flex: 0 0 auto;
@@ -179,9 +228,13 @@ function formatExtra(item: NotificationDto): string {
   font-weight: 700;
   white-space: nowrap;
 }
-.list {
-  display: grid;
-  gap: 0.7rem;
+.hint {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .item-card {
   display: grid;
@@ -227,11 +280,6 @@ p {
 }
 .error {
   color: #fca5a5;
-}
-.hint {
-  margin: 0;
-  color: var(--text-muted);
-  font-size: 0.9rem;
 }
 .empty-card {
   color: var(--text-muted);

@@ -23,8 +23,10 @@ let healthInFlight = false;
 let healthFailStreak = 0;
 let lastReportedHealthFail = false;
 let unhandledBound = false;
+let visibilityBound = false;
 let apiBusy = false;
 let apiQueued = false;
+let healthAbort: AbortController | null = null;
 
 function healthTimeoutMs(): number {
   if (typeof window === "undefined") {
@@ -174,7 +176,23 @@ export function noteApiReachable(): void {
   serverOk.value = true;
 }
 
+function isPageHidden(): boolean {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
+export function noteForegroundResume(): void {
+  healthFailStreak = 0;
+  lastReportedHealthFail = false;
+  lastHealthError.value = null;
+  if (online.value) {
+    void pingServer();
+  }
+}
+
 export async function pingServer(): Promise<boolean> {
+  if (isPageHidden()) {
+    return serverOk.value !== false;
+  }
   if (healthInFlight) {
     return serverOk.value !== false;
   }
@@ -188,6 +206,7 @@ export async function pingServer(): Promise<boolean> {
   }
   healthInFlight = true;
   const ctrl = new AbortController();
+  healthAbort = ctrl;
   const timeoutMs = healthTimeoutMs();
   const timer = globalThis.setTimeout(() => ctrl.abort(), timeoutMs);
   const started = typeof performance !== "undefined" ? performance.now() : Date.now();
@@ -219,6 +238,9 @@ export async function pingServer(): Promise<boolean> {
     lastHealthMs.value = (typeof performance !== "undefined" ? performance.now() : Date.now()) - started;
     lastHealthAt.value = new Date().toISOString();
     lastHealthError.value = (error as Error)?.message || String(error);
+    if (isPageHidden() || ctrl.signal.aborted && isPageHidden()) {
+      return serverOk.value !== false;
+    }
     if (lastApiOkAt > 0 && Date.now() - lastApiOkAt < 20_000) {
       serverOk.value = true;
       return false;
@@ -242,6 +264,9 @@ export async function pingServer(): Promise<boolean> {
     return false;
   } finally {
     globalThis.clearTimeout(timer);
+    if (healthAbort === ctrl) {
+      healthAbort = null;
+    }
     healthInFlight = false;
     online.value = typeof navigator === "undefined" ? true : navigator.onLine;
   }
@@ -255,6 +280,17 @@ function onOnline(): void {
 function onOffline(): void {
   online.value = false;
   serverOk.value = false;
+}
+
+function abortHealthIfHidden(): void {
+  if (!isPageHidden()) {
+    return;
+  }
+  try {
+    healthAbort?.abort();
+  } catch {
+    // ignore
+  }
 }
 
 function onUnhandledRejection(event: PromiseRejectionEvent): void {
@@ -291,6 +327,10 @@ export function startConnectionWatch(apiBase: string): void {
   }
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
+  if (!visibilityBound) {
+    document.addEventListener("visibilitychange", abortHealthIfHidden);
+    visibilityBound = true;
+  }
   if (!unhandledBound) {
     window.addEventListener("unhandledrejection", onUnhandledRejection);
     window.addEventListener("error", onWindowError);
@@ -316,6 +356,10 @@ export function stopConnectionWatch(): void {
   }
   window.removeEventListener("online", onOnline);
   window.removeEventListener("offline", onOffline);
+  if (visibilityBound) {
+    document.removeEventListener("visibilitychange", abortHealthIfHidden);
+    visibilityBound = false;
+  }
   if (healthTimer !== null) {
     window.clearInterval(healthTimer);
     healthTimer = null;

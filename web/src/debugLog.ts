@@ -60,6 +60,28 @@ export function connectionNetInfo(): {
   };
 }
 
+function isBackgroundTransientNoise(input: {
+  source: string;
+  error?: unknown;
+  message?: string;
+}): boolean {
+  if (connectionNetInfo().visibility !== "hidden") {
+    return false;
+  }
+  const err = input.error as { name?: string; message?: string; detail?: string | null } | null | undefined;
+  const name = (err?.name || "").toLowerCase();
+  const text = `${input.source} ${input.message || ""} ${err?.message || ""} ${err?.detail || ""}`.toLowerCase();
+  return (
+    name === "aborterror" ||
+    name === "timeouterror" ||
+    text.includes("load failed") ||
+    text.includes("failed to fetch") ||
+    text.includes("timeout") ||
+    text.includes("нет ответа сервера") ||
+    text.includes("нет связи")
+  );
+}
+
 export function reportDebugError(input: {
   source: string;
   error?: unknown;
@@ -67,7 +89,10 @@ export function reportDebugError(input: {
   url?: string | null;
   method?: string | null;
   extra?: Record<string, unknown> | null;
-}): DebugErrorEntry {
+}): DebugErrorEntry | null {
+  if (isBackgroundTransientNoise(input)) {
+    return null;
+  }
   const err = input.error as
     | {
         name?: string;

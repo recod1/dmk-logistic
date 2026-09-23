@@ -24,6 +24,7 @@ from mobile_api.onec_routes import parse_onec_message
 from mobile_api.roles import RoleCode, role_label_ru
 from mobile_api.time_formatting import format_dt_for_app
 from utils.onec_datetime import planned_wall_fields, split_onec_wall_datetime, normalize_planned_time
+from utils.route_point_changes import changed_text as _changed_text, diff_route_points
 
 
 router = APIRouter(prefix="/v1/admin/routes", tags=["admin-routes"])
@@ -491,16 +492,6 @@ def _ensure_logistic(db: Session, user_id: int) -> User:
     if user.role_code not in LOGISTIC_SELECT_ROLES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Пользователь не может быть логистом рейса")
     return user
-
-
-def _changed_text(label: str, old: str | None, new: str | None) -> str | None:
-    prev = (old or "").strip()
-    nxt = (new or "").strip()
-    if prev == nxt:
-        return None
-    if prev and nxt:
-        return f"{label}: {prev} → {nxt}"
-    return f"{label}: {nxt or '—'}"
 
 
 def _apply_points_replace(
@@ -1143,9 +1134,10 @@ def update_route(
             route.created_by_user_id = creator.id
             changes.append(f"Логист: {old_name} → {new_name}")
     if payload.points is not None:
+        existing_points = _route_points(db, route.id)
+        changes.extend(diff_route_points(existing_points, payload.points))
         _apply_points_replace(db, route, payload.points, preserve_progress=True)
         _sync_route_status_from_points(db, route)
-        changes.append("Точки рейса")
 
     db.add(route)
     notify_driver_route_updated(db, route=route, actor_user=current_user, changes=changes)
