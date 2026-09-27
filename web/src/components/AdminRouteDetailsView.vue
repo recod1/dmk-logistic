@@ -999,6 +999,7 @@ function removeRoute(): void {
   color: #93c5fd;
   font-size: 0.78rem;
   padding: 0.15rem 0.4rem;
+  overflow-wrap: anywhere;
 }
 .head {
   display: flex;

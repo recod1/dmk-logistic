@@ -457,6 +457,7 @@ function showRevert(pointId: number): boolean {
 .delta {
   color: #93c5fd;
   font-size: 0.78rem;
+  overflow-wrap: anywhere;
 }
 .loc {
   margin: 0.4rem 0 0;
