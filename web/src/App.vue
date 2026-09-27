@@ -2295,6 +2295,7 @@ async function doCreateAdminRoute(payload: AdminRouteCreatePayload): Promise<voi
 async function doCreateAdminRouteFromOnec(payload: {
   raw_text: string;
   driver_user_id?: number | null;
+  created_by_user_id?: number | null;
   number_auto?: string;
   trailer_number?: string;
 }): Promise<void> {

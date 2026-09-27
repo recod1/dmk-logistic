@@ -101,14 +101,6 @@ function formatPlannedLine(date?: string | null, time?: string | null): string {
   return `${dateText} · ${timeText}`;
 }
 
-function defaultContactsText(): string {
-  const items = (props.logisticsContacts ?? []).filter((item) => (item.name || item.phone || "").trim());
-  if (!items.length) {
-    return "";
-  }
-  return items.map((item) => `${(item.name || "").trim()} ${(item.phone || "").trim()}`.trim()).join("; ");
-}
-
 function statusLabel(status: RouteWorkflowStatus): string {
   const labels: Record<RouteWorkflowStatus, string> = {
     new: "Не принят",
@@ -453,9 +445,6 @@ function closeReassign(): void {
 }
 
 function openEdit(): void {
-  if (!editForm.dispatcher_contacts.trim()) {
-    editForm.dispatcher_contacts = defaultContactsText();
-  }
   showEdit.value = true;
 }
 

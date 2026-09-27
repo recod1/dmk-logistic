@@ -47,7 +47,15 @@ const emit = defineEmits<{
       points: AdminRoutePointPayload[];
     }
   ];
-  createOnec: [payload: { raw_text: string; driver_user_id?: number | null; number_auto?: string; trailer_number?: string }];
+  createOnec: [
+    payload: {
+      raw_text: string;
+      driver_user_id?: number | null;
+      created_by_user_id?: number | null;
+      number_auto?: string;
+      trailer_number?: string;
+    }
+  ];
   selectRoute: [routeId: string];
 }>();
 
@@ -186,6 +194,7 @@ const createForm = reactive({
 const onecForm = reactive({
   raw_text: "",
   driver_user_id: 0,
+  created_by_user_id: 0,
   number_auto: "",
   trailer_number: ""
 });
@@ -317,6 +326,7 @@ function openCreateOnec(): void {
   showCreate.value = false;
   onecForm.raw_text = "";
   onecForm.driver_user_id = 0;
+  onecForm.created_by_user_id = 0;
   onecDriverQuery.value = "";
   onecDriverOpen.value = false;
   onecForm.number_auto = "";
@@ -396,6 +406,7 @@ function submitCreateOnec(): void {
   emit("createOnec", {
     raw_text: raw,
     driver_user_id: onecForm.driver_user_id || null,
+    created_by_user_id: onecForm.created_by_user_id || null,
     number_auto: onecForm.number_auto.trim() || undefined,
     trailer_number: onecForm.trailer_number.trim() || undefined
   });
@@ -563,6 +574,15 @@ onMounted(() => {
             {{ driver.full_name || driver.login }}
           </button>
         </div>
+      </label>
+      <label>
+        Логист
+        <select v-model.number="onecForm.created_by_user_id">
+          <option :value="0">Из текста 1С или не назначать</option>
+          <option v-for="person in logistics || []" :key="person.id" :value="person.id">
+            {{ person.full_name || person.login }}
+          </option>
+        </select>
       </label>
       <div class="create-grid onec-grid">
         <label>

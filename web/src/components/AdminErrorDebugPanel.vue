@@ -37,43 +37,45 @@ function onClose(): void {
     <article class="panel" role="dialog" aria-modal="true" aria-label="Отладка соединения">
       <header class="head">
         <h2>Отладка ошибок</h2>
-        <button type="button" class="ghost" @click="onClose">Закрыть</button>
+        <button type="button" class="ghost close" @click="onClose">Закрыть</button>
       </header>
-      <p class="note">
-        Временный разбор для администратора: снимок связи, очередь синка и последние сбои. Скопируйте текст и
-        пришлите, если ошибка повторяется.
-      </p>
+      <div class="body">
+        <p class="note">
+          Временный разбор для администратора: снимок связи, очередь синка и последние сбои. Скопируйте текст и
+          пришлите, если ошибка повторяется.
+        </p>
 
-      <section v-if="latest" class="latest">
-        <h3>Последняя ошибка</h3>
-        <p><strong>{{ latest.source }}</strong> · {{ latest.at }}</p>
-        <p class="msg">{{ latest.message }}</p>
-        <p v-if="latest.status != null">HTTP {{ latest.status }} {{ latest.method || "" }} {{ latest.url || "" }}</p>
-        <p>online={{ latest.online }} · visibility={{ latest.visibility }} · net={{ latest.effectiveType || "—" }}</p>
-      </section>
+        <section v-if="latest" class="latest">
+          <h3>Последняя ошибка</h3>
+          <p class="wrap"><strong>{{ latest.source }}</strong> · {{ latest.at }}</p>
+          <p class="msg">{{ latest.message }}</p>
+          <p v-if="latest.status != null" class="wrap">HTTP {{ latest.status }} {{ latest.method || "" }} {{ latest.url || "" }}</p>
+          <p class="wrap">online={{ latest.online }} · visibility={{ latest.visibility }} · net={{ latest.effectiveType || "—" }}</p>
+        </section>
 
-      <section>
-        <h3>Снимок соединения</h3>
-        <pre class="dump">{{ JSON.stringify(connectionSnapshot(), null, 2) }}</pre>
-      </section>
+        <section>
+          <h3>Снимок соединения</h3>
+          <pre class="dump">{{ JSON.stringify(connectionSnapshot(), null, 2) }}</pre>
+        </section>
 
-      <section>
-        <h3>Журнал ({{ debugErrors.length }})</h3>
-        <ol v-if="debugErrors.length" class="log">
-          <li v-for="item in debugErrors" :key="item.id">
-            <div class="log-head">{{ item.at }} · {{ item.source }}</div>
-            <div>{{ item.message }}</div>
-            <div v-if="item.url" class="muted">{{ item.method }} {{ item.url }} {{ item.status != null ? `HTTP ${item.status}` : "" }}</div>
-            <pre v-if="item.stack" class="stack">{{ item.stack }}</pre>
-            <pre v-if="item.bodyPreview" class="stack">{{ item.bodyPreview }}</pre>
-          </li>
-        </ol>
-        <p v-else class="muted">Ошибок пока нет. Журнал заполнится при сбое запроса, health-check или необработанном исключении.</p>
-      </section>
+        <section>
+          <h3>Журнал ({{ debugErrors.length }})</h3>
+          <ol v-if="debugErrors.length" class="log">
+            <li v-for="item in debugErrors" :key="item.id">
+              <div class="log-head wrap">{{ item.at }} · {{ item.source }}</div>
+              <div class="log-msg">{{ item.message }}</div>
+              <div v-if="item.url" class="muted wrap">{{ item.method }} {{ item.url }} {{ item.status != null ? `HTTP ${item.status}` : "" }}</div>
+              <pre v-if="item.stack" class="stack">{{ item.stack }}</pre>
+              <pre v-if="item.bodyPreview" class="stack">{{ item.bodyPreview }}</pre>
+            </li>
+          </ol>
+          <p v-else class="muted">Ошибок пока нет. Журнал заполнится при сбое запроса, health-check или необработанном исключении.</p>
+        </section>
 
-      <div class="actions">
-        <button type="button" class="primary" @click="copyDump">Скопировать всё</button>
-        <button type="button" class="ghost" @click="clearDebugErrors">Очистить журнал</button>
+        <div class="actions">
+          <button type="button" class="primary" @click="copyDump">Скопировать всё</button>
+          <button type="button" class="ghost" @click="clearDebugErrors">Очистить журнал</button>
+        </div>
       </div>
     </article>
   </div>
@@ -88,23 +90,49 @@ function onClose(): void {
   display: grid;
   place-items: center;
   padding: 0.75rem;
+  box-sizing: border-box;
 }
 .panel {
   width: min(720px, 100%);
+  max-width: 100%;
   max-height: min(88dvh, 860px);
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: hidden;
   border-radius: 16px;
   border: 1px solid var(--border);
   background: #0b1220;
-  padding: 1rem;
-  display: grid;
-  gap: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  box-sizing: border-box;
 }
 .head {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 0.85rem 1rem;
+  background: #0b1220;
+  border-bottom: 1px solid #1e293b;
+}
+.head h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.close {
+  flex: 0 0 auto;
+}
+.body {
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 0.85rem 1rem 1rem;
+  display: grid;
+  gap: 0.75rem;
+  min-width: 0;
 }
 h2,
 h3 {
@@ -119,8 +147,17 @@ h3 {
   margin-bottom: 0.3rem;
 }
 .note,
-.muted {
+.muted,
+.wrap,
+.log-msg,
+.msg {
   margin: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.note,
+.muted {
   color: var(--text-muted);
   font-size: 0.82rem;
   line-height: 1.4;
@@ -128,7 +165,6 @@ h3 {
 .msg {
   margin: 0.2rem 0;
   color: #fecaca;
-  word-break: break-word;
 }
 .dump,
 .stack {
@@ -139,9 +175,12 @@ h3 {
   border: 1px solid #1e293b;
   font-size: 0.72rem;
   line-height: 1.4;
-  overflow: auto;
+  overflow-x: auto;
+  overflow-y: auto;
   max-height: 220px;
+  max-width: 100%;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   word-break: break-word;
 }
 .log {
@@ -150,6 +189,7 @@ h3 {
   display: grid;
   gap: 0.55rem;
   font-size: 0.8rem;
+  min-width: 0;
 }
 .log-head {
   color: #93c5fd;

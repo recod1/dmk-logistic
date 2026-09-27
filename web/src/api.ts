@@ -597,7 +597,13 @@ export async function createAdminRoute(token: string, payload: AdminRouteCreateP
 
 export async function createAdminRouteFromOnec(
   token: string,
-  payload: { raw_text: string; driver_user_id?: number | null; number_auto?: string; trailer_number?: string }
+  payload: {
+    raw_text: string;
+    driver_user_id?: number | null;
+    created_by_user_id?: number | null;
+    number_auto?: string;
+    trailer_number?: string;
+  }
 ): Promise<AdminRoute> {
   return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/onec`, {
     method: "POST",
@@ -1435,14 +1441,24 @@ export async function getChatUnreadSummary(
   token: string,
   routeIds: string[]
 ): Promise<Array<{ route_id: string; unread_count: number }>> {
-  const data = await requestJson<{ items: Array<{ route_id: string; unread_count: number }> }>(`${API_BASE}/v1/chat/unread-summary`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`
-    },
-    body: JSON.stringify({ route_ids: routeIds })
-  });
-  return data.items;
+  const ids = [...new Set(routeIds.map((id) => String(id || "").trim()).filter(Boolean))];
+  const chunkSize = 250;
+  const items: Array<{ route_id: string; unread_count: number }> = [];
+  for (let offset = 0; offset < ids.length; offset += chunkSize) {
+    const chunk = ids.slice(offset, offset + chunkSize);
+    const data = await requestJson<{ items: Array<{ route_id: string; unread_count: number }> }>(
+      `${API_BASE}/v1/chat/unread-summary`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ route_ids: chunk })
+      }
+    );
+    items.push(...(data.items || []));
+  }
+  return items;
 }
 
 export async function getMyChatUnreadSummary(

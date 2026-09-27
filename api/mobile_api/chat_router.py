@@ -173,7 +173,7 @@ def list_messages(
 
 
 class UnreadSummaryIn(BaseModel):
-    route_ids: list[str] = Field(default_factory=list, max_items=300)
+    route_ids: list[str] = Field(default_factory=list, max_items=2000)
 
 
 @router.post("/v1/chat/unread-summary")
@@ -183,7 +183,7 @@ def unread_summary(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     route_ids = [str(x).strip() for x in (payload.route_ids or []) if str(x).strip()]
-    route_ids = list(dict.fromkeys(route_ids))[:300]
+    route_ids = list(dict.fromkeys(route_ids))[:2000]
     if not route_ids:
         return {"items": []}
 

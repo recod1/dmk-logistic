@@ -177,6 +177,7 @@ class AdminRouteCreatePayload(BaseModel):
 class AdminRouteCreateFromOnecPayload(BaseModel):
     raw_text: str = Field(min_length=1, max_length=20000)
     driver_user_id: int | None = None
+    created_by_user_id: int | None = None
     number_auto: str | None = Field(default=None, max_length=64)
     trailer_number: str | None = Field(default=None, max_length=64)
 
@@ -441,14 +442,14 @@ def _ensure_driver(db: Session, driver_user_id: int) -> User:
     return user
 
 
-def _try_find_driver_by_fio(db: Session, fio: str) -> User | None:
+def _try_find_user_by_fio(db: Session, fio: str, roles: set[str]) -> User | None:
     text = (fio or "").strip()
     if not text:
         return None
     q = f"%{text.lower()}%"
     rows = db.scalars(
         select(User).where(
-            User.role_code == RoleCode.DRIVER.value,
+            User.role_code.in_(roles),
             User.is_active.is_(True),
             func.coalesce(func.lower(User.full_name), "").like(q),
         )
@@ -456,6 +457,10 @@ def _try_find_driver_by_fio(db: Session, fio: str) -> User | None:
     if len(rows) == 1:
         return rows[0]
     return None
+
+
+def _try_find_driver_by_fio(db: Session, fio: str) -> User | None:
+    return _try_find_user_by_fio(db, fio, {RoleCode.DRIVER.value})
 
 
 def _normalize_point_plan(date_raw: str, time_raw: str) -> tuple[str, str]:
@@ -492,6 +497,10 @@ def _ensure_logistic(db: Session, user_id: int) -> User:
     if user.role_code not in LOGISTIC_SELECT_ROLES:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Пользователь не может быть логистом рейса")
     return user
+
+
+def _try_find_logistic_by_name(db: Session, name: str) -> User | None:
+    return _try_find_user_by_fio(db, name, LOGISTIC_SELECT_ROLES)
 
 
 def _apply_points_replace(
@@ -698,11 +707,16 @@ def create_route_from_onec(
             )
 
     legacy_driver_tg_id = int(driver.legacy_tg_id) if (driver.legacy_tg_id or "").isdigit() else None
+    creator: User | None = None
+    if payload.created_by_user_id:
+        creator = _ensure_logistic(db, payload.created_by_user_id)
+    else:
+        creator = _try_find_logistic_by_name(db, parsed.logistic_name)
     route = Route(
         id=parsed.route_id,
         legacy_driver_tg_id=legacy_driver_tg_id,
         assigned_user_id=driver.id,
-        created_by_user_id=current_user.id,
+        created_by_user_id=creator.id if creator else None,
         status="new",
         number_auto=((payload.number_auto or parsed.number_auto) or "").strip(),
         temperature=(parsed.temperature or "").strip(),

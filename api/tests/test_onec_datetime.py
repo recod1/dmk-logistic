@@ -39,6 +39,11 @@ class OnecDatetimeTests(TestCase):
         self.assertEqual(split_onec_wall_datetime("21.09.2026 16:30"), ("21.09.2026", "16:30"))
         self.assertNotEqual(split_onec_wall_datetime("21.09.2026 16:30")[1], "04:30")
 
+    def test_keeps_1700_dmy_and_iso(self) -> None:
+        self.assertEqual(split_onec_wall_datetime("21.09.2026 17:00"), ("21.09.2026", "17:00"))
+        self.assertEqual(split_onec_wall_datetime("2026-09-21T17:00:00"), ("21.09.2026", "17:00"))
+        self.assertNotEqual(split_onec_wall_datetime("21.09.2026 17:00")[1], "05:00")
+
 
 class OnecParseTests(TestCase):
     def test_parse_loading_keeps_1630(self) -> None:
@@ -50,3 +55,39 @@ class OnecParseTests(TestCase):
         self.assertEqual(len(parsed.points), 1)
         self.assertEqual(parsed.points[0].date_point, "21.09.2026")
         self.assertEqual(parsed.points[0].point_time, "16:30")
+
+    def test_keeps_1700_and_dispatcher_from_dmk_not_placeholder(self) -> None:
+        from mobile_api.onec_routes import parse_onec_message
+
+        raw = (
+            "00ЭК-036813\n"
+            "ФИО водителя: Иванов Иван\n"
+            "Логист: Петров Пётр\n"
+            "Контакты логистов: +7 999 123-45-67\n"
+            "Контакты ООО ДМК: +7 915 170-05-89\n"
+            "Загр: 21.09.2026 17:00 Организация: Склад ДМК\n"
+        )
+        parsed = parse_onec_message(raw)
+        self.assertEqual(parsed.route_id, "00ЭК-036813")
+        self.assertEqual(parsed.logistic_name, "Петров Пётр")
+        self.assertEqual(parsed.dispatcher_contacts, "+7 915 170-05-89")
+        self.assertNotIn("999 123", parsed.dispatcher_contacts)
+        self.assertEqual(parsed.points[0].date_point, "21.09.2026")
+        self.assertEqual(parsed.points[0].point_time, "17:00")
+
+    def test_iso_1700_without_tz_shift(self) -> None:
+        from mobile_api.onec_routes import parse_onec_message
+
+        parsed = parse_onec_message(
+            "00ЭК-036813\nКонтакты: +79151700589\nЗагр: 2026-09-21T17:00:00 Организация: Склад\n"
+        )
+        self.assertEqual(parsed.dispatcher_contacts, "+79151700589")
+        self.assertEqual(parsed.points[0].date_point, "21.09.2026")
+        self.assertEqual(parsed.points[0].point_time, "17:00")
+
+    def test_empty_contacts_stay_empty(self) -> None:
+        from mobile_api.onec_routes import parse_onec_message
+
+        parsed = parse_onec_message("00ЭК-1\nЗагр: 21.09.2026 17:00 Организация: Склад\n")
+        self.assertEqual(parsed.dispatcher_contacts, "")
+        self.assertEqual(parsed.logistic_name, "")

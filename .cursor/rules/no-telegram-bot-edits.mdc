@@ -1,0 +1,12 @@
+---
+description: Telegram bot is read-only; implement features in PWA/API only
+alwaysApply: true
+---
+
+# Telegram bot is not maintained
+
+The Telegram bot (`bot/`) is no longer used in production. Do **not** edit it in any form: handlers, keyboards, states, Docker, tests, or copy inside `bot/`.
+
+- Implement and fix product behavior in **PWA** (`web/`) and **API** (`api/`, `shared/` except bot-only helpers).
+- You may **read** `bot/` only when the user asks how a piece of business logic used to work there. Do not port changes back into the bot.
+- Do not "keep bot in sync" with PWA/API. Do not commit `bot/` unless the user explicitly asks to change the bot.
