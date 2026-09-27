@@ -1952,16 +1952,68 @@ function onVisibilityChange(): void {
     return;
   }
   onForegroundResume();
-  if (isDriver.value) {
-    void sendDriverLocationIfPossible();
+}
+
+const GEO_PERMISSION_KEY = "dmk_geo_permission";
+
+function rememberGeoPermission(state: "granted" | "denied" | "asked"): void {
+  try {
+    localStorage.setItem(GEO_PERMISSION_KEY, state);
+  } catch {
+    // ignore quota / private mode
   }
+}
+
+function readGeoPermission(): string {
+  try {
+    return localStorage.getItem(GEO_PERMISSION_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function ensureDriverGeoPermission(): void {
+  if (!authToken.value || !isDriver.value) {
+    return;
+  }
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    return;
+  }
+  const already = readGeoPermission();
+  if (already === "denied") {
+    return;
+  }
+  navigator.geolocation.getCurrentPosition(
+    (pos) => {
+      rememberGeoPermission("granted");
+      const targetId = (selectedDriverRoute.value?.id || driverActiveRouteId.value || route.value?.id || "").trim();
+      if (!targetId || !authToken.value) {
+        return;
+      }
+      void reportDriverLocation(authToken.value, targetId, {
+        lat: pos.coords.latitude,
+        lng: pos.coords.longitude
+      }).catch(() => {
+        // permission is saved; send can retry on admin request
+      });
+    },
+    (error) => {
+      if (error.code === error.PERMISSION_DENIED) {
+        rememberGeoPermission("denied");
+        syncMessage.value = "Нет доступа к геолокации";
+      } else {
+        rememberGeoPermission(already === "granted" ? "granted" : "asked");
+      }
+    },
+    { enableHighAccuracy: true, timeout: 20000, maximumAge: 60_000 }
+  );
 }
 
 async function sendDriverLocationIfPossible(routeId?: string | null): Promise<void> {
   if (!authToken.value || !isDriver.value) {
     return;
   }
-  const targetId = (routeId || selectedDriverRoute.value?.id || driverActiveRouteId.value || "").trim();
+  const targetId = (routeId || selectedDriverRoute.value?.id || driverActiveRouteId.value || route.value?.id || "").trim();
   if (!targetId) {
     return;
   }
@@ -1972,6 +2024,7 @@ async function sendDriverLocationIfPossible(routeId?: string | null): Promise<vo
   await new Promise<void>((resolve) => {
     navigator.geolocation.getCurrentPosition(
       (pos) => {
+        rememberGeoPermission("granted");
         void reportDriverLocation(authToken.value, targetId, {
           lat: pos.coords.latitude,
           lng: pos.coords.longitude
@@ -1984,7 +2037,10 @@ async function sendDriverLocationIfPossible(routeId?: string | null): Promise<vo
           })
           .finally(() => resolve());
       },
-      () => {
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
+          rememberGeoPermission("denied");
+        }
         syncMessage.value = "Нет доступа к геолокации";
         resolve();
       },
@@ -2135,13 +2191,46 @@ async function syncOutboxInBackground(): Promise<void> {
   }, 75_000);
   try {
     await flushPendingAccepts();
-    let outbox = (await getOutboxEvents(deviceId)).sort((a, b) => a.created_at.localeCompare(b.created_at));
     await refreshConnectionQueue();
-    if (!outbox.length) {
-      return;
-    }
 
-    for (const ev of outbox) {
+    const flushReadyEvents = async (): Promise<boolean> => {
+      const ready = (await getOutboxEvents(deviceId)).sort((a, b) => a.created_at.localeCompare(b.created_at));
+      const events: EventPayload[] = ready
+        .filter((event) => !(event.to_status === "docs" && event.document_local_keys?.length && !event.document_file_ids?.length))
+        .map((event) => {
+          const payload: EventPayload = {
+            client_event_id: event.client_event_id,
+            occurred_at_client: event.occurred_at_client,
+            point_id: event.point_id,
+            to_status: event.to_status,
+            time_source: event.time_source ?? null,
+            odometer: event.odometer ?? null,
+            odometer_source: event.odometer_source ?? null,
+            coordinates: null
+          };
+          if (event.document_file_ids?.length) {
+            payload.document_file_ids = event.document_file_ids;
+          }
+          return payload;
+        });
+      if (!events.length) {
+        return false;
+      }
+      const result = await sendEventsBatch(authToken.value, deviceId, events);
+      const removable = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.client_event_id);
+      await removeOutboxByClientEventIds(removable);
+      const appliedPointIds = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.point_id);
+      if (route.value && appliedPointIds.length) {
+        await removePointOverlays(route.value.id, appliedPointIds);
+      }
+      return removable.length > 0;
+    };
+
+    // Сначала статусы до «ворота», иначе сервер отклоняет фото (нужен load/docs).
+    const sentStatuses = await flushReadyEvents();
+
+    const pendingDocs = (await getOutboxEvents(deviceId)).sort((a, b) => a.created_at.localeCompare(b.created_at));
+    for (const ev of pendingDocs) {
       if (ev.to_status !== "docs") {
         continue;
       }
@@ -2176,41 +2265,15 @@ async function syncOutboxInBackground(): Promise<void> {
           error,
           extra: { point_id: ev.point_id, client_event_id: ev.client_event_id, files: blobs.length }
         });
-        break;
+        continue;
       }
     }
 
-    outbox = (await getOutboxEvents(deviceId)).sort((a, b) => a.created_at.localeCompare(b.created_at));
-    const events: EventPayload[] = outbox
-      .filter((event) => !(event.to_status === "docs" && event.document_local_keys?.length && !event.document_file_ids?.length))
-      .map((event) => {
-        const payload: EventPayload = {
-          client_event_id: event.client_event_id,
-          occurred_at_client: event.occurred_at_client,
-          point_id: event.point_id,
-          to_status: event.to_status,
-          time_source: event.time_source ?? null,
-          odometer: event.odometer ?? null,
-          odometer_source: event.odometer_source ?? null,
-          coordinates: null
-        };
-        if (event.document_file_ids?.length) {
-          payload.document_file_ids = event.document_file_ids;
-        }
-        return payload;
-      });
-    if (!events.length) {
-      return;
+    const sentDocs = await flushReadyEvents();
+    if (sentStatuses || sentDocs) {
+      await refreshRoute();
+      await refreshDriverRoutes();
     }
-    const result = await sendEventsBatch(authToken.value, deviceId, events);
-    const removable = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.client_event_id);
-    await removeOutboxByClientEventIds(removable);
-    const appliedPointIds = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.point_id);
-    if (route.value && appliedPointIds.length) {
-      await removePointOverlays(route.value.id, appliedPointIds);
-    }
-    await refreshRoute();
-    await refreshDriverRoutes();
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы продолжить синхронизацию." })) {
       return;
@@ -2886,6 +2949,7 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
       await refreshDriverRoutes();
       await refreshRoute();
       await refreshRouteChatUnread();
+      ensureDriverGeoPermission();
       await syncOutboxInBackground();
       startBackgroundSyncLoop();
       if (typeof Notification !== "undefined" && Notification.permission === "granted") {

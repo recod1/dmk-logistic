@@ -27,13 +27,18 @@ export function parseOdometerKm(raw: string | null | undefined): number | null {
   return Number.isFinite(value) ? value : null;
 }
 
-function formatMinutes(deltaMin: number): string {
-  const abs = Math.abs(Math.round(deltaMin));
-  const hours = Math.floor(abs / 60);
-  const minutes = abs % 60;
-  if (hours && minutes) return `${hours} ч ${minutes} мин`;
-  if (hours) return `${hours} ч`;
-  return `${minutes} мин`;
+function formatDuration(deltaMin: number): string {
+  const total = Math.abs(Math.round(deltaMin));
+  const hours = Math.floor(total / 60);
+  const minutes = total % 60;
+  const clock = `${hours} ч ${String(minutes).padStart(2, "0")} мин`;
+  if (deltaMin < 0) {
+    return `на ${clock} раньше предыдущего этапа`;
+  }
+  if (total === 0) {
+    return "сразу после предыдущего этапа";
+  }
+  return `после предыдущего этапа прошло ${clock}`;
 }
 
 export function formatStageDelta(prev: StageDeltaInput, next: StageDeltaInput): string | null {
@@ -45,15 +50,20 @@ export function formatStageDelta(prev: StageDeltaInput, next: StageDeltaInput): 
   if (prevTime && nextTime) {
     const minutes = (nextTime.getTime() - prevTime.getTime()) / 60000;
     if (Number.isFinite(minutes)) {
-      const sign = minutes < 0 ? "−" : "+";
-      parts.push(`${sign}${formatMinutes(minutes)}`);
+      parts.push(formatDuration(minutes));
     }
   }
   if (prevKm != null && nextKm != null) {
     const km = Math.round(nextKm - prevKm);
-    parts.push(km < 0 ? "—" : `+${km} км`);
+    if (km < 0) {
+      parts.push("пробег не вырос");
+    } else if (km === 0) {
+      parts.push("пробег без изменений");
+    } else {
+      parts.push(`пробег вырос на ${km} км`);
+    }
   }
-  return parts.length ? parts.join(" · ") : null;
+  return parts.length ? parts.join(", ") : null;
 }
 
 export function stageDeltasForPoint(point: {

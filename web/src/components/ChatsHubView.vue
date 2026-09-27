@@ -61,7 +61,6 @@ const emit = defineEmits<{
 }>();
 
 let lastHubTab: HubTab = "chats";
-const searchOpen = ref(false);
 const tab = ref<HubTab>(lastHubTab);
 watch(tab, (value) => {
   lastHubTab = value;
@@ -262,17 +261,15 @@ watch(
   <section class="wrap">
     <div class="head-row">
       <button class="ghost back" type="button" @click="emit('back')">← Назад</button>
-      <h1>Чаты</h1>
-      <button class="ghost search-toggle" type="button" @click="searchOpen = !searchOpen">🔍</button>
+      <h1 v-if="isAdmin">Чаты</h1>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
-    <label v-if="searchOpen || tab === 'chats'" class="field search-field">
-      Поиск
-      <input v-model="userQuery" placeholder="ФИО, рейс, сообщение" />
+    <label class="field search-field">
+      <input v-model="userQuery" placeholder="Поиск по чатам, ФИО и рейсу" />
     </label>
 
-    <div class="tabs">
-      <button class="tab" :class="{ active: tab === 'chats' }" type="button" @click="onTabSelect('chats')">Чаты</button>
+    <div v-if="isAdmin" class="tabs">
+      <button class="tab" :class="{ active: tab === 'chats' }" type="button" @click="onTabSelect('chats')">Лента</button>
       <button v-if="isAdmin" class="tab" :class="{ active: tab === 'broadcast' }" type="button" @click="onTabSelect('broadcast')">
         Рассылка
       </button>
@@ -299,10 +296,6 @@ watch(
       </div>
 
       <h2 class="subhead">Написать пользователю</h2>
-      <label class="field">
-        Поиск
-        <input v-model="userQuery" placeholder="Логин или ФИО" />
-      </label>
       <div class="users">
         <button
           v-for="u in filteredUsers"

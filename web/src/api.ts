@@ -127,9 +127,10 @@ export function isOfflineLikeError(error: unknown): boolean {
 
 const getInflight = new Map<string, Promise<unknown>>();
 
-async function requestJson<T>(url: string, init?: RequestInit & { timeoutMs?: number }): Promise<T> {
+async function requestJson<T>(url: string, init?: RequestInit & { timeoutMs?: number; skipSlot?: boolean }): Promise<T> {
   const method = (init?.method || "GET").toUpperCase();
-  const canCoalesce = method === "GET" && !init?.signal;
+  const skipSlot = Boolean(init?.skipSlot);
+  const canCoalesce = method === "GET" && !init?.signal && !skipSlot;
   if (canCoalesce) {
     const existing = getInflight.get(url);
     if (existing) {
@@ -137,11 +138,15 @@ async function requestJson<T>(url: string, init?: RequestInit & { timeoutMs?: nu
     }
   }
   const pending = (async () => {
-    await acquireApiSlot();
+    if (!skipSlot) {
+      await acquireApiSlot();
+    }
     try {
       return await requestJsonInner<T>(url, init);
     } finally {
-      releaseApiSlot();
+      if (!skipSlot) {
+        releaseApiSlot();
+      }
     }
   })();
   if (canCoalesce) {
@@ -157,12 +162,13 @@ async function requestJson<T>(url: string, init?: RequestInit & { timeoutMs?: nu
 
 async function fetchWithTimeout(
   url: string,
-  init: (RequestInit & { timeoutMs?: number }) | undefined,
+  init: (RequestInit & { timeoutMs?: number; skipSlot?: boolean }) | undefined,
   headers: Record<string, string>,
   timeoutMs: number
 ): Promise<Response> {
-  const { timeoutMs: _timeout, ...fetchInit } = init ?? {};
+  const { timeoutMs: _timeout, skipSlot: _skipSlot, ...fetchInit } = init ?? {};
   void _timeout;
+  void _skipSlot;
   return fetchWithHardTimeout(
     url,
     {
@@ -601,7 +607,8 @@ export async function reportDriverLocation(
   return requestJson<{ route: unknown }>(`${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}/location`, {
     method: "POST",
     headers: { Authorization: `Bearer ${token}` },
-    body: JSON.stringify(coords)
+    body: JSON.stringify(coords),
+    skipSlot: true
   });
 }
 
