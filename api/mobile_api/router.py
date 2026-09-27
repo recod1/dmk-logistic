@@ -239,6 +239,12 @@ def _route_snapshot(db: Session, route: Route) -> dict:
         "created_at": route.created_at.isoformat() if route.created_at else None,
         "accepted_at": route.accepted_at.isoformat() if route.accepted_at else None,
         "driver_received_at": route.driver_received_at.isoformat() if route.driver_received_at else None,
+        "driver_lat": route.driver_lat,
+        "driver_lng": route.driver_lng,
+        "driver_location_at": route.driver_location_at.isoformat() if route.driver_location_at else None,
+        "driver_location_requested_at": (
+            route.driver_location_requested_at.isoformat() if route.driver_location_requested_at else None
+        ),
         "logistics_contacts": logistics_contacts_payload(db),
         "points": [
             _point_to_dict(
@@ -460,6 +466,32 @@ def accept_route(
     db.commit()
     db.refresh(route)
 
+    return {"route": _route_snapshot(db, route)}
+
+
+class DriverLocationIn(BaseModel):
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+
+@router.post("/v1/mobile/routes/{route_id:path}/location")
+def report_driver_location(
+    route_id: str,
+    payload: DriverLocationIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_driver),
+) -> dict:
+    route_id = unquote(route_id or "").strip()
+    route = next((item for item in _driver_routes_for_user(db, current_user.id) if item.id == route_id), None)
+    if route is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
+    now = datetime.now(timezone.utc)
+    route.driver_lat = float(payload.lat)
+    route.driver_lng = float(payload.lng)
+    route.driver_location_at = now
+    db.add(route)
+    db.commit()
+    db.refresh(route)
     return {"route": _route_snapshot(db, route)}
 
 

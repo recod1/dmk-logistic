@@ -17,6 +17,7 @@ type PointForm = {
   date_point: string;
   point_time: string;
   point_note: string;
+  point_name?: string;
 };
 
 const props = defineProps<{
@@ -29,6 +30,7 @@ const props = defineProps<{
   error: string;
   unreadByRoute?: Record<string, number>;
   initialFilters?: RouteSearchFilters;
+  total?: number;
 }>();
 
 const emit = defineEmits<{
@@ -57,6 +59,7 @@ const emit = defineEmits<{
     }
   ];
   selectRoute: [routeId: string];
+  loadMore: [];
 }>();
 
 const statusTabs: Array<{ label: string; value: RouteWorkflowStatus }> = [
@@ -86,7 +89,12 @@ const selectedTabLabel = computed(() => {
   return tab?.label ?? "Все";
 });
 
-const filteredTitle = computed(() => `Рейсы (${selectedTabLabel.value}) — ${props.routes.length}`);
+const filteredTitle = computed(() => {
+  const shown = props.routes.length;
+  const total = props.total ?? shown;
+  return `Рейсы (${selectedTabLabel.value}) — ${shown}${total > shown ? ` из ${total}` : ""}`;
+});
+const canLoadMore = computed(() => (props.total ?? props.routes.length) > props.routes.length);
 const isNewTab = computed(() => filters.status === "new");
 const isProcessTab = computed(() => filters.status === "process");
 const tableColspan = computed(() => 4 + (isNewTab.value ? 1 : 0) + (isProcessTab.value ? 1 : 0));
@@ -246,7 +254,8 @@ function makeEmptyPoint(): PointForm {
     place_point: "",
     date_point: "",
     point_time: "",
-    point_note: ""
+    point_note: "",
+    point_name: ""
   };
 }
 
@@ -257,6 +266,7 @@ function toPointPayload(points: PointForm[]): AdminRoutePointPayload[] {
     date_point: point.date_point.trim(),
     point_time: point.point_time.trim(),
     point_note: point.point_note.trim(),
+    point_name: (point.point_name || "").trim(),
     order_index: index
   }));
 }
@@ -512,6 +522,9 @@ onMounted(() => {
           >
         </button>
         <p v-if="!routes.length" class="empty cards-empty">Рейсы не найдены</p>
+        <button v-if="canLoadMore" class="secondary more" type="button" :disabled="loading" @click="emit('loadMore')">
+          Ещё
+        </button>
       </div>
 
       <div class="table-wrap table-wrap-desktop">
@@ -548,6 +561,9 @@ onMounted(() => {
             </tr>
           </tbody>
         </table>
+        <button v-if="canLoadMore" class="secondary more" type="button" :disabled="loading" @click="emit('loadMore')">
+          Ещё
+        </button>
       </div>
     </section>
 
@@ -687,6 +703,10 @@ onMounted(() => {
               <option value="loading">Загрузка</option>
               <option value="unloading">Выгрузка</option>
             </select>
+          </label>
+          <label>
+            Организация
+            <input v-model="point.point_name" />
           </label>
           <label>
             Адрес
@@ -880,6 +900,9 @@ tbody tr:hover {
 .empty {
   text-align: center;
   color: #94a3b8;
+}
+.more {
+  margin-top: 0.7rem;
 }
 .actions {
   display: flex;

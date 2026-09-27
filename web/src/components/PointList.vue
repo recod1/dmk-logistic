@@ -58,14 +58,14 @@ function showRevert(point: PointDto): boolean {
         <strong>#{{ point.id }} · {{ point.type_point }}</strong>
         <span class="status">{{ statusLabel(point.status) }}</span>
       </div>
+      <p v-if="point.point_name" class="org">{{ point.point_name }}</p>
       <p v-if="point.place_point" class="addr">
         <MapsAddressLink :address="point.place_point" />
       </p>
       <p v-else class="addr-muted">Адрес не указан</p>
       <small>{{ plannedDateDisplay(point.date_point, point.point_time) }}</small>
-      <small v-if="point.point_name || point.point_contacts || plannedTimeDisplay(point.date_point, point.point_time) || point.point_note" class="point-meta">
-        {{ point.point_name || "Без названия" }}
-        <span v-if="point.point_contacts"> · {{ point.point_contacts }}</span>
+      <small v-if="point.point_contacts || plannedTimeDisplay(point.date_point, point.point_time) || point.point_note" class="point-meta">
+        <span v-if="point.point_contacts">{{ point.point_contacts }}</span>
         <span v-if="plannedTimeDisplay(point.date_point, point.point_time)"> · {{ plannedTimeDisplay(point.date_point, point.point_time) }}</span>
       </small>
       <small v-if="point.point_note" class="point-note">{{ point.point_note }}</small>
@@ -114,6 +114,10 @@ function showRevert(point: PointDto): boolean {
 }
 .point-note {
   color: #d1d5db;
+}
+.org {
+  margin: 0.2rem 0 0;
+  font-weight: 600;
 }
 .addr {
   margin: 0;

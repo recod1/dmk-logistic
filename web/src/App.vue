@@ -72,6 +72,10 @@ import {
   confirmSalary,
   commentSalary,
   deleteSalary,
+  replaceSalary,
+  getSalaryHistory,
+  requestDriverLocation,
+  reportDriverLocation,
   isOfflineLikeError,
   isPageHidden,
   listSalaryChatMessages,
@@ -203,6 +207,9 @@ const usersLoading = ref(false);
 const usersError = ref("");
 
 const adminRoutes = ref<AdminRoute[]>([]);
+const adminRoutesTotal = ref(0);
+const adminRoutesOffset = ref(0);
+const ADMIN_ROUTES_PAGE = 15;
 const selectedAdminRoute = ref<AdminRoute | null>(null);
 const routeDrivers = ref<DriverOption[]>([]);
 const routeLogistics = ref<DriverOption[]>([]);
@@ -319,6 +326,8 @@ const salaryChatLoading = ref(false);
 const salaryChatError = ref("");
 const salaryAccountantDrivers = ref<Array<{ id: number; login: string; full_name: string | null; legacy_tg_id: string | null }>>([]);
 const salaryAccountantItems = ref<SalaryRecord[]>([]);
+const salaryIncludeArchived = ref(false);
+const salaryHistoryItems = ref<SalaryRecord[]>([]);
 const salarySelectedDriver = ref<{ id: number; login: string; full_name: string | null } | null>(null);
 const salarySaving = ref(false);
 const salaryDetailBackSection = ref<AppSection>("driver_salary");
@@ -1258,6 +1267,9 @@ function handleIncomingNotification(
   if (syncDriverState && item.event_type === "route_updated" && isDriver.value) {
     void refreshDriverData();
   }
+  if (isDriver.value && item.event_type === "driver_location_request") {
+    void sendDriverLocationIfPossible(item.route_id);
+  }
 
   if (syncDriverState && item.event_type === "route_deleted" && isDriver.value) {
     // Only force-close the details view when we know which route was deleted
@@ -1940,6 +1952,89 @@ function onVisibilityChange(): void {
     return;
   }
   onForegroundResume();
+  if (isDriver.value) {
+    void sendDriverLocationIfPossible();
+  }
+}
+
+async function sendDriverLocationIfPossible(routeId?: string | null): Promise<void> {
+  if (!authToken.value || !isDriver.value) {
+    return;
+  }
+  const targetId = (routeId || selectedDriverRoute.value?.id || driverActiveRouteId.value || "").trim();
+  if (!targetId) {
+    return;
+  }
+  if (typeof navigator === "undefined" || !navigator.geolocation) {
+    syncMessage.value = "Нет доступа к геолокации";
+    return;
+  }
+  await new Promise<void>((resolve) => {
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        void reportDriverLocation(authToken.value, targetId, {
+          lat: pos.coords.latitude,
+          lng: pos.coords.longitude
+        })
+          .then(() => {
+            syncMessage.value = "Геопозиция отправлена";
+          })
+          .catch((error) => {
+            syncMessage.value = (error as Error).message;
+          })
+          .finally(() => resolve());
+      },
+      () => {
+        syncMessage.value = "Нет доступа к геолокации";
+        resolve();
+      },
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
+    );
+  });
+}
+
+async function doRequestDriverLocation(routeId: string): Promise<void> {
+  if (!authToken.value) return;
+  routesLoading.value = true;
+  try {
+    const updated = await requestDriverLocation(authToken.value, routeId);
+    selectedAdminRoute.value = await getAdminRoute(authToken.value, updated.id);
+    syncMessage.value = "Запрос геопозиции отправлен водителю";
+  } catch (error) {
+    routesError.value = (error as Error).message;
+  } finally {
+    routesLoading.value = false;
+  }
+}
+
+async function loadMoreAdminRoutes(): Promise<void> {
+  if (!authToken.value || routesLoading.value) return;
+  if (adminRoutes.value.length >= adminRoutesTotal.value) return;
+  adminRoutesOffset.value = adminRoutes.value.length;
+  routesLoading.value = true;
+  try {
+    const page = await listAdminRoutes(authToken.value, {
+      ...routeFilters.value,
+      limit: ADMIN_ROUTES_PAGE,
+      offset: adminRoutesOffset.value
+    });
+    const seen = new Set(adminRoutes.value.map((r) => r.id));
+    adminRoutes.value = [...adminRoutes.value, ...page.items.filter((r) => !seen.has(r.id))];
+    adminRoutesTotal.value = page.total ?? adminRoutesTotal.value;
+    const routeIds = page.items.map((x) => x.id);
+    if (routeIds.length) {
+      const unread = await getChatUnreadSummary(authToken.value, routeIds);
+      const map = { ...chatUnreadByRoute.value };
+      unread.forEach((row) => {
+        map[row.route_id] = row.unread_count;
+      });
+      chatUnreadByRoute.value = map;
+    }
+  } catch (error) {
+    routesError.value = (error as Error).message;
+  } finally {
+    routesLoading.value = false;
+  }
 }
 
 function onPageShow(event: PageTransitionEvent): void {
@@ -2236,8 +2331,22 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
     routesError.value = "";
     try {
       const effectiveFilters = filters ?? routeFilters.value;
+      const filtersChanged =
+        routeFilters.value.status !== effectiveFilters.status ||
+        routeFilters.value.route_id !== effectiveFilters.route_id ||
+        routeFilters.value.number_auto !== effectiveFilters.number_auto ||
+        routeFilters.value.driver_query !== effectiveFilters.driver_query;
       routeFilters.value = effectiveFilters;
-      adminRoutes.value = await listAdminRoutes(authToken.value, effectiveFilters);
+      if (filtersChanged) {
+        adminRoutesOffset.value = 0;
+      }
+      const page = await listAdminRoutes(authToken.value, {
+        ...effectiveFilters,
+        limit: ADMIN_ROUTES_PAGE,
+        offset: adminRoutesOffset.value
+      });
+      adminRoutes.value = page.items;
+      adminRoutesTotal.value = page.total ?? page.items.length;
 
       try {
         const routeIds = adminRoutes.value.map((x) => x.id);
@@ -3591,6 +3700,74 @@ async function doSalaryDelete(): Promise<void> {
   }
 }
 
+async function doSalaryReplace(): Promise<void> {
+  if (!authToken.value || !salaryCurrentRecord.value || !(isAdmin.value || isAccountant.value)) return;
+  const current = salaryCurrentRecord.value;
+  salaryDetailBusy.value = true;
+  try {
+    const created = await replaceSalary(authToken.value, current.id, {
+      date_salary: current.date_salary,
+      type_route: current.type_route,
+      sum_status: current.sum_status,
+      sum_daily: current.sum_daily,
+      load_2_trips: current.load_2_trips,
+      calc_shuttle: current.calc_shuttle,
+      sum_load_unload: current.sum_load_unload,
+      sum_curtain: current.sum_curtain,
+      sum_return: current.sum_return,
+      sum_add_shuttle: current.sum_add_shuttle,
+      sum_add_point: current.sum_add_point,
+      sum_gas_station: current.sum_gas_station,
+      pallets_hyper: current.pallets_hyper,
+      pallets_metro: current.pallets_metro,
+      pallets_ashan: current.pallets_ashan,
+      rate_3km: current.rate_3km,
+      rate_3_5km: current.rate_3_5km,
+      rate_5km: current.rate_5km,
+      rate_10km: current.rate_10km,
+      rate_12km: current.rate_12km,
+      rate_12_5km: current.rate_12_5km,
+      mileage: current.mileage,
+      sum_cell_compensation: current.sum_cell_compensation,
+      experience: current.experience,
+      percent_10: current.percent_10,
+      sum_bonus: current.sum_bonus,
+      withhold: current.withhold,
+      compensation: current.compensation,
+      dr: current.dr,
+      sum_without_daily_dr_bonus_exp: current.sum_without_daily_dr_bonus_exp,
+      sum_without_daily_dr_bonus: current.sum_without_daily_dr_bonus,
+      total: current.total,
+      load_address: current.load_address,
+      unload_address: current.unload_address,
+      transport: current.transport,
+      trailer_number: current.trailer_number,
+      route_number: current.route_number
+    });
+    salaryCurrentRecord.value = created;
+    syncMessage.value = "Создан исправленный расчёт, предыдущий в архиве";
+    await refreshAccountantSalaryList();
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    salaryDetailBusy.value = false;
+  }
+}
+
+async function loadSalaryHistory(salaryId: number): Promise<void> {
+  if (!authToken.value) return;
+  try {
+    salaryHistoryItems.value = await getSalaryHistory(authToken.value, salaryId);
+  } catch (error) {
+    salaryError.value = (error as Error).message;
+  }
+}
+
+async function toggleSalaryArchive(show: boolean): Promise<void> {
+  salaryIncludeArchived.value = show;
+  await refreshAccountantSalaryList();
+}
+
 async function openSalaryChatFromDetail(): Promise<void> {
   if (!salaryCurrentRecord.value || !authToken.value) return;
   salaryChatSalaryId.value = salaryCurrentRecord.value.id;
@@ -3704,7 +3881,13 @@ async function refreshAccountantSalaryList(dateFrom?: string, dateTo?: string): 
   salaryListLoading.value = true;
   salaryError.value = "";
   try {
-    const res = await listSalariesForDriver(authToken.value, salarySelectedDriver.value.id, dateFrom, dateTo);
+    const res = await listSalariesForDriver(
+      authToken.value,
+      salarySelectedDriver.value.id,
+      dateFrom,
+      dateTo,
+      salaryIncludeArchived.value
+    );
     salaryAccountantItems.value = res.items;
   } catch (error) {
     salaryError.value = (error as Error).message;
@@ -4234,7 +4417,9 @@ onUnmounted(() => {
         :error="routesError"
         :unread-by-route="chatUnreadByRoute"
         :initial-filters="routeFilters"
+        :total="adminRoutesTotal"
         @refresh="refreshAdminRoutes"
+        @load-more="loadMoreAdminRoutes"
         @create="doCreateAdminRoute"
         @create-onec="doCreateAdminRouteFromOnec"
         @select-route="doSelectAdminRoute"
@@ -4258,6 +4443,7 @@ onUnmounted(() => {
         @update-route="doUpdateAdminRoute"
         @update-point="doUpdateAdminRoutePoint"
         @open-chat="openChatForRoute"
+        @request-location="doRequestDriverLocation"
       />
     </section>
 
@@ -4384,7 +4570,11 @@ onUnmounted(() => {
         @back="goBack"
         @search="(q) => void searchSalaryDriversForAccounting(q)"
         @pick-driver="(id) => void pickSalaryAccountantDriver(id)"
+        :include-archived="salaryIncludeArchived"
+        :history-items="salaryHistoryItems"
         @refresh-list="(a, b) => void refreshAccountantSalaryList(a, b)"
+        @toggle-archive="(v) => void toggleSalaryArchive(v)"
+        @history="(id) => void loadSalaryHistory(id)"
         @create="(p) => void createSalaryFromAccountant(p)"
         @select="(r) => openSalaryDetail(r, 'salary_accounting')"
         @export-csv="exportAccountantSalaryCsv"
@@ -4401,6 +4591,7 @@ onUnmounted(() => {
         @confirm="doSalaryConfirm"
         @comment="doSalaryComment"
         @open-chat="openSalaryChatFromDetail"
+        @replace="doSalaryReplace"
         @remove="doSalaryDelete"
       />
     </section>

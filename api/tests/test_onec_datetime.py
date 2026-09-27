@@ -91,3 +91,22 @@ class OnecParseTests(TestCase):
         parsed = parse_onec_message("00ЭК-1\nЗагр: 21.09.2026 17:00 Организация: Склад\n")
         self.assertEqual(parsed.dispatcher_contacts, "")
         self.assertEqual(parsed.logistic_name, "")
+
+    def test_splits_org_address_contacts_inkerman_novabev(self) -> None:
+        from mobile_api.onec_routes import parse_onec_message
+
+        raw = (
+            "00ЭК-036439\n"
+            "ФИО водителя: Иванов Иван\n"
+            "Загр: 21.09.2026 10:00 Организация: ИНКЕРМАН Россия, г Севастополь, ул Инкерманская 1 Контакт: +7 978 111-22-33\n"
+            "Выгр: 21.09.2026 18:00 Организация: НОВАБЕВ Россия, г Москва, ул Ленина 10 Контакт: +7 495 000-00-00\n"
+        )
+        parsed = parse_onec_message(raw)
+        self.assertEqual(parsed.route_id, "00ЭК-036439")
+        self.assertEqual(len(parsed.points), 2)
+        self.assertEqual(parsed.points[0].point_name, "ИНКЕРМАН")
+        self.assertIn("Севастополь", parsed.points[0].place_point)
+        self.assertIn("978", parsed.points[0].point_contacts)
+        self.assertEqual(parsed.points[1].point_name, "НОВАБЕВ")
+        self.assertIn("Москва", parsed.points[1].place_point)
+        self.assertIn("495", parsed.points[1].point_contacts)

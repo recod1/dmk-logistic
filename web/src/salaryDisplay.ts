@@ -1,7 +1,8 @@
-export function salaryStatusKey(status: string | null | undefined): "confirmed" | "commented" | "pending" {
+export function salaryStatusKey(status: string | null | undefined): "confirmed" | "commented" | "archived" | "pending" {
   const t = (status || "").trim();
   if (t === "confirmed") return "confirmed";
   if (t === "commented") return "commented";
+  if (t === "archived") return "archived";
   return "pending";
 }
 
@@ -9,6 +10,7 @@ export function salaryStatusLabel(status: string | null | undefined): string {
   const key = salaryStatusKey(status);
   if (key === "confirmed") return "Подтверждено";
   if (key === "commented") return "С комментарием";
+  if (key === "archived") return "Архив";
   return "Ожидает подтверждения";
 }
 

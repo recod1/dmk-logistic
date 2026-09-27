@@ -2,6 +2,7 @@
 
 import sys
 import os
+import asyncio
 import logging
 from pathlib import Path
 
@@ -35,6 +36,7 @@ from mobile_api.salary_router import router as salary_router
 from mobile_api.logistics_contacts_router import router as logistics_contacts_router
 from mobile_api.bootstrap import ensure_demo_user
 from mobile_api.db import SessionLocal
+from mobile_api.stale_point_job import run_stale_point_loop
 
 app = FastAPI(
     title="DMK API Server",
@@ -71,6 +73,10 @@ def bootstrap_mobile_user():
     except Exception as exc:
         # Не прерываем запуск текущего бота/старого API при проблемах с Postgres.
         logger.warning("Mobile bootstrap skipped: %s", exc)
+    try:
+        asyncio.get_event_loop().create_task(run_stale_point_loop())
+    except Exception as exc:
+        logger.warning("point_status_stale loop not started: %s", exc)
 
 
 @app.get("/")

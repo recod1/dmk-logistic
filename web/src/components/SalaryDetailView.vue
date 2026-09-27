@@ -16,6 +16,7 @@ const emit = defineEmits<{
   confirm: [];
   comment: [text: string];
   openChat: [];
+  replace: [];
   remove: [];
 }>();
 
@@ -134,6 +135,11 @@ function submitComment(): void {
       <button type="button" class="secondary" :disabled="busy || !commentText.trim()" @click="submitComment">
         Отправить комментарий
       </button>
+    </div>
+    <div v-if="canDelete && record.status_driver !== 'archived'" class="card">
+      <h2>Исправление</h2>
+      <p class="hint">Текущий расчёт уйдёт в архив, будет создана новая версия.</p>
+      <button type="button" class="primary" :disabled="busy" @click="emit('replace')">Заменить расчёт</button>
     </div>
     <div v-if="canDelete" class="card danger-card">
       <h2>Удаление</h2>

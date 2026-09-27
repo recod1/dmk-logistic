@@ -72,6 +72,10 @@ class Route(Base):
     trailer_number: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     driver_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    driver_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    driver_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    driver_location_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    driver_location_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -435,6 +439,12 @@ class Salary(Base):
     route_number: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
     status_driver: Mapped[str] = mapped_column(String(32), nullable=False, default=" ", server_default=" ")
     comment_driver: Mapped[str] = mapped_column(Text, nullable=False, default=" ", server_default=" ")
+    replaces_salary_id: Mapped[int | None] = mapped_column(
+        ForeignKey("salary.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    replaced_by_salary_id: Mapped[int | None] = mapped_column(
+        ForeignKey("salary.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )

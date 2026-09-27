@@ -90,6 +90,10 @@ export interface RouteDto {
   trailer_number: string;
   created_at: string | null;
   accepted_at: string | null;
+  driver_lat?: number | null;
+  driver_lng?: number | null;
+  driver_location_at?: string | null;
+  driver_location_requested_at?: string | null;
   points: PointDto[];
   logistics_contacts?: Array<{ name: string; phone: string }>;
 }
@@ -212,6 +216,10 @@ export interface AdminRoute {
   accepted_at: string | null;
   created_at: string | null;
   driver_received_at?: string | null;
+  driver_lat?: number | null;
+  driver_lng?: number | null;
+  driver_location_at?: string | null;
+  driver_location_requested_at?: string | null;
   driver: DriverOption | null;
   created_by: DriverOption | null;
   points_count: number;
@@ -280,6 +288,9 @@ export interface AdminRoute {
 
 export interface AdminRoutesListResponse {
   items: AdminRoute[];
+  total?: number;
+  limit?: number;
+  offset?: number;
 }
 
 export interface DriversResponse {
@@ -306,6 +317,7 @@ export interface NotificationDto {
   trailer_number?: string | null;
   point_place_point?: string | null;
   point_type_point?: string | null;
+  point_name?: string | null;
   is_read: boolean;
   created_at: string;
   /** Parsed server JSON: room_id, salary_id, route_id, etc. */

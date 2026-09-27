@@ -72,6 +72,7 @@ const canAdvance = computed(() => {
         <span class="pill-k">Текущая точка</span>
         <strong>{{ statusLabel(activePoint.status) }}</strong>
         <span class="pill-type">{{ activePoint.type_point === "unloading" ? "Выгрузка" : "Загрузка" }}</span>
+        <span v-if="activePoint.point_name" class="pill-org">{{ activePoint.point_name }}</span>
         <span v-if="activePoint.place_point" class="pill-addr">
           <MapsAddressLink :address="activePoint.place_point" />
         </span>
@@ -188,6 +189,9 @@ const canAdvance = computed(() => {
 .pill-type {
   color: var(--text-body);
   font-size: 0.9rem;
+}
+.pill-org {
+  font-weight: 600;
 }
 .pill-addr {
   margin-top: 0.12rem;

@@ -202,12 +202,26 @@ def _room_out(db: Session, room: ChatRoom, current_user: User, unread_by_room: d
     title = room.title
     if room.kind == "direct":
         title = _room_title_for_direct(db, room, current_user)
+    last = db.scalar(select(ChatMessage).where(ChatMessage.room_id == room.id).order_by(ChatMessage.id.desc()))
+    last_author = ""
+    last_text = ""
+    last_at = None
+    if last is not None:
+        author = db.get(User, last.user_id)
+        last_author = ((author.full_name or author.login) if author else f"user#{last.user_id}") or ""
+        last_text = (last.text or "").strip()
+        if not last_text:
+            last_text = "Вложение"
+        last_at = last.created_at.isoformat() if isinstance(last.created_at, datetime) else str(last.created_at)
     return {
         "id": int(room.id),
         "kind": room.kind,
         "title": title or "",
         "system_key": room.system_key,
         "unread_count": int((unread_by_room or {}).get(int(room.id), 0)),
+        "last_message_text": last_text,
+        "last_message_at": last_at,
+        "last_author_name": last_author,
         "created_at": room.created_at.isoformat() if isinstance(room.created_at, datetime) else str(room.created_at),
     }
 
@@ -452,7 +466,9 @@ def list_rooms(
         ) or 0
         unread_by_room[int(room.id)] = int(unread)
 
-    return {"items": [_room_out(db, r, current_user, unread_by_room) for r in rooms]}
+    items = [_room_out(db, r, current_user, unread_by_room) for r in rooms]
+    items.sort(key=lambda row: row.get("last_message_at") or row.get("created_at") or "", reverse=True)
+    return {"items": items}
 
 
 @router.get("/v1/chats/rooms/{room_id}/messages")

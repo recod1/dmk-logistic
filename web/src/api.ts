@@ -550,8 +550,10 @@ export async function listAdminRoutes(
     route_id?: string;
     number_auto?: string;
     driver_query?: string;
+    limit?: number;
+    offset?: number;
   }
-): Promise<AdminRoute[]> {
+): Promise<AdminRoutesListResponse> {
   const qs = new URLSearchParams();
   if (params?.status) {
     qs.set("status", params.status);
@@ -568,13 +570,39 @@ export async function listAdminRoutes(
   if (params?.driver_query) {
     qs.set("driver_query", params.driver_query);
   }
-  const suffix = qs.toString() ? `?${qs.toString()}` : "";
-  const data = await requestJson<AdminRoutesListResponse>(`${API_BASE}/v1/admin/routes${suffix}`, {
+  qs.set("limit", String(params?.limit ?? 15));
+  qs.set("offset", String(params?.offset ?? 0));
+  const data = await requestJson<AdminRoutesListResponse>(`${API_BASE}/v1/admin/routes?${qs.toString()}`, {
     headers: {
       Authorization: `Bearer ${token}`
     }
   });
-  return data.items;
+  return {
+    items: data.items ?? [],
+    total: data.total ?? data.items?.length ?? 0,
+    limit: data.limit ?? params?.limit ?? 15,
+    offset: data.offset ?? params?.offset ?? 0
+  };
+}
+
+export async function requestDriverLocation(token: string, routeId: string): Promise<AdminRoute> {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${encodeRouteId(routeId)}/location-request`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({})
+  });
+}
+
+export async function reportDriverLocation(
+  token: string,
+  routeId: string,
+  coords: { lat: number; lng: number }
+): Promise<{ route: unknown }> {
+  return requestJson<{ route: unknown }>(`${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}/location`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(coords)
+  });
 }
 
 export async function getAdminRoute(token: string, routeId: string): Promise<AdminRoute> {
@@ -1003,10 +1031,10 @@ export async function listAccountantDriverChatRooms(
 export async function listChatRooms(
   token: string,
   kind?: "direct" | "group"
-): Promise<Array<{ id: number; kind: "direct" | "group"; title: string; system_key?: string | null; unread_count?: number }>> {
+): Promise<ChatRoomListItem[]> {
   const qs = new URLSearchParams();
   if (kind) qs.set("kind", kind);
-  const data = await requestJson<{ items: Array<{ id: number; kind: "direct" | "group"; title: string; system_key?: string | null; unread_count?: number }> }>(
+  const data = await requestJson<{ items: ChatRoomListItem[] }>(
     `${API_BASE}/v1/chats/rooms?${qs.toString()}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
@@ -1146,6 +1174,17 @@ export async function adminBroadcastByRoles(
 
 // --- Salary (зарплата, как в боте) ---
 
+export type ChatRoomListItem = {
+  id: number;
+  kind: "direct" | "group";
+  title: string;
+  system_key?: string | null;
+  unread_count?: number;
+  last_message_text?: string;
+  last_message_at?: string | null;
+  last_author_name?: string;
+};
+
 export type SalaryRecord = {
   id: number;
   id_driver: string;
@@ -1188,6 +1227,8 @@ export type SalaryRecord = {
   route_number: string;
   status_driver: string;
   comment_driver: string;
+  replaces_salary_id?: number | null;
+  replaced_by_salary_id?: number | null;
   created_at: string;
 };
 
@@ -1343,16 +1384,37 @@ export async function listSalariesForDriver(
   token: string,
   driverUserId: number,
   dateFrom?: string,
-  dateTo?: string
+  dateTo?: string,
+  includeArchived = false
 ): Promise<{ items: SalaryRecord[]; driver: { id: number; full_name: string | null; login: string } }> {
   const qs = new URLSearchParams();
   if (dateFrom) qs.set("date_from", dateFrom);
   if (dateTo) qs.set("date_to", dateTo);
+  if (includeArchived) qs.set("include_archived", "true");
   const suf = qs.toString() ? `?${qs.toString()}` : "";
   return requestJson<{ items: SalaryRecord[]; driver: { id: number; full_name: string | null; login: string } }>(
     `${API_BASE}/v1/salary/for-driver/${driverUserId}${suf}`,
     { headers: { Authorization: `Bearer ${token}` } }
   );
+}
+
+export async function replaceSalary(
+  token: string,
+  salaryId: number,
+  payload: Omit<SalaryRecord, "id" | "id_driver" | "status_driver" | "comment_driver" | "created_at" | "replaces_salary_id" | "replaced_by_salary_id">
+): Promise<SalaryRecord> {
+  return requestJson<SalaryRecord>(`${API_BASE}/v1/salary/${salaryId}/replace`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function getSalaryHistory(token: string, salaryId: number): Promise<SalaryRecord[]> {
+  const data = await requestJson<{ items: SalaryRecord[] }>(`${API_BASE}/v1/salary/${salaryId}/history`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return data.items;
 }
 
 export async function getSalary(token: string, salaryId: number): Promise<SalaryRecord> {

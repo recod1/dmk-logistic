@@ -95,11 +95,17 @@ function formatExtra(item: NotificationDto): string {
   if (auto) parts.push(`ТС: ${auto}`);
   const trailer = (item.trailer_number || "").trim();
   if (trailer) parts.push(`Прицеп: ${trailer}`);
+  const pointName = (item.point_name || item.payload?.point_name || "").toString().trim();
+  if (pointName) parts.push(`Организация: ${pointName}`);
   const pointType = (item.point_type_point || "").trim();
   const pointAddr = (item.point_place_point || "").trim();
   if (pointType || pointAddr) {
     const label = [pointType, pointAddr].filter(Boolean).join(" · ");
     parts.push(`Точка: ${label}`);
+  }
+  if (item.event_type === "point_status_stale") {
+    const duration = (item.payload?.duration || "").toString().trim();
+    parts.unshift(duration ? `Стоит ${duration}` : "Стоит на этапе");
   }
   return parts.join(" | ");
 }
@@ -133,7 +139,7 @@ function formatExtra(item: NotificationDto): string {
         v-for="item in items"
         :key="item.id"
         class="card item-card"
-        :class="{ unread: !item.is_read, clickable: notificationIsNavigable(item) }"
+        :class="{ unread: !item.is_read, clickable: notificationIsNavigable(item), stale: item.event_type === 'point_status_stale' }"
         @click="onNotificationCardClick(item)"
       >
         <div class="row-top">
@@ -246,6 +252,9 @@ function formatExtra(item: NotificationDto): string {
 }
 .item-card.clickable {
   cursor: pointer;
+}
+.item-card.stale {
+  border-color: #f59e0b;
 }
 .item-card.unread {
   border-color: rgba(239, 68, 68, 0.55);

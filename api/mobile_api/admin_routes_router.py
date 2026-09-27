@@ -20,6 +20,7 @@ from mobile_api.route_notification_logic import (
     notify_route_deleted,
     point_fact_datetime,
 )
+from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.onec_routes import parse_onec_message
 from mobile_api.roles import RoleCode, role_label_ru
 from mobile_api.time_formatting import format_dt_for_app
@@ -393,6 +394,12 @@ def _route_out(
         "trailer_number": route.trailer_number,
         "accepted_at": route.accepted_at.isoformat() if route.accepted_at else None,
         "driver_received_at": route.driver_received_at.isoformat() if route.driver_received_at else None,
+        "driver_lat": route.driver_lat,
+        "driver_lng": route.driver_lng,
+        "driver_location_at": route.driver_location_at.isoformat() if route.driver_location_at else None,
+        "driver_location_requested_at": (
+            route.driver_location_requested_at.isoformat() if route.driver_location_requested_at else None
+        ),
         "created_at": route.created_at.isoformat() if isinstance(route.created_at, datetime) else None,
         "driver": _driver_out(driver),
         "created_by": _driver_out(creator),
@@ -733,8 +740,8 @@ def create_route_from_onec(
                 type_point=p.type_point,
                 place_point=p.place_point,
                 date_point=p.date_point,
-                point_name="",
-                point_contacts="",
+                point_name=p.point_name,
+                point_contacts=p.point_contacts,
                 point_time=p.point_time,
                 point_note="",
                 order_index=i,
@@ -756,6 +763,8 @@ def list_routes(
     route_id: str | None = Query(default=None),
     number_auto: str | None = Query(default=None),
     driver_query: str | None = Query(default=None),
+    limit: int = Query(default=15, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_route_manager),
 ) -> dict:
@@ -779,9 +788,10 @@ def list_routes(
             )
         ).all()
         if not driver_ids:
-            return {"items": []}
+            return {"items": [], "total": 0, "limit": limit, "offset": offset}
         query = query.where(Route.assigned_user_id.in_(driver_ids))
-    routes = db.scalars(query).all()
+    total = int(db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0)
+    routes = db.scalars(query.offset(offset).limit(limit)).all()
     active_points = _active_points_by_route_id(db, [route.id for route in routes])
     return {
         "items": [
@@ -793,7 +803,10 @@ def list_routes(
                 skip_active_point_lookup=True,
             )
             for route in routes
-        ]
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 
@@ -1194,4 +1207,39 @@ def delete_route(
     db.query(Point).filter(Point.route_id == route.id).delete(synchronize_session=False)
     db.delete(route)
     db.commit()
+
+
+class DriverLocationRequestIn(BaseModel):
+    note: str | None = None
+
+
+@router.post("/{route_id:path}/location-request")
+def request_driver_location(
+    route_id: str,
+    payload: DriverLocationRequestIn | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_route_manager),
+) -> dict:
+    route_id = _normalize_route_id(route_id)
+    route = db.get(Route, route_id)
+    if route is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
+    if not route.assigned_user_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Route has no assigned driver")
+    now = datetime.now(timezone.utc)
+    route.driver_location_requested_at = now
+    db.add(route)
+    note = (payload.note if payload else None) or ""
+    create_notification_for_users(
+        db,
+        user_ids=[int(route.assigned_user_id)],
+        event_type="driver_location_request",
+        title="Запрос геопозиции",
+        message="Диспетчер запросил вашу текущую геопозицию по рейсу.",
+        route_id=route.id,
+        payload={"note": note} if note.strip() else None,
+    )
+    db.commit()
+    db.refresh(route)
+    return _route_out(db, route)
 

@@ -68,6 +68,23 @@ function isMine(message: ChatMessage): boolean {
   return Boolean(props.currentUserId) && message.user_id === props.currentUserId;
 }
 
+function messageDayKey(value: string): string {
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "";
+  return dt.toDateString();
+}
+
+function messageDayLabel(value: string): string {
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "";
+  const today = new Date();
+  if (dt.toDateString() === today.toDateString()) return "Сегодня";
+  const y = new Date(today);
+  y.setDate(today.getDate() - 1);
+  if (dt.toDateString() === y.toDateString()) return "Вчера";
+  return dt.toLocaleDateString("ru-RU");
+}
+
 const COMPOSER_LINE_PX = 40;
 const COMPOSER_MAX_PX = 120;
 
@@ -308,11 +325,17 @@ onUnmounted(() => {
       <button v-if="showJump" class="jump" type="button" @click="scrollToBottom">Новые сообщения ↓</button>
       <div ref="listInnerRef" class="list-inner">
         <article
-          v-for="m in items"
+          v-for="(m, idx) in items"
           :key="m.id"
           class="msg"
           :class="{ mine: isMine(m) }"
         >
+          <div
+            v-if="idx === 0 || messageDayKey(m.created_at) !== messageDayKey(items[idx - 1]?.created_at || '')"
+            class="day-sep"
+          >
+            {{ messageDayLabel(m.created_at) }}
+          </div>
           <div class="bubble">
             <strong v-if="!currentUserId || m.user_id !== currentUserId" class="author">{{ m.author_name }}</strong>
             <p class="text">{{ m.text }}</p>
@@ -450,6 +473,12 @@ onUnmounted(() => {
   gap: 0.2rem;
 }
 
+.day-sep {
+  text-align: center;
+  color: #94a3b8;
+  font-size: 0.75rem;
+  margin: 0.35rem 0;
+}
 .msg {
   display: flex;
   width: 100%;

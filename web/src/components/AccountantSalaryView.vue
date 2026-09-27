@@ -11,6 +11,8 @@ const props = defineProps<{
   loading: boolean;
   saving: boolean;
   error: string;
+  includeArchived?: boolean;
+  historyItems?: SalaryRecord[];
 }>();
 
 const emit = defineEmits<{
@@ -18,6 +20,8 @@ const emit = defineEmits<{
   search: [q: string];
   pickDriver: [id: number];
   refreshList: [dateFrom?: string, dateTo?: string];
+  toggleArchive: [show: boolean];
+  history: [salaryId: number];
   create: [payload: { driver_user_id: number; salary_line: string }];
   select: [row: SalaryRecord];
   exportCsv: [dateFrom: string, dateTo: string];
@@ -89,6 +93,9 @@ function doExport(): void {
             Загрузить
           </button>
           <button type="button" class="primary" :disabled="!dateFrom || !dateTo" @click="doExport">CSV за период</button>
+          <button type="button" class="ghost" @click="emit('toggleArchive', !includeArchived)">
+            {{ includeArchived ? "Скрыть архив" : "Архив" }}
+          </button>
         </div>
       </div>
       <div class="list">
@@ -97,7 +104,15 @@ function doExport(): void {
           <span class="t2">{{ r.total.toFixed(2) }} ₽</span>
           <span class="status" :class="`status--${salaryStatusKey(r.status_driver)}`">{{ salaryStatusLabel(r.status_driver) }}</span>
           <span v-if="salaryCommentText(r.comment_driver)" class="comment">Комментарий: {{ salaryCommentText(r.comment_driver) }}</span>
+          <button type="button" class="ghost" @click.stop="emit('history', r.id)">История</button>
         </button>
+      </div>
+      <div v-if="historyItems?.length" class="history">
+        <h3>История</h3>
+        <p v-for="h in historyItems" :key="h.id">
+          #{{ h.id }} · {{ h.date_salary }} · {{ h.total.toFixed(2) }} ₽ · {{ salaryStatusLabel(h.status_driver) }}
+          <span v-if="salaryCommentText(h.comment_driver)"> · {{ salaryCommentText(h.comment_driver) }}</span>
+        </p>
       </div>
     </div>
   </section>

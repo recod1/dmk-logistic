@@ -26,6 +26,7 @@ from mobile_api.salary_logic import (
     SalaryIntegrationDriverReference,
     SalaryIntegrationStructuredBody,
     SalaryStructuredCreateBody,
+    SalaryStructuredFields,
     build_salaries_csv_bytes,
     csv_content_disposition,
     driver_identity_keys,
@@ -123,6 +124,8 @@ def _salary_to_dict(s: Salary) -> dict[str, Any]:
         "route_number": s.route_number or "",
         "status_driver": (s.status_driver or "").strip(),
         "comment_driver": (s.comment_driver or "").strip(),
+        "replaces_salary_id": int(s.replaces_salary_id) if s.replaces_salary_id else None,
+        "replaced_by_salary_id": int(s.replaced_by_salary_id) if s.replaced_by_salary_id else None,
         "created_at": s.created_at.isoformat() if isinstance(s.created_at, datetime) else str(s.created_at),
     }
 
@@ -149,17 +152,24 @@ def _parse_period(date_from: str, date_to: str) -> tuple[datetime, datetime]:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid date_from/date_to") from exc
 
 
+def _is_archived(s: Salary) -> bool:
+    return (s.status_driver or "").strip() == "archived"
+
+
 def _salaries_for_driver_user(
     db: Session,
     driver: User,
     date_from: str | None = None,
     date_to: str | None = None,
+    include_archived: bool = False,
 ) -> list[Salary]:
     keys = driver_identity_keys(driver)
     rows = list(db.scalars(select(Salary).where(Salary.id_driver.in_(keys)).order_by(Salary.id.desc())).all())
     if date_from and date_to:
         s_dt, e_dt = _parse_period(date_from, date_to)
         rows = [s for s in rows if salary_date_in_range(s, s_dt, e_dt)]
+    if not include_archived:
+        rows = [s for s in rows if not _is_archived(s)]
     return rows
 
 
@@ -433,6 +443,7 @@ def list_my_salaries(
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid date_from/date_to") from exc
         rows = [s for s in rows if salary_date_in_range(s, s_dt, e_dt)]
+    rows = [s for s in rows if not _is_archived(s)]
     return {"items": [_salary_to_dict(s) for s in rows]}
 
 
@@ -452,6 +463,8 @@ def export_my_salaries_csv(
     keys = driver_identity_keys(current_user)
     rows = list(db.scalars(select(Salary).where(Salary.id_driver.in_(keys)).order_by(Salary.id.desc())).all())
     rows = [s for s in rows if salary_date_in_range(s, s_dt, e_dt)]
+    # CSV/экспорт: архивные расчёты не включаем.
+    rows = [s for s in rows if not _is_archived(s)]
     name = (current_user.full_name or current_user.login or str(current_user.id)).strip()
     period_info = f"с {date_from} по {date_to}"
     body = build_salaries_csv_bytes(rows, name, period_info)
@@ -464,6 +477,7 @@ def list_salaries_for_driver(
     driver_user_id: int,
     date_from: str | None = Query(default=None),
     date_to: str | None = Query(default=None),
+    include_archived: bool = Query(default=False),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
@@ -472,7 +486,7 @@ def list_salaries_for_driver(
     driver = db.get(User, driver_user_id)
     if driver is None or not driver.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
-    rows = _salaries_for_driver_user(db, driver, date_from, date_to)
+    rows = _salaries_for_driver_user(db, driver, date_from, date_to, include_archived=include_archived)
     return {"items": [_salary_to_dict(s) for s in rows], "driver": {"id": int(driver.id), "full_name": driver.full_name, "login": driver.login}}
 
 
@@ -489,7 +503,8 @@ def export_salaries_for_driver_csv(
     driver = db.get(User, driver_user_id)
     if driver is None or not driver.is_active:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Driver not found")
-    rows = _salaries_for_driver_user(db, driver, date_from, date_to)
+    rows = _salaries_for_driver_user(db, driver, date_from, date_to, include_archived=False)
+    # CSV/экспорт: архивные расчёты не включаем.
     name = (driver.full_name or driver.login or str(driver.id)).strip()
     period_info = f"с {date_from} по {date_to}"
     body = build_salaries_csv_bytes(rows, name, period_info)
@@ -506,6 +521,75 @@ def get_salary(
     s = _get_salary_or_404(db, salary_id)
     _assert_can_view_salary(db, current_user, s)
     return _salary_to_dict(s)
+
+
+@router.post("/v1/salary/{salary_id}/replace")
+def replace_salary(
+    salary_id: int,
+    payload: SalaryStructuredFields,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    if not _is_accountant_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    old = _get_salary_or_404(db, salary_id)
+    if _is_archived(old):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot replace archived salary")
+    try:
+        fields = payload.to_db_fields()
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    old.status_driver = "archived"
+    db.add(old)
+    db.flush()
+    row = Salary(
+        id_driver=old.id_driver,
+        status_driver=" ",
+        comment_driver=old.comment_driver or " ",
+        replaces_salary_id=int(old.id),
+        **fields,
+    )
+    db.add(row)
+    db.flush()
+    old.replaced_by_salary_id = int(row.id)
+    db.add(old)
+    db.commit()
+    db.refresh(row)
+    driver = resolve_user_for_salary_driver_id(db, row.id_driver)
+    if driver:
+        create_notification_for_users(
+            db,
+            user_ids=[int(driver.id)],
+            event_type="salary_new",
+            title="Новый расчёт зарплаты",
+            message=f"Расчёт за {row.date_salary}, итого {_fnum(row.total):.2f} ₽",
+            payload={"salary_id": int(row.id), "replaces_salary_id": int(old.id)},
+            skip_user_ids=[],
+        )
+        db.commit()
+    return _salary_to_dict(row)
+
+
+@router.get("/v1/salary/{salary_id}/history")
+def salary_history(
+    salary_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    if not _is_accountant_admin(current_user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    current = _get_salary_or_404(db, salary_id)
+    chain: list[Salary] = [current]
+    seen = {int(current.id)}
+    cursor = current.replaces_salary_id
+    while cursor and cursor not in seen:
+        prev = db.get(Salary, cursor)
+        if prev is None:
+            break
+        chain.append(prev)
+        seen.add(int(prev.id))
+        cursor = prev.replaces_salary_id
+    return {"items": [_salary_to_dict(s) for s in chain]}
 
 
 @router.delete("/v1/salary/{salary_id}", status_code=status.HTTP_200_OK)

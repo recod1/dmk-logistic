@@ -10,6 +10,9 @@ export type ChatRoomListItem = {
   title: string;
   system_key?: string | null;
   unread_count?: number;
+  last_message_text?: string;
+  last_message_at?: string | null;
+  last_author_name?: string;
 };
 
 export type UserListItem = {
@@ -25,7 +28,7 @@ export type LogisticDriverRoomRow = {
   room: ChatRoomListItem;
 };
 
-type HubTab = "direct" | "group" | "broadcast" | "admin";
+type HubTab = "chats" | "broadcast" | "admin";
 
 const props = defineProps<{
   loading: boolean;
@@ -57,7 +60,8 @@ const emit = defineEmits<{
   "admin-patch-room": [payload: { roomId: number; title: string }];
 }>();
 
-let lastHubTab: HubTab = "direct";
+let lastHubTab: HubTab = "chats";
+const searchOpen = ref(false);
 const tab = ref<HubTab>(lastHubTab);
 watch(tab, (value) => {
   lastHubTab = value;
@@ -87,6 +91,51 @@ const newRoomRoles = ref<Record<RoleCode, boolean>>({
 
 const editingRoomId = ref<number | null>(null);
 const editingTitle = ref("");
+
+function roomInitials(title: string): string {
+  const parts = (title || "").trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return "?";
+  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
+  return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+}
+
+function formatRoomTime(value?: string | null): string {
+  if (!value) return "";
+  const dt = new Date(value);
+  if (Number.isNaN(dt.getTime())) return "";
+  const now = new Date();
+  if (dt.toDateString() === now.toDateString()) {
+    return dt.toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  }
+  return dt.toLocaleDateString("ru-RU", { day: "2-digit", month: "2-digit" });
+}
+
+const feedRooms = computed(() => {
+  const extra: ChatRoomListItem[] = [];
+  const seen = new Set(props.rooms.map((r) => r.id));
+  for (const row of [...(props.logisticDriverRooms ?? []), ...(props.accountantDriverRooms ?? [])]) {
+    if (!seen.has(row.room.id)) {
+      extra.push(row.room);
+      seen.add(row.room.id);
+    }
+  }
+  const q = userQuery.value.trim().toLowerCase();
+  const all = [...props.rooms, ...extra];
+  const filtered = q
+    ? all.filter((r) => {
+        const hay = [r.title, r.last_author_name, r.last_message_text, r.system_key]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase();
+        return hay.includes(q);
+      })
+    : all;
+  return [...filtered].sort((a, b) => {
+    const at = a.last_message_at || "";
+    const bt = b.last_message_at || "";
+    return bt.localeCompare(at);
+  });
+});
 
 const filteredUsers = computed(() => {
   const q = userQuery.value.trim().toLowerCase();
@@ -211,26 +260,42 @@ watch(
 
 <template>
   <section class="wrap">
-    <button class="ghost back" type="button" @click="emit('back')">← Назад</button>
+    <div class="head-row">
+      <button class="ghost back" type="button" @click="emit('back')">← Назад</button>
+      <h1>Чаты</h1>
+      <button class="ghost search-toggle" type="button" @click="searchOpen = !searchOpen">🔍</button>
+    </div>
     <p v-if="error" class="error">{{ error }}</p>
+    <label v-if="searchOpen || tab === 'chats'" class="field search-field">
+      Поиск
+      <input v-model="userQuery" placeholder="ФИО, рейс, сообщение" />
+    </label>
 
     <div class="tabs">
-      <button class="tab" :class="{ active: tab === 'direct' }" type="button" @click="onTabSelect('direct')">Личные</button>
-      <button class="tab" :class="{ active: tab === 'group' }" type="button" @click="onTabSelect('group')">Групповые</button>
+      <button class="tab" :class="{ active: tab === 'chats' }" type="button" @click="onTabSelect('chats')">Чаты</button>
       <button v-if="isAdmin" class="tab" :class="{ active: tab === 'broadcast' }" type="button" @click="onTabSelect('broadcast')">
         Рассылка
       </button>
       <button v-if="isAdmin" class="tab" :class="{ active: tab === 'admin' }" type="button" @click="onTabSelect('admin')">Комнаты</button>
     </div>
 
-    <section v-if="tab === 'direct'" class="card">
-      <h2>Диалоги</h2>
+    <section v-if="tab === 'chats'" class="card">
       <div class="rooms">
-        <button v-for="r in directRooms" :key="r.id" type="button" class="room" @click="emit('openRoom', r.id, r.title)">
-          <span class="room-title">{{ r.title }}</span>
-          <span v-if="(r.unread_count ?? 0) > 0" class="dot" />
+        <button v-for="r in feedRooms" :key="r.id" type="button" class="room feed" @click="emit('openRoom', r.id, r.title)">
+          <span class="avatar">{{ roomInitials(r.title) }}</span>
+          <span class="feed-main">
+            <span class="feed-top">
+              <span class="room-title">{{ r.title }}</span>
+              <span class="when">{{ formatRoomTime(r.last_message_at) }}</span>
+            </span>
+            <span class="preview">
+              <span v-if="r.last_author_name" class="author">{{ r.last_author_name }}: </span>
+              {{ r.last_message_text || "Нет сообщений" }}
+            </span>
+          </span>
+          <span v-if="(r.unread_count ?? 0) > 0" class="badge">{{ r.unread_count }}</span>
         </button>
-        <p v-if="!directRooms.length" class="empty">Диалогов пока нет.</p>
+        <p v-if="!feedRooms.length" class="empty">Чатов пока нет.</p>
       </div>
 
       <h2 class="subhead">Написать пользователю</h2>
@@ -469,6 +534,62 @@ h2 {
   align-items: center;
   justify-content: space-between;
   text-align: left;
+}
+.head-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.search-toggle {
+  margin-left: auto;
+}
+.room.feed {
+  gap: 0.65rem;
+  justify-content: flex-start;
+}
+.avatar {
+  width: 2.2rem;
+  height: 2.2rem;
+  border-radius: 999px;
+  background: #1d4ed8;
+  display: grid;
+  place-items: center;
+  font-size: 0.75rem;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+.feed-main {
+  min-width: 0;
+  flex: 1;
+  display: grid;
+  gap: 0.15rem;
+}
+.feed-top {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+.when {
+  color: #94a3b8;
+  font-size: 0.75rem;
+  flex: 0 0 auto;
+}
+.preview {
+  color: #94a3b8;
+  font-size: 0.82rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.badge {
+  margin-left: auto;
+  min-width: 1.2rem;
+  padding: 0.1rem 0.35rem;
+  border-radius: 999px;
+  background: #2563eb;
+  color: #fff;
+  font-size: 0.72rem;
+  text-align: center;
 }
 .room-title {
   font-weight: 600;

@@ -3,6 +3,7 @@ import { computed } from "vue";
 
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
+import { stageDeltasForPoint } from "../stageDeltas";
 import {
   canRevertPointStatus,
   isPointDone,
@@ -226,6 +227,10 @@ function showRevert(pointId: number): boolean {
           Открыть чат рейса
           <span v-if="(unreadChatCount ?? 0) > 0" class="chat-badge" aria-label="Новые сообщения" />
         </button>
+        <p v-if="route.driver_lat != null && route.driver_lng != null" class="loc">
+          Моя точка:
+          <MapsCoordsLink :lat="route.driver_lat" :lng="route.driver_lng" />
+        </p>
       </article>
 
       <article class="card">
@@ -236,6 +241,7 @@ function showRevert(pointId: number): boolean {
               <strong>{{ point.type_point === "unloading" ? "Выгрузка" : "Загрузка" }}</strong>
               <span class="chip">{{ statusLabel(point.status) }}</span>
             </div>
+            <p v-if="point.point_name" class="org">{{ point.point_name }}</p>
             <p v-if="point.place_point" class="addr">
               <MapsAddressLink :address="point.place_point" />
             </p>
@@ -259,6 +265,9 @@ function showRevert(pointId: number): boolean {
                       <MapsCoordsLink :lat="point.departure_coordinates?.lat" :lng="point.departure_coordinates?.lng" />
                     </td>
                   </tr>
+                  <tr v-if="stageDeltasForPoint(point).registration">
+                    <td colspan="4" class="delta">{{ stageDeltasForPoint(point).registration }}</td>
+                  </tr>
                   <tr>
                     <td>{{ stageLabel("registration") }}</td>
                     <td>{{ point.registration_time || point.time_registration || "—" }}{{ timeSourceLabel(point.registration_time_source) }}</td>
@@ -267,6 +276,9 @@ function showRevert(pointId: number): boolean {
                       <MapsCoordsLink :lat="point.registration_coordinates?.lat" :lng="point.registration_coordinates?.lng" />
                     </td>
                   </tr>
+                  <tr v-if="stageDeltasForPoint(point).gate">
+                    <td colspan="4" class="delta">{{ stageDeltasForPoint(point).gate }}</td>
+                  </tr>
                   <tr>
                     <td>{{ stageLabel("load") }}</td>
                     <td>{{ point.gate_time || point.time_put_on_gate || "—" }}{{ timeSourceLabel(point.gate_time_source) }}</td>
@@ -274,6 +286,9 @@ function showRevert(pointId: number): boolean {
                     <td>
                       <MapsCoordsLink :lat="point.gate_coordinates?.lat" :lng="point.gate_coordinates?.lng" />
                     </td>
+                  </tr>
+                  <tr v-if="stageDeltasForPoint(point).docs">
+                    <td colspan="4" class="delta">{{ stageDeltasForPoint(point).docs }}</td>
                   </tr>
                   <tr>
                     <td>{{ stageLabel("docs") }}</td>
@@ -434,6 +449,17 @@ function showRevert(pointId: number): boolean {
 }
 .point-card strong {
   color: var(--text-heading);
+}
+.org {
+  margin: 0.2rem 0 0;
+  font-weight: 600;
+}
+.delta {
+  color: #93c5fd;
+  font-size: 0.78rem;
+}
+.loc {
+  margin: 0.4rem 0 0;
 }
 .addr {
   margin: 0;

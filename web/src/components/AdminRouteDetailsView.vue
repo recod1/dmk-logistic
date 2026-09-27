@@ -4,6 +4,7 @@ import { computed, reactive, ref, watch } from "vue";
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
 import PointDocLinks from "./PointDocLinks.vue";
+import { stageDeltasForPoint } from "../stageDeltas";
 import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
 import { plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
 import { listPointStatusLabel } from "../status";
@@ -44,6 +45,7 @@ type PointForm = {
   place_point: string;
   date_point: string;
   point_time: string;
+  point_name?: string;
 };
 
 const props = defineProps<{
@@ -76,7 +78,17 @@ const emit = defineEmits<{
   ];
   openChat: [routeId: string];
   updatePoint: [pointId: number, payload: Record<string, unknown>];
+  requestLocation: [routeId: string];
 }>();
+
+function locationAtLabel(value: string | null | undefined): string {
+  if (!value) return "ещё не отправлял";
+  try {
+    return new Date(value).toLocaleString("ru-RU");
+  } catch {
+    return value;
+  }
+}
 
 const showReassign = ref(false);
 const showEdit = ref(false);
@@ -185,7 +197,8 @@ function makeEmptyPoint(): PointForm {
     type_point: "loading",
     place_point: "",
     date_point: "",
-    point_time: ""
+    point_time: "",
+    point_name: ""
   };
 }
 
@@ -397,7 +410,7 @@ function toPointPayload(points: PointForm[]): AdminRoutePointPayload[] {
     type_point: point.type_point || "loading",
     place_point: point.place_point.trim(),
     date_point: point.date_point.trim(),
-    point_name: "",
+    point_name: (point.point_name || "").trim(),
     point_contacts: "",
     point_time: point.point_time.trim(),
     point_note: "",
@@ -419,7 +432,8 @@ watch(
       type_point: point.type_point || "loading",
       place_point: point.place_point || "",
       date_point: plannedDateInputValue(point.date_point, point.point_time),
-      point_time: plannedTimeInputValue(point.date_point, point.point_time)
+      point_time: plannedTimeInputValue(point.date_point, point.point_time),
+      point_name: point.point_name || ""
     }));
     reassignDriverId.value = route.driver?.id ?? 0;
     reassignNumberAuto.value = route.number_auto || "";
@@ -549,6 +563,17 @@ function removeRoute(): void {
         </div>
       </div>
       <section class="actions top-actions">
+        <section class="location-card">
+          <h3>Местоположение водителя</h3>
+          <p v-if="route.driver_lat != null && route.driver_lng != null">
+            <MapsCoordsLink :lat="route.driver_lat" :lng="route.driver_lng" />
+            <span class="muted"> · {{ locationAtLabel(route.driver_location_at) }}</span>
+          </p>
+          <p v-else class="muted">Координаты ещё не получены</p>
+          <button class="secondary" type="button" :disabled="loading || !route.driver?.id" @click="emit('requestLocation', route.id)">
+            Обновить
+          </button>
+        </section>
         <button class="secondary chat-btn" type="button" @click="emit('openChat', route.id)">
           Открыть чат рейса
           <span v-if="(unreadChatCount ?? 0) > 0" class="chat-badge" aria-label="Новые сообщения" />
@@ -665,6 +690,10 @@ function removeRoute(): void {
               <input v-model="point.point_time" type="time" step="60" lang="ru" />
             </label>
             <label>
+              Организация
+              <input v-model="point.point_name" />
+            </label>
+            <label>
               Адрес
               <input v-model="point.place_point" />
             </label>
@@ -678,16 +707,16 @@ function removeRoute(): void {
           <div class="point-top">
             <strong>
               {{ pointTypeLabel(point.type_point) }}
-              ·
-              <MapsAddressLink v-if="point.place_point" :address="point.place_point" />
-              <span v-else>Без адреса</span>
+              <span v-if="point.point_name"> · {{ point.point_name }}</span>
             </strong>
             <span class="status-chip">{{ pointStatusLabel(point.status) }}</span>
           </div>
-          <p class="meta-line">{{ formatPlannedLine(point.date_point, point.point_time) }}</p>
-          <p v-if="point.point_name || point.point_contacts" class="meta-line">
-            {{ point.point_name || "—" }}{{ point.point_contacts ? ` · ${point.point_contacts}` : "" }}
+          <p class="meta-line">
+            <MapsAddressLink v-if="point.place_point" :address="point.place_point" />
+            <span v-else>Без адреса</span>
           </p>
+          <p class="meta-line">{{ formatPlannedLine(point.date_point, point.point_time) }}</p>
+          <p v-if="point.point_contacts" class="meta-line">{{ point.point_contacts }}</p>
           <div v-if="editingPointId !== point.id" class="actions">
             <button class="secondary" type="button" :disabled="loading" @click="openPointEdit(point)">
               Изменить точку
@@ -871,6 +900,9 @@ function removeRoute(): void {
                   <small v-if="editHint(point.manual_edits, 'departure_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'departure_coordinates') }}</small>
                 </td>
               </tr>
+              <tr v-if="stageDeltasForPoint(point).registration">
+                <td colspan="4" class="delta">{{ stageDeltasForPoint(point).registration }}</td>
+              </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("registration") }}</td>
                 <td>
@@ -886,6 +918,9 @@ function removeRoute(): void {
                   <small v-if="editHint(point.manual_edits, 'registration_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'registration_coordinates') }}</small>
                 </td>
               </tr>
+              <tr v-if="stageDeltasForPoint(point).gate">
+                <td colspan="4" class="delta">{{ stageDeltasForPoint(point).gate }}</td>
+              </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("load") }}</td>
                 <td>
@@ -900,6 +935,9 @@ function removeRoute(): void {
                   <MapsCoordsLink :lat="point.gate_coordinates?.lat" :lng="point.gate_coordinates?.lng" />
                   <small v-if="editHint(point.manual_edits, 'gate_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'gate_coordinates') }}</small>
                 </td>
+              </tr>
+              <tr v-if="stageDeltasForPoint(point).docs">
+                <td colspan="4" class="delta">{{ stageDeltasForPoint(point).docs }}</td>
               </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("docs") }}</td>
@@ -949,6 +987,18 @@ function removeRoute(): void {
 .details-card {
   display: grid;
   gap: 0.8rem;
+}
+.location-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  display: grid;
+  gap: 0.4rem;
+}
+.delta {
+  color: #93c5fd;
+  font-size: 0.78rem;
+  padding: 0.15rem 0.4rem;
 }
 .head {
   display: flex;

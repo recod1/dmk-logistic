@@ -13,6 +13,8 @@ class OnecPoint:
     date_point: str
     point_time: str
     place_point: str
+    point_name: str = ""
+    point_contacts: str = ""
 
 
 @dataclass(frozen=True)
@@ -74,6 +76,41 @@ def _pick_dispatcher_contacts(hits: list[tuple[int, str]]) -> str:
         key=lambda item: (item[0], 1 if is_placeholder_dispatcher_phone(item[1]) else 0),
     )
     return ranked[0][1].strip()
+
+
+_ADDRESS_MARKERS = ("россия", "г ", "г.", "обл", "ул ", "ул.", "улица", "пр-кт", "проспект", "ш.", "шоссе")
+
+
+def split_onec_org_and_address(text: str) -> tuple[str, str, str]:
+    """Split 1C org+address+contacts. Returns (point_name, place_point, point_contacts)."""
+    raw = " ".join((text or "").split()).strip()
+    if not raw:
+        return "", "", ""
+
+    contacts = ""
+    place = raw
+    contact_pos = place.lower().find("контакт")
+    if contact_pos >= 0:
+        tail = place[contact_pos:]
+        if ":" in tail:
+            contacts = tail.split(":", 1)[1].strip()
+        else:
+            contacts = tail[len("контакт") :].lstrip(" :").strip()
+        place = place[:contact_pos].strip()
+
+    lower = place.lower()
+    cut = -1
+    for marker in _ADDRESS_MARKERS:
+        pos = lower.find(marker)
+        if pos > 0 and (cut < 0 or pos < cut):
+            cut = pos
+    if cut <= 0:
+        return "", place, contacts
+    name = place[:cut].strip(" ,;")
+    address = place[cut:].strip(" ,;")
+    if not name or not address:
+        return "", place, contacts
+    return name, address, contacts
 
 
 def parse_onec_message(raw: str) -> OnecParsedRoute:
@@ -166,19 +203,19 @@ def parse_onec_message(raw: str) -> OnecParsedRoute:
                 else:
                     place = org_line
 
-            contact_pos = place.lower().find("контакт")
-            if contact_pos >= 0:
-                place = place[:contact_pos].strip()
             place = " ".join(place.split())
+            point_name, place_point, point_contacts = split_onec_org_and_address(place)
 
-            if date_time and place:
+            if date_time and (place_point or point_name):
                 date_point, point_time = split_onec_wall_datetime(date_time)
                 points.append(
                     OnecPoint(
                         type_point=type_point,
                         date_point=date_point or date_time,
                         point_time=point_time,
-                        place_point=place,
+                        place_point=place_point or place,
+                        point_name=point_name,
+                        point_contacts=point_contacts,
                     )
                 )
 
