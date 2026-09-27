@@ -75,6 +75,18 @@ body {
   overflow: hidden;
 }
 
+html.keyboard-open,
+html.keyboard-open body,
+html.keyboard-open #app {
+  height: var(--vv-height, 100%);
+  max-height: var(--vv-height, 100%);
+}
+
+html.keyboard-open body {
+  top: var(--vv-offset, 0px);
+  bottom: auto;
+}
+
 button,
 input,
 textarea,

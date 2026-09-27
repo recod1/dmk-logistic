@@ -161,7 +161,9 @@ function formatExtra(item: NotificationDto): string {
   gap: 0.8rem;
   width: 100%;
   max-width: 720px;
+  min-width: 0;
   margin: 0 auto;
+  overflow-x: hidden;
 }
 .head-sticky {
   position: sticky;
@@ -195,12 +197,13 @@ function formatExtra(item: NotificationDto): string {
 .head-actions button {
   min-height: 36px;
   border-radius: 10px;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   white-space: nowrap;
 }
 .list {
   display: grid;
   gap: 0.7rem;
+  min-width: 0;
   padding-top: 0.15rem;
   scroll-margin-top: var(--notif-head-h, 0px);
 }
@@ -216,12 +219,9 @@ function formatExtra(item: NotificationDto): string {
     align-items: stretch;
   }
   .head-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
+    display: flex;
+    flex-wrap: wrap;
     overflow: visible;
-  }
-  .head-actions button:last-child {
-    grid-column: 1 / -1;
   }
 }
 .chat-kind {
@@ -238,13 +238,13 @@ function formatExtra(item: NotificationDto): string {
   margin: 0.25rem 0 0;
   color: var(--text-muted);
   font-size: 0.78rem;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .item-card {
   display: grid;
   gap: 0.45rem;
+  min-width: 0;
   border: 1px solid var(--border);
   padding: 0.85rem;
   border-radius: 14px;
@@ -265,6 +265,12 @@ function formatExtra(item: NotificationDto): string {
   justify-content: space-between;
   align-items: flex-start;
   gap: 0.5rem;
+  min-width: 0;
+}
+.row-top strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 p {
   margin: 0;

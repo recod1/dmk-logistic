@@ -4243,7 +4243,7 @@ function updateViewportVars(): void {
   const focused = isEditableTarget(document.activeElement);
   const drop = window.innerHeight - height;
   const shortViewport = height < window.screen.height * 0.64;
-  const open = focused && (drop > 120 || shortViewport);
+  const open = focused && (drop > 80 || shortViewport);
   keyboardOpen.value = open;
   document.documentElement.classList.toggle("keyboard-open", open);
   if (open || offset > 0 || window.scrollY > 0) {
@@ -4795,9 +4795,13 @@ onUnmounted(() => {
   overscroll-behavior: none;
 }
 .app-shell.keyboard-open {
+  position: fixed;
+  left: 0;
+  right: 0;
+  top: var(--vv-offset, 0px);
   height: var(--vv-height, 100%);
   max-height: var(--vv-height, 100%);
-  transform: translate3d(0, var(--vv-offset, 0px), 0);
+  transform: none;
 }
 .app-scroll {
   flex: 1 1 0;
@@ -4862,6 +4866,7 @@ onUnmounted(() => {
 .page-stage > section {
   width: 100%;
   max-width: none;
+  min-width: 0;
 }
 .topbar {
   position: sticky;

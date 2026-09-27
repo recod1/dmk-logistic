@@ -324,18 +324,14 @@ onUnmounted(() => {
     <div ref="listRef" class="list" role="log" aria-live="polite" @scroll.passive="updateStickiness">
       <button v-if="showJump" class="jump" type="button" @click="scrollToBottom">Новые сообщения ↓</button>
       <div ref="listInnerRef" class="list-inner">
-        <article
-          v-for="(m, idx) in items"
-          :key="m.id"
-          class="msg"
-          :class="{ mine: isMine(m) }"
-        >
+        <template v-for="(m, idx) in items" :key="m.id">
           <div
             v-if="idx === 0 || messageDayKey(m.created_at) !== messageDayKey(items[idx - 1]?.created_at || '')"
             class="day-sep"
           >
-            {{ messageDayLabel(m.created_at) }}
+            <span>{{ messageDayLabel(m.created_at) }}</span>
           </div>
+          <article class="msg" :class="{ mine: isMine(m) }">
           <div class="bubble">
             <strong v-if="!currentUserId || m.user_id !== currentUserId" class="author">{{ m.author_name }}</strong>
             <p class="text">{{ m.text }}</p>
@@ -362,7 +358,8 @@ onUnmounted(() => {
               </span>
             </div>
           </div>
-        </article>
+          </article>
+        </template>
         <p v-if="!items.length && !loading" class="empty">Сообщений пока нет.</p>
       </div>
     </div>
@@ -474,10 +471,30 @@ onUnmounted(() => {
 }
 
 .day-sep {
-  text-align: center;
-  color: #94a3b8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  gap: 0.55rem;
+  margin: 0.65rem 0 0.5rem;
+}
+.day-sep::before,
+.day-sep::after {
+  content: "";
+  flex: 1 1 auto;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+}
+.day-sep span {
+  flex: 0 0 auto;
+  padding: 0.18rem 0.7rem;
+  border-radius: 999px;
+  background: #1c2733;
+  color: #9bb4c9;
   font-size: 0.75rem;
-  margin: 0.35rem 0;
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
 }
 .msg {
   display: flex;
@@ -582,7 +599,7 @@ onUnmounted(() => {
   flex-wrap: wrap;
   align-items: flex-end;
   gap: 0.45rem;
-  padding: 0.5rem 0.65rem 0.55rem;
+  padding: 0.5rem 0.65rem max(0.55rem, env(safe-area-inset-bottom, 0px));
   background: #17212b;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
   overflow: hidden;
