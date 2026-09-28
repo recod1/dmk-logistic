@@ -158,7 +158,7 @@ function formatExtra(item: NotificationDto): string {
 <style scoped>
 .notifications-wrap {
   display: grid;
-  gap: 0.55rem;
+  gap: 0.45rem;
   width: 100%;
   max-width: 720px;
   min-width: 0;
@@ -168,8 +168,8 @@ function formatExtra(item: NotificationDto): string {
   position: sticky;
   top: var(--topbar-h, 0px);
   z-index: 20;
-  margin: 0;
-  padding: 0.2rem 0 0.4rem;
+  margin: 0 -0.2rem;
+  padding: 0.2rem 0.2rem 0.4rem;
   background: rgba(3, 7, 18, 0.96);
   backdrop-filter: blur(12px);
 }
@@ -177,8 +177,8 @@ function formatExtra(item: NotificationDto): string {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 0.45rem;
+  gap: 0.4rem;
+  min-width: 0;
 }
 .page-heading {
   margin: 0;
@@ -187,26 +187,51 @@ function formatExtra(item: NotificationDto): string {
   line-height: 1.2;
   white-space: nowrap;
 }
+.head-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.head-actions button {
+  min-height: 34px;
+  border-radius: 10px;
+  flex: 0 1 auto;
+  white-space: nowrap;
+  padding: 0.32rem 0.55rem;
+  font-size: 0.82rem;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid var(--border-strong);
+  color: #e2e8f0;
+}
 @media (max-width: 760px) {
+  .notifications-wrap {
+    margin-top: -0.85rem;
+    gap: 0.4rem;
+  }
+  .head-sticky {
+    padding: 0.4rem 0.1rem 0.45rem;
+  }
   .page-heading {
     display: none;
   }
   .head-row {
-    flex-direction: column;
-    align-items: stretch;
+    display: block;
   }
-}
-.head-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.45rem;
-  min-width: 0;
-}
-.head-actions button {
-  min-height: 36px;
-  border-radius: 10px;
-  flex: 0 1 auto;
-  white-space: nowrap;
+  .head-actions {
+    width: 100%;
+    flex-wrap: nowrap;
+    gap: 0.3rem;
+  }
+  .head-actions button {
+    flex: 1 1 0;
+    min-width: 0;
+    min-height: 34px;
+    padding: 0.32rem 0.28rem;
+    font-size: 0.72rem;
+    line-height: 1.15;
+    white-space: normal;
+  }
 }
 .list {
   display: grid;
@@ -233,6 +258,13 @@ function formatExtra(item: NotificationDto): string {
   font-size: 0.78rem;
   white-space: normal;
   overflow-wrap: anywhere;
+}
+@media (max-width: 760px) {
+  .hint {
+    margin-top: 0.3rem;
+    font-size: 0.72rem;
+    line-height: 1.25;
+  }
 }
 .item-card {
   display: grid;
