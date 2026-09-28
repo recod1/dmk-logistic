@@ -264,9 +264,11 @@ watch(
       <h1 v-if="isAdmin">Чаты</h1>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
-    <label class="field search-field">
-      <input v-model="userQuery" placeholder="Поиск по чатам, ФИО и рейсу" />
-    </label>
+    <div class="search-sticky">
+      <label class="field search-field">
+        <input v-model="userQuery" placeholder="Поиск по чатам, ФИО и рейсу" />
+      </label>
+    </div>
 
     <div v-if="isAdmin" class="tabs">
       <button class="tab" :class="{ active: tab === 'chats' }" type="button" @click="onTabSelect('chats')">Лента</button>
@@ -532,6 +534,15 @@ h2 {
   display: flex;
   align-items: center;
   gap: 0.6rem;
+}
+.search-sticky {
+  position: sticky;
+  top: var(--topbar-h, 0px);
+  z-index: 20;
+  margin: 0 -0.2rem;
+  padding: 0.2rem 0.2rem 0.45rem;
+  background: rgba(3, 7, 18, 0.96);
+  backdrop-filter: blur(12px);
 }
 .search-toggle {
   margin-left: auto;

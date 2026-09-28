@@ -473,34 +473,36 @@ onMounted(() => {
       </button>
     </div>
 
-    <section v-if="!showCreate && !showCreateOnec" class="card">
-      <h2>Выберите статус</h2>
-      <div class="tabs desktop-status">
-        <button
-          v-for="tab in statusTabs"
-          :key="tab.value"
-          :class="['tab-btn', { active: tab.value === filters.status }]"
-          type="button"
-          @click="setStatusTab(tab.value)"
-        >
-          {{ tab.label }}
-        </button>
-      </div>
-      <label class="mobile-status">
-        Статус
-        <select :value="filters.status" @change="setStatusTab(($event.target as HTMLSelectElement).value)">
-          <option v-for="tab in statusTabs" :key="tab.value" :value="tab.value">{{ tab.label }}</option>
-        </select>
-      </label>
-    </section>
-
-    <section v-if="!showCreate && !showCreateOnec" class="card filters-card">
-      <div class="filters-head">
-        <h2>{{ filteredTitle }}</h2>
-        <button class="ghost search-toggle" type="button" @click="searchOpen = !searchOpen">
-          {{ searchOpen ? "Скрыть поиск" : "Поиск по рейсу" }}
-        </button>
-      </div>
+    <div v-if="!showCreate && !showCreateOnec" class="list-sticky">
+      <section class="card toolbar-card">
+        <div class="toolbar-row">
+          <div class="status-block">
+            <h2>Статус</h2>
+            <div class="tabs desktop-status">
+              <button
+                v-for="tab in statusTabs"
+                :key="tab.value"
+                :class="['tab-btn', { active: tab.value === filters.status }]"
+                type="button"
+                @click="setStatusTab(tab.value)"
+              >
+                {{ tab.label }}
+              </button>
+            </div>
+            <label class="mobile-status">
+              Статус
+              <select :value="filters.status" @change="setStatusTab(($event.target as HTMLSelectElement).value)">
+                <option v-for="tab in statusTabs" :key="tab.value" :value="tab.value">{{ tab.label }}</option>
+              </select>
+            </label>
+          </div>
+          <button class="ghost search-toggle" type="button" @click="searchOpen = !searchOpen">
+            {{ searchOpen ? "Скрыть поиск" : "Поиск" }}
+          </button>
+        </div>
+        <div class="filters-head">
+          <h2>{{ filteredTitle }}</h2>
+        </div>
       <div class="filters-grid" :class="{ open: searchOpen }">
         <label>
           Водитель (часть ФИО)
@@ -524,8 +526,11 @@ onMounted(() => {
           <button class="secondary" type="button" :disabled="loading" @click="doSearch">Применить</button>
         </div>
       </div>
-      <p v-if="error" class="error">{{ error }}</p>
+        <p v-if="error" class="error">{{ error }}</p>
+      </section>
+    </div>
 
+    <div v-if="!showCreate && !showCreateOnec" class="routes-list">
       <div class="routes-cards" role="list">
         <button
           v-for="r in routes"
@@ -607,7 +612,7 @@ onMounted(() => {
           Ещё
         </button>
       </div>
-    </section>
+    </div>
 
     <section v-if="showCreateOnec" ref="createCardEl" class="card create-card">
       <h2>Создать рейс из 1С</h2>
@@ -786,6 +791,32 @@ onMounted(() => {
   margin: 0 auto;
   min-width: 0;
 }
+.list-sticky {
+  position: sticky;
+  top: var(--topbar-h, 0px);
+  z-index: 20;
+  margin: 0 -0.2rem;
+  padding: 0.15rem 0.2rem 0.45rem;
+  background: rgba(3, 7, 18, 0.96);
+  backdrop-filter: blur(12px);
+}
+.toolbar-card {
+  padding: 0.75rem 0.9rem 0.85rem;
+}
+.toolbar-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.status-block {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+.status-block > h2 {
+  margin: 0 0 0.45rem;
+}
 .card {
   border: 1px solid #243043;
   border-radius: 16px;
@@ -831,7 +862,7 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 .filters-head h2 {
-  margin: 0;
+  margin: 0.55rem 0 0;
 }
 .search-toggle,
 .mobile-status {
@@ -1048,6 +1079,17 @@ button {
   .desktop-status {
     display: none;
   }
+  .status-block > h2 {
+    display: none;
+  }
+  .toolbar-row {
+    flex-wrap: nowrap;
+    align-items: flex-end;
+  }
+  .search-toggle {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
   .mobile-status,
   .search-toggle {
     display: grid;
@@ -1056,6 +1098,7 @@ button {
     display: inline-flex;
     align-items: center;
     width: auto;
+    min-height: 36px;
   }
   .filters-grid {
     display: none;
@@ -1072,7 +1115,7 @@ button {
   .table-wrap-desktop {
     display: none;
   }
-  .filters-card h2 {
+  .filters-head h2 {
     font-size: 1rem;
     line-height: 1.35;
   }
