@@ -11,6 +11,7 @@ export interface ActiveRouteSnapshot {
 export interface OutboxEvent extends EventPayload {
   id?: number;
   device_id: string;
+  user_id?: number;
   created_at: string;
 }
 
@@ -115,6 +116,17 @@ db.version(6).stores({
   authSession: "key"
 });
 
+db.version(7).stores({
+  activeRoute: "key",
+  outbox: "++id,client_event_id,point_id,created_at,user_id",
+  pointOverlay: "++id,route_id,point_id,[route_id+point_id],updated_at",
+  pendingDocBlobs: "local_key,point_id,route_id,created_at",
+  driverRoutesCache: "key",
+  routeSnapshots: "id",
+  pendingAccepts: "route_id,created_at",
+  authSession: "key"
+});
+
 function toPlainObject<T>(value: T): T {
   if (value === null || value === undefined) {
     return value;
@@ -146,8 +158,37 @@ export async function addOutboxEvent(event: OutboxEvent): Promise<void> {
   await db.outbox.add(event);
 }
 
-export async function getOutboxEvents(deviceId: string): Promise<OutboxEvent[]> {
-  return db.outbox.where("created_at").above("").filter((item) => item.device_id === deviceId).toArray();
+export async function getOutboxEvents(deviceId: string, userId?: number | null): Promise<OutboxEvent[]> {
+  return db.outbox
+    .where("created_at")
+    .above("")
+    .filter((item) => {
+      if (item.device_id !== deviceId) {
+        return false;
+      }
+      if (userId && item.user_id && item.user_id !== userId) {
+        return false;
+      }
+      return true;
+    })
+    .toArray();
+}
+
+export async function listPendingDocBlobs(): Promise<PendingDocBlob[]> {
+  return db.pendingDocBlobs.toArray();
+}
+
+export async function clearLocalUserData(): Promise<void> {
+  await Promise.all([
+    db.activeRoute.clear(),
+    db.outbox.clear(),
+    db.pointOverlay.clear(),
+    db.pendingDocBlobs.clear(),
+    db.driverRoutesCache.clear(),
+    db.routeSnapshots.clear(),
+    db.pendingAccepts.clear(),
+    db.authSession.clear()
+  ]);
 }
 
 export async function removeOutboxByClientEventIds(ids: string[]): Promise<void> {

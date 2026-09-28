@@ -113,7 +113,6 @@ import {
   addPendingAccept,
   getOutboxEvents,
   getPendingAccepts,
-  getPendingDocBlob,
   getDriverQueueCounts,
   getPointOverlays,
   loadActiveRoute,
@@ -130,7 +129,9 @@ import {
   savePendingDocBlob,
   savePointOverlay,
   saveRouteSnapshot,
-  updateOutboxEventByClientId
+  updateOutboxEventByClientId,
+  listPendingDocBlobs,
+  clearLocalUserData
 } from "./db";
 import { DRIVER_PREFETCH_SYNC_TAG, persistPrefetchPayload, prefetchAssignedRoutesFromSession, routeToListItem } from "./offlinePrefetch";
 import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
@@ -167,6 +168,9 @@ const TOKEN_STORAGE_KEY = "dmk_mobile_token";
 const PENDING_NOTIFICATION_READS_KEY = "dmk_pending_notification_reads";
 const USER_STORAGE_KEY = "dmk_mobile_user";
 const DEVICE_ID_STORAGE_KEY = "dmk_mobile_device_id";
+const LAST_USER_ID_KEY = "dmk_last_user_id";
+const GEO_PERMISSION_KEY = "dmk_geo_permission";
+const GEO_ENABLED_PREFIX = "dmk_geo_enabled_";
 
 type AppSection =
   | "driver_home"
@@ -196,6 +200,7 @@ const syncMessage = ref("Готово");
 const currentSection = ref<AppSection>("driver_home");
 const sectionStack = ref<AppSection[]>([]);
 const profileMenuOpen = ref(false);
+const geoSharingOn = ref(true);
 const selectedDriverRoute = ref<RouteDto | null>(null);
 const driverAssignedRoutes = ref<DriverRouteListItem[]>([]);
 const driverHistoryRoutes = ref<DriverRouteListItem[]>([]);
@@ -1455,6 +1460,14 @@ function connectNotificationsSocket(): void {
 }
 
 function clearAuth(): void {
+  const previousId = authUser.value?.id;
+  if (previousId) {
+    try {
+      localStorage.setItem(LAST_USER_ID_KEY, String(previousId));
+    } catch {
+      // ignore quota / private mode
+    }
+  }
   authToken.value = "";
   denyRealtimeSockets();
   clearNotificationsSocketTimers();
@@ -1503,6 +1516,7 @@ function clearAuth(): void {
   profileMenuOpen.value = false;
   localStorage.removeItem(TOKEN_STORAGE_KEY);
   localStorage.removeItem(USER_STORAGE_KEY);
+  localStorage.removeItem(PENDING_NOTIFICATION_READS_KEY);
   void clearAuthSession();
 }
 
@@ -1813,7 +1827,7 @@ async function refreshDriverRoutes(): Promise<void> {
       // ignore chat unread errors
     }
 
-    const localWork = pendingIds.size > 0 || (await getOutboxEvents(getDeviceId())).length > 0;
+    const localWork = pendingIds.size > 0 || (await getOutboxEvents(getDeviceId(), authUser.value?.id)).length > 0;
     if (driverActiveRouteId.value) {
       if (!route.value || route.value.id !== driverActiveRouteId.value) {
         const cachedSnap = await loadRouteSnapshot(driverActiveRouteId.value);
@@ -1860,7 +1874,7 @@ async function refreshRoute(): Promise<void> {
   try {
     const serverRoute = await getActiveRoute(authToken.value);
     const pending = await getPendingAccepts();
-    const localWork = pending.length > 0 || (await getOutboxEvents(getDeviceId())).length > 0;
+    const localWork = pending.length > 0 || (await getOutboxEvents(getDeviceId(), authUser.value?.id)).length > 0;
     if (!serverRoute && localWork && route.value) {
       route.value = await applyOverlaysToRoute(route.value);
       return;
@@ -1956,7 +1970,34 @@ function onVisibilityChange(): void {
   onForegroundResume();
 }
 
-const GEO_PERMISSION_KEY = "dmk_geo_permission";
+function geoEnabledStorageKey(userId: number): string {
+  return `${GEO_ENABLED_PREFIX}${userId}`;
+}
+
+function readGeoSharingEnabled(userId?: number | null): boolean {
+  const id = userId ?? authUser.value?.id;
+  if (!id) {
+    return true;
+  }
+  try {
+    return localStorage.getItem(geoEnabledStorageKey(id)) !== "0";
+  } catch {
+    return true;
+  }
+}
+
+function writeGeoSharingEnabled(enabled: boolean, userId?: number | null): void {
+  const id = userId ?? authUser.value?.id;
+  if (!id) {
+    return;
+  }
+  try {
+    localStorage.setItem(geoEnabledStorageKey(id), enabled ? "1" : "0");
+  } catch {
+    // ignore quota / private mode
+  }
+  geoSharingOn.value = enabled;
+}
 
 function rememberGeoPermission(state: "granted" | "denied" | "asked"): void {
   try {
@@ -1974,20 +2015,24 @@ function readGeoPermission(): string {
   }
 }
 
-function ensureDriverGeoPermission(): void {
+function ensureDriverGeoPermission(opts?: { forcePrompt?: boolean }): void {
   if (!authToken.value || !isDriver.value) {
+    return;
+  }
+  if (!opts?.forcePrompt && !readGeoSharingEnabled()) {
     return;
   }
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     return;
   }
   const already = readGeoPermission();
-  if (already === "denied") {
+  if (!opts?.forcePrompt && already === "denied") {
     return;
   }
   navigator.geolocation.getCurrentPosition(
     (pos) => {
       rememberGeoPermission("granted");
+      writeGeoSharingEnabled(true);
       const targetId = (selectedDriverRoute.value?.id || driverActiveRouteId.value || route.value?.id || "").trim();
       if (!targetId || !authToken.value) {
         return;
@@ -2002,7 +2047,8 @@ function ensureDriverGeoPermission(): void {
     (error) => {
       if (error.code === error.PERMISSION_DENIED) {
         rememberGeoPermission("denied");
-        syncMessage.value = "Нет доступа к геолокации";
+        writeGeoSharingEnabled(false);
+        syncMessage.value = "Нет доступа к геолокации. Разрешите её в настройках телефона и нажмите «Включить геопозицию».";
       } else {
         rememberGeoPermission(already === "granted" ? "granted" : "asked");
       }
@@ -2013,6 +2059,9 @@ function ensureDriverGeoPermission(): void {
 
 async function sendDriverLocationIfPossible(routeId?: string | null): Promise<void> {
   if (!authToken.value || !isDriver.value) {
+    return;
+  }
+  if (!readGeoSharingEnabled()) {
     return;
   }
   const targetId = (routeId || selectedDriverRoute.value?.id || driverActiveRouteId.value || route.value?.id || "").trim();
@@ -2042,6 +2091,7 @@ async function sendDriverLocationIfPossible(routeId?: string | null): Promise<vo
       (error) => {
         if (error.code === error.PERMISSION_DENIED) {
           rememberGeoPermission("denied");
+          writeGeoSharingEnabled(false);
         }
         syncMessage.value = "Нет доступа к геолокации";
         resolve();
@@ -2049,6 +2099,21 @@ async function sendDriverLocationIfPossible(routeId?: string | null): Promise<vo
       { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
     );
   });
+}
+
+function toggleGeoSharing(): void {
+  if (!isDriver.value) {
+    return;
+  }
+  profileMenuOpen.value = false;
+  if (readGeoSharingEnabled()) {
+    writeGeoSharingEnabled(false);
+    syncMessage.value = "Передача геопозиции выключена";
+    return;
+  }
+  writeGeoSharingEnabled(true);
+  syncMessage.value = "Включаем геопозицию…";
+  ensureDriverGeoPermission({ forcePrompt: true });
 }
 
 async function doRequestDriverLocation(routeId: string): Promise<void> {
@@ -2196,9 +2261,8 @@ async function syncOutboxInBackground(): Promise<void> {
     await refreshConnectionQueue();
 
     const flushReadyEvents = async (): Promise<boolean> => {
-      const ready = (await getOutboxEvents(deviceId)).sort((a, b) => a.created_at.localeCompare(b.created_at));
+      const ready = (await getOutboxEvents(deviceId, authUser.value?.id)).sort((a, b) => a.created_at.localeCompare(b.created_at));
       const events: EventPayload[] = ready
-        .filter((event) => !(event.to_status === "docs" && event.document_local_keys?.length && !event.document_file_ids?.length))
         .map((event) => {
           const payload: EventPayload = {
             client_event_id: event.client_event_id,
@@ -2231,43 +2295,32 @@ async function syncOutboxInBackground(): Promise<void> {
     // Сначала статусы до «ворота», иначе сервер отклоняет фото (нужен load/docs).
     const sentStatuses = await flushReadyEvents();
 
-    const pendingDocs = (await getOutboxEvents(deviceId)).sort((a, b) => a.created_at.localeCompare(b.created_at));
-    for (const ev of pendingDocs) {
-      if (ev.to_status !== "docs") {
-        continue;
-      }
-      const keys = ev.document_local_keys;
-      if (!keys?.length || ev.document_file_ids?.length) {
-        continue;
-      }
-      const blobs: Blob[] = [];
-      let missing = false;
-      for (const key of keys) {
-        const row = await getPendingDocBlob(key);
-        if (!row) {
-          missing = true;
-          break;
-        }
-        blobs.push(row.blob);
-      }
-      if (missing || blobs.length !== keys.length) {
-        continue;
-      }
+    const pendingBlobs = await listPendingDocBlobs();
+    const blobsByPoint = new Map<number, typeof pendingBlobs>();
+    for (const row of pendingBlobs) {
+      const group = blobsByPoint.get(row.point_id) ?? [];
+      group.push(row);
+      blobsByPoint.set(row.point_id, group);
+    }
+    for (const [pointId, rows] of blobsByPoint) {
+      const blobs = rows.map((row) => row.blob);
+      const keys = rows.map((row) => row.local_key);
       try {
         const prepared = await prepareDocumentImageBlobs(blobs);
-        const { file_ids } = await uploadPointDocuments(authToken.value, ev.point_id, prepared, { timeoutMs: 45_000 });
-        await updateOutboxEventByClientId(ev.client_event_id, {
-          document_file_ids: file_ids,
-          document_local_keys: []
-        });
+        await uploadPointDocuments(authToken.value, pointId, prepared, { timeoutMs: 45_000 });
         await removePendingDocBlobs(keys);
+        const leftover = (await getOutboxEvents(deviceId, authUser.value?.id)).filter(
+          (event) => event.point_id === pointId && event.document_local_keys?.length
+        );
+        for (const ev of leftover) {
+          await updateOutboxEventByClientId(ev.client_event_id, { document_local_keys: [] });
+        }
       } catch (error) {
         reportDebugError({
           source: "sync.docs",
           error,
-          extra: { point_id: ev.point_id, client_event_id: ev.client_event_id, files: blobs.length }
+          extra: { point_id: pointId, files: blobs.length }
         });
-        continue;
       }
     }
 
@@ -2951,12 +3004,13 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
       await refreshDriverRoutes();
       await refreshRoute();
       await refreshRouteChatUnread();
+      geoSharingOn.value = readGeoSharingEnabled(user.id);
       ensureDriverGeoPermission();
       await syncOutboxInBackground();
       startBackgroundSyncLoop();
-      if (typeof Notification !== "undefined" && Notification.permission === "granted") {
-        void ensureWebPushSubscription();
-      }
+    }
+    if (typeof Notification !== "undefined" && Notification.permission === "granted") {
+      void ensureWebPushSubscription();
     }
     await refreshNotifications();
     await refreshLogisticsContacts();
@@ -3038,8 +3092,23 @@ async function doLogin(loginValue: string, password: string): Promise<void> {
   authLoading.value = true;
   try {
     const result = await loginRequest(loginValue, password);
+    let previousId = 0;
+    try {
+      previousId = Number(localStorage.getItem(LAST_USER_ID_KEY) || 0);
+    } catch {
+      previousId = 0;
+    }
+    if (previousId && previousId !== result.user.id) {
+      await clearLocalUserData();
+      try {
+        localStorage.removeItem(PENDING_NOTIFICATION_READS_KEY);
+      } catch {
+        // ignore
+      }
+    }
     authToken.value = result.access_token;
     authUser.value = result.user;
+    geoSharingOn.value = readGeoSharingEnabled(result.user.id);
     await persistAuth(result.access_token, result.user);
     await bootstrapByRole(result.user);
   } catch (error) {
@@ -3337,6 +3406,7 @@ async function markPointNext(
   await addOutboxEvent({
     ...event,
     device_id: getDeviceId(),
+    user_id: authUser.value?.id,
     created_at: new Date().toISOString()
   });
   syncMessage.value = hasNetwork() ? "Изменение сохранено, синхронизация в фоне" : "Изменение сохранено локально";
@@ -4170,7 +4240,11 @@ function advanceActivePointFromHome(): void {
   openStatusConfirm(activePoint.id);
 }
 
-function logout(): void {
+async function logout(): Promise<void> {
+  if (authToken.value) {
+    await tryUnsubscribeWebPush();
+  }
+  await clearLocalUserData();
   clearAuth();
 }
 
@@ -4472,6 +4546,14 @@ onUnmounted(() => {
                   v-else-if="(item.section === 'admin_routes' || item.section === 'driver_routes') && hasUnreadRouteChats"
                   class="notif-dot menu-dot success-dot"
                 />
+              </button>
+              <button
+                v-if="isDriver"
+                class="menu-item"
+                type="button"
+                @click="toggleGeoSharing"
+              >
+                {{ geoSharingOn ? "Выключить геопозицию" : "Включить геопозицию" }}
               </button>
               <button class="menu-item" type="button" :disabled="resettingConnections" @click="resetConnections">
                 {{ resettingConnections ? "Переподключение…" : "Переподключить" }}

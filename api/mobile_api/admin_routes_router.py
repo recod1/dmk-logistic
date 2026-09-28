@@ -297,6 +297,21 @@ def _active_points_by_route_id(db: Session, route_ids: list[str]) -> dict[str, P
     return {route_id: first_open.get(route_id) or last_by_route[route_id] for route_id in last_by_route}
 
 
+def _last_loading_by_route_id(db: Session, route_ids: list[str]) -> dict[str, Point]:
+    if not route_ids:
+        return {}
+    rows = db.execute(
+        select(RoutePoint.route_id, Point)
+        .join(Point, Point.id == RoutePoint.point_id)
+        .where(RoutePoint.route_id.in_(route_ids), Point.type_point == "loading")
+        .order_by(RoutePoint.route_id.asc(), RoutePoint.order_index.asc(), Point.id.asc())
+    ).all()
+    last_by_route: dict[str, Point] = {}
+    for route_id, point in rows:
+        last_by_route[route_id] = point
+    return last_by_route
+
+
 def _driver_out(user: User | None) -> dict | None:
     if user is None:
         return None
@@ -358,6 +373,14 @@ def _point_out(db: Session, point: Point, order_index: int) -> dict:
     }
 
 
+def _last_loading_fields(point: Point | None) -> tuple[str | None, str | None, str | None]:
+    if point is None:
+        return None, None, None
+    name = (point.point_name or "").strip() or None
+    date_value, time_value = planned_wall_fields(point.date_point, point.point_time)
+    return name, (date_value or None), (time_value or None)
+
+
 def _route_out(
     db: Session,
     route: Route,
@@ -365,6 +388,8 @@ def _route_out(
     *,
     active_point: Point | None = None,
     skip_active_point_lookup: bool = False,
+    last_loading_point: Point | None = None,
+    skip_last_loading_lookup: bool = False,
 ) -> dict:
     driver = db.get(User, route.assigned_user_id) if route.assigned_user_id else None
     creator = db.get(User, route.created_by_user_id) if route.created_by_user_id else None
@@ -374,10 +399,17 @@ def _route_out(
         points_count = db.scalar(select(func.count()).select_from(RoutePoint).where(RoutePoint.route_id == route.id)) or 0
     if include_points:
         current_point = _pick_active_point(points)
+        loading_points = [point for point in points if (point.type_point or "") == "loading"]
+        current_last_loading = loading_points[-1] if loading_points else None
     elif skip_active_point_lookup:
         current_point = active_point
+        current_last_loading = last_loading_point if skip_last_loading_lookup else _last_loading_by_route_id(db, [route.id]).get(route.id)
     else:
-        current_point = _pick_active_point(_route_points(db, route.id))
+        ordered = _route_points(db, route.id)
+        current_point = _pick_active_point(ordered)
+        loading_points = [point for point in ordered if (point.type_point or "") == "loading"]
+        current_last_loading = loading_points[-1] if loading_points else None
+    last_loading_name, last_loading_date, last_loading_time = _last_loading_fields(current_last_loading)
     place = (current_point.place_point or "").strip() if current_point else ""
     name = (current_point.point_name or "").strip() if current_point else ""
     active_date, active_time = planned_wall_fields(
@@ -413,6 +445,9 @@ def _route_out(
         "active_point_fact_time": (
             _format_datetime_ru(point_fact_datetime(current_point)) if current_point else None
         ),
+        "last_loading_point_name": last_loading_name,
+        "last_loading_date": last_loading_date,
+        "last_loading_time": last_loading_time,
         "points": [_point_out(db, point, idx) for idx, point in enumerate(points)] if include_points else None,
     }
 
@@ -792,7 +827,9 @@ def list_routes(
         query = query.where(Route.assigned_user_id.in_(driver_ids))
     total = int(db.scalar(select(func.count()).select_from(query.order_by(None).subquery())) or 0)
     routes = db.scalars(query.offset(offset).limit(limit)).all()
-    active_points = _active_points_by_route_id(db, [route.id for route in routes])
+    route_ids = [route.id for route in routes]
+    active_points = _active_points_by_route_id(db, route_ids)
+    last_loading_points = _last_loading_by_route_id(db, route_ids)
     return {
         "items": [
             _route_out(
@@ -801,6 +838,8 @@ def list_routes(
                 include_points=False,
                 active_point=active_points.get(route.id),
                 skip_active_point_lookup=True,
+                last_loading_point=last_loading_points.get(route.id),
+                skip_last_loading_lookup=True,
             )
             for route in routes
         ],

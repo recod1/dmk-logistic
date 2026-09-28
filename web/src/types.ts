@@ -230,6 +230,9 @@ export interface AdminRoute {
   active_point_date?: string | null;
   active_point_time?: string | null;
   active_point_fact_time?: string | null;
+  last_loading_point_name?: string | null;
+  last_loading_date?: string | null;
+  last_loading_time?: string | null;
   points: Array<
     {
       id: number;

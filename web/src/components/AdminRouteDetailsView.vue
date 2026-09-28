@@ -900,9 +900,6 @@ function removeRoute(): void {
                   <small v-if="editHint(point.manual_edits, 'departure_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'departure_coordinates') }}</small>
                 </td>
               </tr>
-              <tr v-if="stageDeltasForPoint(point).registration">
-                <td colspan="4" class="delta">{{ stageDeltasForPoint(point).registration }}</td>
-              </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("registration") }}</td>
                 <td>
@@ -917,9 +914,6 @@ function removeRoute(): void {
                   <MapsCoordsLink :lat="point.registration_coordinates?.lat" :lng="point.registration_coordinates?.lng" />
                   <small v-if="editHint(point.manual_edits, 'registration_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'registration_coordinates') }}</small>
                 </td>
-              </tr>
-              <tr v-if="stageDeltasForPoint(point).gate">
-                <td colspan="4" class="delta">{{ stageDeltasForPoint(point).gate }}</td>
               </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("load") }}</td>
@@ -936,9 +930,6 @@ function removeRoute(): void {
                   <small v-if="editHint(point.manual_edits, 'gate_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'gate_coordinates') }}</small>
                 </td>
               </tr>
-              <tr v-if="stageDeltasForPoint(point).docs">
-                <td colspan="4" class="delta">{{ stageDeltasForPoint(point).docs }}</td>
-              </tr>
               <tr>
                 <td>{{ normalizePointStageLabel("docs") }}</td>
                 <td>
@@ -953,6 +944,15 @@ function removeRoute(): void {
                   <MapsCoordsLink :lat="point.docs_coordinates?.lat" :lng="point.docs_coordinates?.lng" />
                   <small v-if="editHint(point.manual_edits, 'docs_coordinates')" class="edit-hint">{{ editHint(point.manual_edits, 'docs_coordinates') }}</small>
                 </td>
+              </tr>
+              <tr v-if="stageDeltasForPoint(point).registration">
+                <td colspan="4" class="delta">{{ stageDeltasForPoint(point).registration }}</td>
+              </tr>
+              <tr v-if="stageDeltasForPoint(point).gate">
+                <td colspan="4" class="delta">{{ stageDeltasForPoint(point).gate }}</td>
+              </tr>
+              <tr v-if="stageDeltasForPoint(point).docs">
+                <td colspan="4" class="delta">{{ stageDeltasForPoint(point).docs }}</td>
               </tr>
             </tbody>
           </table>

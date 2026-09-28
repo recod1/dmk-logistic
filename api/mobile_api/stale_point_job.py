@@ -12,17 +12,23 @@ from mobile_api.db import SessionLocal
 from mobile_api.models import Notification, Point, Route, RoutePoint
 from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.route_notification_logic import (
-    POINT_STATUS_LABELS_RU,
     _manager_ids,
     _point_event_time,
 )
 
 logger = logging.getLogger(__name__)
 
+COMPLETED_POINT_STATUSES = frozenset({"docs", "success"})
 STALE_STATUSES = frozenset({"process", "registration", "load"})
 STALE_AFTER = timedelta(minutes=60)
 DEDUP_WINDOW = timedelta(minutes=55)
 LOOP_INTERVAL_SEC = 300
+
+STALE_STATUS_LABELS_RU: dict[str, str] = {
+    "process": "Выехал на точку",
+    "registration": "Регистрация",
+    "load": "На воротах",
+}
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -67,17 +73,19 @@ def _recent_stale_exists(db: Session, *, route_id: str, point_id: int, status_va
     return any(_payload_status(row.payload_json) == status_value for row in rows)
 
 
-def _active_points(db: Session, route_id: str) -> list[Point]:
-    point_ids = list(db.scalars(select(RoutePoint.point_id).where(RoutePoint.route_id == route_id)).all())
-    if not point_ids:
-        return []
+def _ordered_points(db: Session, route_id: str) -> list[Point]:
     return list(
         db.scalars(
             select(Point)
-            .where(Point.id.in_(point_ids), Point.route_id == route_id)
-            .order_by(Point.order_index.asc(), Point.id.asc())
+            .join(RoutePoint, RoutePoint.point_id == Point.id)
+            .where(RoutePoint.route_id == route_id)
+            .order_by(RoutePoint.order_index.asc(), Point.id.asc())
         ).all()
     )
+
+
+def _active_open_point(points: list[Point]) -> Point | None:
+    return next((point for point in points if (point.status or "") not in COMPLETED_POINT_STATUSES), None)
 
 
 def scan_stale_points(db: Session, *, now: datetime | None = None) -> int:
@@ -88,20 +96,24 @@ def scan_stale_points(db: Session, *, now: datetime | None = None) -> int:
     sent = 0
     manager_ids = _manager_ids(db)
     for route in routes:
-        points = _active_points(db, route.id)
-        active = next((p for p in points if (p.status or "") in STALE_STATUSES), None)
-        if active is None:
+        points = _ordered_points(db, route.id)
+        active = _active_open_point(points)
+        if active is None or (active.status or "") not in STALE_STATUSES:
             continue
-        started = _aware(_point_event_time(active, active.status))
+        started = _aware(_point_event_time(active, active.status)) or _aware(active.updated_at) or _aware(
+            active.created_at
+        )
         if started is None or started > cutoff:
             continue
-        if _recent_stale_exists(db, route_id=route.id, point_id=int(active.id), status_value=active.status, since=dedup_since):
+        if _recent_stale_exists(
+            db, route_id=route.id, point_id=int(active.id), status_value=active.status, since=dedup_since
+        ):
             continue
         recipients = list(manager_ids)
         if route.created_by_user_id:
             recipients.append(int(route.created_by_user_id))
         skip = [int(route.assigned_user_id)] if route.assigned_user_id else []
-        status_label = POINT_STATUS_LABELS_RU.get(active.status, active.status)
+        status_label = STALE_STATUS_LABELS_RU.get(active.status, active.status)
         duration = _duration_label(now - started)
         point_type = "загрузка" if (active.type_point or "") == "loading" else "выгрузка"
         address = (active.place_point or "").strip() or (active.point_name or "").strip() or "точка"
@@ -111,7 +123,7 @@ def scan_stale_points(db: Session, *, now: datetime | None = None) -> int:
             event_type="point_status_stale",
             title="Водитель стоит на этапе",
             message=(
-                f"Рейс {route.id} · водитель стоит на {status_label} · {duration} · {point_type} · {address}"
+                f"Рейс {route.id} · водитель на статусе «{status_label}» · {duration} · {point_type} · {address}"
             ),
             route_id=route.id,
             point_id=int(active.id),

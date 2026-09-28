@@ -500,7 +500,8 @@ def _validate_document_ids_for_docs(
 ) -> str | None:
     ids = list(file_ids or [])
     if not ids:
-        return "Для статуса «Забрал документы» необходимо загрузить хотя бы одно фото"
+        # Photos may arrive later; time/odometer must still be stored.
+        return None
     if len(ids) > 32:
         return "Слишком много файлов документов"
     uniq = sorted({int(x) for x in ids})

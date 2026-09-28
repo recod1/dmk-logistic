@@ -1,6 +1,6 @@
 import { reportDebugError } from "./debugLog";
 import { noteApiReachable, setApiLoad } from "./connectionWatch";
-import { fetchWithHardTimeout, withRetryBust } from "./hardFetch";
+import { fetchWithHardTimeout, mergeAbortSignals, withRetryBust } from "./hardFetch";
 import type {
   ActiveRouteResponse,
   AdminRoute,

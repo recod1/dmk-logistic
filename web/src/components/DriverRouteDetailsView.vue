@@ -265,9 +265,6 @@ function showRevert(pointId: number): boolean {
                       <MapsCoordsLink :lat="point.departure_coordinates?.lat" :lng="point.departure_coordinates?.lng" />
                     </td>
                   </tr>
-                  <tr v-if="stageDeltasForPoint(point).registration">
-                    <td colspan="4" class="delta">{{ stageDeltasForPoint(point).registration }}</td>
-                  </tr>
                   <tr>
                     <td>{{ stageLabel("registration") }}</td>
                     <td>{{ point.registration_time || point.time_registration || "—" }}{{ timeSourceLabel(point.registration_time_source) }}</td>
@@ -275,9 +272,6 @@ function showRevert(pointId: number): boolean {
                     <td>
                       <MapsCoordsLink :lat="point.registration_coordinates?.lat" :lng="point.registration_coordinates?.lng" />
                     </td>
-                  </tr>
-                  <tr v-if="stageDeltasForPoint(point).gate">
-                    <td colspan="4" class="delta">{{ stageDeltasForPoint(point).gate }}</td>
                   </tr>
                   <tr>
                     <td>{{ stageLabel("load") }}</td>
@@ -287,9 +281,6 @@ function showRevert(pointId: number): boolean {
                       <MapsCoordsLink :lat="point.gate_coordinates?.lat" :lng="point.gate_coordinates?.lng" />
                     </td>
                   </tr>
-                  <tr v-if="stageDeltasForPoint(point).docs">
-                    <td colspan="4" class="delta">{{ stageDeltasForPoint(point).docs }}</td>
-                  </tr>
                   <tr>
                     <td>{{ stageLabel("docs") }}</td>
                     <td>{{ point.docs_time || point.time_docs || "—" }}{{ timeSourceLabel(point.docs_time_source) }}</td>
@@ -297,6 +288,15 @@ function showRevert(pointId: number): boolean {
                     <td>
                       <MapsCoordsLink :lat="point.docs_coordinates?.lat" :lng="point.docs_coordinates?.lng" />
                     </td>
+                  </tr>
+                  <tr v-if="stageDeltasForPoint(point).registration">
+                    <td colspan="4" class="delta">{{ stageDeltasForPoint(point).registration }}</td>
+                  </tr>
+                  <tr v-if="stageDeltasForPoint(point).gate">
+                    <td colspan="4" class="delta">{{ stageDeltasForPoint(point).gate }}</td>
+                  </tr>
+                  <tr v-if="stageDeltasForPoint(point).docs">
+                    <td colspan="4" class="delta">{{ stageDeltasForPoint(point).docs }}</td>
                   </tr>
                 </tbody>
               </table>

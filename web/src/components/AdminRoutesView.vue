@@ -2,6 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref } from "vue";
 
 import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel } from "../status";
+import { plannedDateDisplay, plannedTimeDisplay } from "../plannedTime";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, RouteWorkflowStatus } from "../types";
 
 type RouteSearchFilters = {
@@ -97,7 +98,7 @@ const filteredTitle = computed(() => {
 const canLoadMore = computed(() => (props.total ?? props.routes.length) > props.routes.length);
 const isNewTab = computed(() => filters.status === "new");
 const isProcessTab = computed(() => filters.status === "process");
-const tableColspan = computed(() => 4 + (isNewTab.value ? 1 : 0) + (isProcessTab.value ? 1 : 0));
+const tableColspan = computed(() => 6 + (isNewTab.value ? 1 : 0) + (isProcessTab.value ? 1 : 0));
 
 function unreadCount(routeId: string): number {
   return props.unreadByRoute?.[routeId] ?? 0;
@@ -160,6 +161,41 @@ function routeListPointName(route: AdminRoute): string {
 function routeListPointSchedule(route: AdminRoute): string {
   const current = currentListPoint(route);
   return formatPointSchedule(current?.type, current?.date, current?.time);
+}
+
+function routeListLastLoad(route: AdminRoute): string {
+  const when = [plannedDateDisplay(route.last_loading_date, route.last_loading_time), plannedTimeDisplay(route.last_loading_date, route.last_loading_time)]
+    .filter(Boolean)
+    .join(" ");
+  if (when) {
+    return when;
+  }
+  if (route.points?.length) {
+    const loading = [...route.points].filter((point) => point.type_point === "loading");
+    const last = loading[loading.length - 1];
+    if (last) {
+      return [plannedDateDisplay(last.date_point, last.point_time), plannedTimeDisplay(last.date_point, last.point_time)]
+        .filter(Boolean)
+        .join(" ");
+    }
+  }
+  return "";
+}
+
+function routeListOrg(route: AdminRoute): string {
+  const fromApi = (route.last_loading_point_name || "").trim();
+  if (fromApi) {
+    return fromApi;
+  }
+  if (route.points?.length) {
+    const loading = [...route.points].filter((point) => point.type_point === "loading");
+    const last = loading[loading.length - 1];
+    const name = (last?.point_name || "").trim();
+    if (name) {
+      return name;
+    }
+  }
+  return (currentListPoint(route)?.name || "").trim();
 }
 
 function phoneReceiptLabel(route: AdminRoute): string {
@@ -507,6 +543,8 @@ onMounted(() => {
             ><span class="lbl">Водитель:</span> {{ r.driver?.full_name || r.driver?.login || "—" }}</span
           >
           <span class="card-line"><span class="lbl">ТС:</span> {{ r.number_auto || "—" }}</span>
+          <span class="card-line"><span class="lbl">Организация:</span> {{ routeListOrg(r) || "—" }}</span>
+          <span class="card-line"><span class="lbl">Загрузка:</span> {{ routeListLastLoad(r) || "—" }}</span>
           <span class="card-line"
             ><span class="lbl">Статус:</span> {{ routeListStatus(r) }}</span
           >
@@ -534,6 +572,8 @@ onMounted(() => {
               <th>№ рейса</th>
               <th>Водитель</th>
               <th>ТС</th>
+              <th>Организация</th>
+              <th>Дата загрузки</th>
               <th>Статус</th>
               <th v-if="isProcessTab">Точка</th>
               <th v-if="isNewTab">На телефоне</th>
@@ -549,6 +589,8 @@ onMounted(() => {
               </td>
               <td>{{ route.driver?.full_name || route.driver?.login || "—" }}</td>
               <td>{{ route.number_auto || "—" }}</td>
+              <td>{{ routeListOrg(route) || "—" }}</td>
+              <td>{{ routeListLastLoad(route) || "—" }}</td>
               <td>{{ routeListStatus(route) }}</td>
               <td v-if="isProcessTab">
                 <div>{{ routeListPointName(route) }}</div>
@@ -877,7 +919,7 @@ onMounted(() => {
 }
 table {
   width: 100%;
-  min-width: 520px;
+  min-width: 720px;
   border-collapse: collapse;
 }
 th,

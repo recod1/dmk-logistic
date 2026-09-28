@@ -12,7 +12,7 @@ export function swallowAbandoned(promise: Promise<unknown>): void {
   });
 }
 
-function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): AbortSignal | undefined {
+export function mergeAbortSignals(signals: Array<AbortSignal | null | undefined>): AbortSignal | undefined {
   const real = signals.filter((item): item is AbortSignal => Boolean(item));
   if (!real.length) {
     return undefined;

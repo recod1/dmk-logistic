@@ -172,6 +172,10 @@ def push_subscribe(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail="keys must include p256dh and auth",
         )
+    db.query(WebPushSubscription).filter(
+        WebPushSubscription.endpoint == payload.endpoint,
+        WebPushSubscription.user_id != current_user.id,
+    ).delete(synchronize_session=False)
     existing = db.scalar(
         select(WebPushSubscription).where(
             WebPushSubscription.user_id == current_user.id,
