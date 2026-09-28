@@ -217,6 +217,7 @@ const routesLoading = ref(false);
 const routesError = ref("");
 const routeFilters = ref<RouteFilters>({ status: "process" });
 const appScrollEl = ref<HTMLElement | null>(null);
+const topbarEl = ref<HTMLElement | null>(null);
 const keyboardOpen = ref(false);
 
 const notifications = ref<NotificationDto[]>([]);
@@ -254,6 +255,7 @@ const adminDebugOpen = ref(false);
 let docsUploadAbort: AbortController | null = null;
 let syncGeneration = 0;
 let syncWatchdogTimer: number | null = null;
+let topbarObserver: ResizeObserver | null = null;
 
 let syncIntervalId: number | null = null;
 let notificationsWs: WebSocket | null = null;
@@ -4234,12 +4236,20 @@ function isEditableTarget(el: EventTarget | null): el is HTMLElement {
   return el.isContentEditable;
 }
 
+function syncTopbarHeight(): void {
+  const height = Math.ceil(topbarEl.value?.getBoundingClientRect().height ?? 0);
+  if (height > 0) {
+    document.documentElement.style.setProperty("--topbar-h", `${height}px`);
+  }
+}
+
 function updateViewportVars(): void {
   const vv = window.visualViewport;
   const height = Math.round(vv?.height ?? window.innerHeight);
   const offset = Math.round(vv?.offsetTop ?? 0);
   document.documentElement.style.setProperty("--vv-height", `${height}px`);
   document.documentElement.style.setProperty("--vv-offset", `${offset}px`);
+  syncTopbarHeight();
   const focused = isEditableTarget(document.activeElement);
   const drop = window.innerHeight - height;
   const shortViewport = height < window.screen.height * 0.64;
@@ -4342,6 +4352,11 @@ onMounted(async () => {
   document.addEventListener("focusin", onFocusIn);
   document.addEventListener("focusout", onIosInputBlur);
   syncChatViewportLock();
+  syncTopbarHeight();
+  if (topbarEl.value && typeof ResizeObserver !== "undefined") {
+    topbarObserver = new ResizeObserver(() => syncTopbarHeight());
+    topbarObserver.observe(topbarEl.value);
+  }
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.addEventListener("message", onServiceWorkerMessage);
   }
@@ -4354,6 +4369,8 @@ onUnmounted(() => {
   if (syncWatchdogTimer !== null) {
     window.clearTimeout(syncWatchdogTimer);
   }
+  topbarObserver?.disconnect();
+  topbarObserver = null;
   stopConnectionWatch();
   stopWsWatchdog();
   stopBackgroundSyncLoop();
@@ -4398,7 +4415,7 @@ onUnmounted(() => {
       'container--chat': isChatSection
     }"
   >
-    <header class="topbar">
+    <header ref="topbarEl" class="topbar">
       <div class="topbar-side">
         <button v-if="isAuthed" class="icon-btn bell-btn" type="button" aria-label="Уведомления" @click="openNotifications">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">

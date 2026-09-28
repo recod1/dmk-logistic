@@ -158,19 +158,18 @@ function formatExtra(item: NotificationDto): string {
 <style scoped>
 .notifications-wrap {
   display: grid;
-  gap: 0.8rem;
+  gap: 0.55rem;
   width: 100%;
   max-width: 720px;
   min-width: 0;
   margin: 0 auto;
-  overflow-x: hidden;
 }
 .head-sticky {
   position: sticky;
-  top: var(--topbar-h);
+  top: var(--topbar-h, 0px);
   z-index: 20;
-  margin: 0 -0.2rem;
-  padding: 0.35rem 0.2rem 0.45rem;
+  margin: 0;
+  padding: 0.2rem 0 0.4rem;
   background: rgba(3, 7, 18, 0.96);
   backdrop-filter: blur(12px);
 }
@@ -187,6 +186,15 @@ function formatExtra(item: NotificationDto): string {
   font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
+}
+@media (max-width: 760px) {
+  .page-heading {
+    display: none;
+  }
+  .head-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 .head-actions {
   display: flex;
@@ -205,24 +213,9 @@ function formatExtra(item: NotificationDto): string {
   gap: 0.7rem;
   min-width: 0;
   padding-top: 0.15rem;
-  scroll-margin-top: var(--notif-head-h, 0px);
 }
 .item-card:first-child {
-  scroll-margin-top: calc(var(--topbar-h) + var(--notif-head-h, 0px));
-}
-@media (max-width: 400px) {
-  .page-heading {
-    display: none;
-  }
-  .head-row {
-    flex-direction: column;
-    align-items: stretch;
-  }
-  .head-actions {
-    display: flex;
-    flex-wrap: wrap;
-    overflow: visible;
-  }
+  scroll-margin-top: calc(var(--topbar-h, 0px) + var(--notif-head-h, 0px));
 }
 .chat-kind {
   flex: 0 0 auto;
