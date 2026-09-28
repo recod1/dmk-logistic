@@ -10,3 +10,8 @@ web/.vite/
 backups/
 db/self
 
+# Cloud Agent dev environment
+.venv/
+.cursor/run/
+data/
+
