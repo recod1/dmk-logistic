@@ -65,6 +65,7 @@ defineProps<{
   width: 22px;
   height: 22px;
   flex-shrink: 0;
+  overflow: visible;
 }
 .icon-wrap svg {
   width: 22px;

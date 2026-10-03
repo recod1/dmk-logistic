@@ -457,6 +457,12 @@ async function refreshWebPushSubscriptionState(): Promise<void> {
   }
 }
 
+function appIconBadgeCount(): number {
+  const notifications = Math.max(0, unreadNotificationsCount.value);
+  const chats = hasUnreadChatsNav.value ? 1 : 0;
+  return notifications + chats;
+}
+
 function updateUiNotificationIndicators(): void {
   if (typeof document !== "undefined") {
     const base = `ДМК · ${currentPageTitle.value}`;
@@ -464,13 +470,12 @@ function updateUiNotificationIndicators(): void {
     document.title = unread > 0 ? `(${unread}) ${base}` : base;
   }
 
-  const unread = unreadNotificationsCount.value;
+  const unread = appIconBadgeCount();
   const nav = navigator as Navigator & {
     setAppBadge?: (count?: number) => Promise<void>;
     clearAppBadge?: () => Promise<void>;
   };
-  // iOS Safari/PWA can expose setAppBadge without clearAppBadge (version-dependent).
-  // Prefer clearAppBadge when available; otherwise fall back to setAppBadge(0).
+  // iOS Safari/PWA and Android Chrome expose Badging API for installed apps.
   if (typeof nav?.setAppBadge === "function") {
     if (unread > 0) {
       void nav.setAppBadge(unread);
@@ -486,6 +491,7 @@ watchEffect(() => {
   // Keep tab title + badge in sync while app runs in browser / installed PWA.
   void currentPageTitle.value;
   void unreadNotificationsCount.value;
+  void hasUnreadChatsNav.value;
   updateUiNotificationIndicators();
 });
 
@@ -1251,9 +1257,56 @@ function showBrowserPushNotification(item: NotificationDto): void {
   }
 }
 
+function applyChatNavFromNotification(item: NotificationDto): void {
+  const p = notificationPayloadRecord(item);
+  const roomId = notificationPayloadNumber(p, "room_id");
+  if (roomId != null) {
+    if (currentSection.value === "chat_room" && chatRoomId.value === roomId) {
+      return;
+    }
+    const cur = roomUnreadBump.value[roomId] ?? 0;
+    roomUnreadBump.value = { ...roomUnreadBump.value, [roomId]: cur + 1 };
+    return;
+  }
+  const routeId =
+    item.route_id ||
+    (p && typeof p.route_id === "string" && p.route_id.trim() ? p.route_id.trim() : "");
+  if (!routeId) {
+    return;
+  }
+  if (currentSection.value === "chat" && chatRouteId.value === routeId) {
+    return;
+  }
+  const current = chatUnreadByRoute.value[routeId] ?? 0;
+  chatUnreadByRoute.value = { ...chatUnreadByRoute.value, [routeId]: current + 1 };
+}
+
+async function refreshChatNavUnread(): Promise<void> {
+  if (!authToken.value || !hasNetwork()) {
+    return;
+  }
+  try {
+    await refreshRouteChatUnread();
+  } catch {
+    // ignore
+  }
+  try {
+    chatsRooms.value = await listChatRooms(authToken.value);
+    roomUnreadBump.value = {};
+    if (isLogistic.value) {
+      logisticDriverChatRooms.value = await listLogisticDriverChatRooms(authToken.value);
+    }
+    if (isAccountant.value) {
+      accountantDriverChatRooms.value = await listAccountantDriverChatRooms(authToken.value);
+    }
+  } catch {
+    // keep last known unread indicators
+  }
+}
+
 function handleIncomingNotification(
   item: NotificationDto,
-  options: { playEffects?: boolean; syncDriverState?: boolean } = {}
+  options: { playEffects?: boolean; syncDriverState?: boolean; bumpChatNav?: boolean } = {}
 ): void {
   const playEffects = options.playEffects ?? true;
   const syncDriverState = options.syncDriverState ?? true;
@@ -1268,6 +1321,9 @@ function handleIncomingNotification(
     }
     if (!item.is_read) {
       unreadNotificationsCount.value += 1;
+    }
+    if ((options.bumpChatNav ?? playEffects) && !item.is_read && item.event_type === "chat_message") {
+      applyChatNavFromNotification(item);
     }
   }
 
@@ -1351,7 +1407,8 @@ function forceReconnectRealtimeSockets(): void {
     }
     setNotificationsWsState("closed");
     connectNotificationsSocket();
-  } else if (chatWs?.readyState !== WebSocket.OPEN) {
+  }
+  if (chatWs?.readyState !== WebSocket.OPEN) {
     connectChatSocket();
   }
 }
@@ -1941,6 +1998,7 @@ function onForegroundResume(): void {
   void refreshNotifications();
   void flushPendingNotificationReads();
   void refreshRouteChatUnread();
+  void refreshChatNavUnread();
   void ensureWebPushSubscription();
   if (isDriver.value) {
     void hydrateDriverRoutesFromCache();
@@ -2987,9 +3045,10 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
   closeNotificationsSocket();
   closeChatSocket();
   allowRealtimeSockets();
-  connectNotificationsSocket();
-  startNotificationsPolling();
-  try {
+    connectNotificationsSocket();
+    connectChatSocket();
+    startNotificationsPolling();
+    try {
     if (isAdminRole(user.role_code)) {
       resetToSection("admin_routes");
       await refreshAdminUsers();
@@ -3013,6 +3072,7 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
       void ensureWebPushSubscription();
     }
     await refreshNotifications();
+    void refreshChatNavUnread();
     await refreshLogisticsContacts();
   } finally {
     if (!realtimeSocketsAllowed) {
@@ -3020,6 +3080,9 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
     }
     if (!wsBusy(notificationsWs)) {
       connectNotificationsSocket();
+    }
+    if (!wsBusy(chatWs)) {
+      connectChatSocket();
     }
     startNotificationsPolling();
   }

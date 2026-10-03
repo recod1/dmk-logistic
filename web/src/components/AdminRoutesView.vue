@@ -63,7 +63,8 @@ const emit = defineEmits<{
   loadMore: [];
 }>();
 
-const statusTabs: Array<{ label: string; value: RouteWorkflowStatus }> = [
+const statusTabs: Array<{ label: string; value: RouteWorkflowStatus | "" }> = [
+  { label: "Все", value: "" },
   { label: "Не приняты", value: "new" },
   { label: "В процессе", value: "process" },
   { label: "Завершены", value: "success" },
@@ -98,7 +99,9 @@ const filteredTitle = computed(() => {
 const canLoadMore = computed(() => (props.total ?? props.routes.length) > props.routes.length);
 const isNewTab = computed(() => filters.status === "new");
 const isProcessTab = computed(() => filters.status === "process");
-const tableColspan = computed(() => 6 + (isNewTab.value ? 1 : 0) + (isProcessTab.value ? 1 : 0));
+const isAllTab = computed(() => !filters.status);
+const showPointCol = computed(() => isProcessTab.value || isAllTab.value);
+const tableColspan = computed(() => 6 + (isNewTab.value ? 1 : 0) + (showPointCol.value ? 1 : 0));
 
 function unreadCount(routeId: string): number {
   return props.unreadByRoute?.[routeId] ?? 0;
@@ -553,10 +556,10 @@ onMounted(() => {
           <span class="card-line"
             ><span class="lbl">Статус:</span> {{ routeListStatus(r) }}</span
           >
-          <span v-if="isProcessTab" class="card-line"
+          <span v-if="showPointCol" class="card-line"
             ><span class="lbl">Точка:</span> {{ routeListPointName(r) }}</span
           >
-          <span v-if="isProcessTab && routeListPointSchedule(r)" class="card-line"
+          <span v-if="showPointCol && routeListPointSchedule(r)" class="card-line"
             ><span class="lbl">План:</span> {{ routeListPointSchedule(r) }}</span
           >
           <span v-if="isNewTab" class="card-line"
@@ -580,7 +583,7 @@ onMounted(() => {
               <th>Организация</th>
               <th>Дата загрузки</th>
               <th>Статус</th>
-              <th v-if="isProcessTab">Точка</th>
+              <th v-if="showPointCol">Точка</th>
               <th v-if="isNewTab">На телефоне</th>
             </tr>
           </thead>
@@ -597,7 +600,7 @@ onMounted(() => {
               <td>{{ routeListOrg(route) || "—" }}</td>
               <td>{{ routeListLastLoad(route) || "—" }}</td>
               <td>{{ routeListStatus(route) }}</td>
-              <td v-if="isProcessTab">
+              <td v-if="showPointCol">
                 <div>{{ routeListPointName(route) }}</div>
                 <div v-if="routeListPointSchedule(route)" class="point-when">{{ routeListPointSchedule(route) }}</div>
               </td>

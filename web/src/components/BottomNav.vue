@@ -59,7 +59,7 @@ const emit = defineEmits<{
     box-sizing: border-box;
     height: auto;
     max-height: calc(4.25rem + env(safe-area-inset-bottom, 0px));
-    overflow: hidden;
+    overflow: visible;
     padding: 0.22rem 0.35rem calc(0.22rem + env(safe-area-inset-bottom, 0px));
     background: #030712;
     border-top: 1px solid var(--border);

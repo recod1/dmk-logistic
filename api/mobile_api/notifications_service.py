@@ -7,7 +7,7 @@ from collections.abc import Iterable
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mobile_api.models import Notification, Point, Route, User
@@ -107,6 +107,12 @@ def create_notification_for_users(
         row: Notification = created["row"]
         subs = subs_by_user.get(created["user_id"], [])
         if subs:
+            unread = db.scalar(
+                select(func.count())
+                .select_from(Notification)
+                .where(Notification.user_id == created["user_id"], Notification.is_read.is_(False))
+            )
+            badge = int(unread or 0)
             send_web_push_to_users(
                 subscriptions=subs,
                 title=title,
@@ -116,6 +122,8 @@ def create_notification_for_users(
                     "event_type": event_type,
                     "route_id": route_id,
                     "sync": "driver_routes",
+                    "badge": badge,
+                    "badgeCount": badge,
                 },
             )
 

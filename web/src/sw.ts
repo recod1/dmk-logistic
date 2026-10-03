@@ -65,7 +65,9 @@ self.addEventListener("push", (event: PushEvent) => {
   };
   if (typeof nav?.setAppBadge === "function") {
     try {
-      tasks.push(badgeCount && badgeCount > 0 ? nav.setAppBadge(badgeCount) : nav.setAppBadge());
+      tasks.push(
+        badgeCount != null && badgeCount > 0 ? nav.setAppBadge(badgeCount) : nav.setAppBadge()
+      );
     } catch {
       // ignore
     }
@@ -85,10 +87,6 @@ self.addEventListener("push", (event: PushEvent) => {
 
 self.addEventListener("notificationclick", (event: NotificationEvent) => {
   event.notification.close();
-  const nav = self.navigator as Navigator & {
-    clearAppBadge?: () => Promise<void>;
-    setAppBadge?: (count?: number) => Promise<void>;
-  };
   const openApp = self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clientsArr) => {
     const existing = clientsArr.find((client) => "focus" in client) as WindowClient | undefined;
     if (existing) {
@@ -96,13 +94,7 @@ self.addEventListener("notificationclick", (event: NotificationEvent) => {
     }
     return self.clients.openWindow("/");
   });
-  const clearBadge =
-    typeof nav?.clearAppBadge === "function"
-      ? nav.clearAppBadge()
-      : typeof nav?.setAppBadge === "function"
-        ? nav.setAppBadge(0)
-        : Promise.resolve();
-  event.waitUntil(Promise.all([clearBadge, openApp, prefetchDriverRoutesInBackground()]));
+  event.waitUntil(Promise.all([openApp, prefetchDriverRoutesInBackground()]));
 });
 
 self.addEventListener("sync", (event) => {
