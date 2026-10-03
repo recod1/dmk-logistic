@@ -3,7 +3,7 @@ import { computed } from "vue";
 
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
-import { routeAnalyticsForPoints } from "../routeAnalytics";
+import { routeAnalyticsView } from "../routeAnalytics";
 import { stageDeltasForPoint } from "../stageDeltas";
 import {
   canRevertPointStatus,
@@ -36,7 +36,7 @@ const firstIncompletePoint = computed(
   () => (props.route.points || []).find((point) => !isPointDone(point.status)) ?? null
 );
 
-const routeAnalytics = computed(() => routeAnalyticsForPoints(props.route.points));
+const routeAnalytics = computed(() => routeAnalyticsView(props.route.points));
 
 const isAcceptedCurrentRoute = computed(
   () => props.route.status === "process" && props.route.id === props.activeRouteId
@@ -174,13 +174,17 @@ function showRevert(pointId: number): boolean {
           <span class="k">Статус рейса</span>
           <span class="v">{{ routeStatusLabel(route.status) }}</span>
         </div>
-        <div v-if="routeAnalytics.total" class="kv">
-          <span class="k">Всего по рейсу</span>
-          <span class="v">{{ routeAnalytics.total }}</span>
+        <div class="kv">
+          <span class="k">Общее время</span>
+          <span class="v">{{ routeAnalytics.totalTime }}</span>
         </div>
-        <div v-if="routeAnalytics.work" class="kv">
+        <div class="kv">
+          <span class="k">Общий пробег</span>
+          <span class="v">{{ routeAnalytics.totalKm }}</span>
+        </div>
+        <div class="kv">
           <span class="k">От регистрации до документов</span>
-          <span class="v">{{ routeAnalytics.work }}</span>
+          <span class="v">{{ routeAnalytics.workTime }} · {{ routeAnalytics.workKm }}</span>
         </div>
         <div class="kv">
           <span class="k">ТС</span>

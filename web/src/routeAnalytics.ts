@@ -1,9 +1,10 @@
-import { formatStageDelta, parseOdometerKm, type StageDeltaInput } from "./stageDeltas";
+import { formatDuration, parseOdometerKm, parseStageTime } from "./stageDeltas";
 
 export type RouteAnalyticsPoint = {
   type_point?: string | null;
   departure_time?: string | null;
   time_accepted?: string | null;
+  time_departure?: string | null;
   departure_odometer?: string | null;
   registration_time?: string | null;
   time_registration?: string | null;
@@ -14,65 +15,132 @@ export type RouteAnalyticsPoint = {
   docs_time?: string | null;
   time_docs?: string | null;
   docs_odometer?: string | null;
+  odometer?: string | null;
 };
 
-export type RouteAnalytics = {
-  total: string | null;
-  work: string | null;
+export type RouteAnalyticsPayload = {
+  total_minutes?: number | null;
+  total_km?: number | null;
+  work_minutes?: number | null;
+  work_km?: number | null;
 };
 
-function firstFilled(point: RouteAnalyticsPoint): StageDeltaInput {
-  const rows: StageDeltaInput[] = [
-    { time: point.departure_time || point.time_accepted, odometer: point.departure_odometer },
-    { time: point.registration_time || point.time_registration, odometer: point.registration_odometer },
-    { time: point.gate_time || point.time_put_on_gate, odometer: point.gate_odometer },
-    { time: point.docs_time || point.time_docs, odometer: point.docs_odometer }
+export type RouteAnalyticsView = {
+  totalTime: string;
+  totalKm: string;
+  workTime: string;
+  workKm: string;
+};
+
+type Stage = { time: Date | null; km: number | null };
+
+const EMPTY = "нет данных";
+
+function stagesOf(point: RouteAnalyticsPoint): Stage[] {
+  return [
+    {
+      time: parseStageTime(point.departure_time || point.time_accepted || point.time_departure),
+      km: parseOdometerKm(point.departure_odometer)
+    },
+    {
+      time: parseStageTime(point.registration_time || point.time_registration),
+      km: parseOdometerKm(point.registration_odometer)
+    },
+    {
+      time: parseStageTime(point.gate_time || point.time_put_on_gate),
+      km: parseOdometerKm(point.gate_odometer)
+    },
+    {
+      time: parseStageTime(point.docs_time || point.time_docs),
+      km: parseOdometerKm(point.docs_odometer || point.odometer)
+    }
   ];
-  return rows.find((row) => Boolean((row.time || "").trim() || (row.odometer || "").trim())) || {};
 }
 
-function docsStage(point: RouteAnalyticsPoint): StageDeltaInput {
-  return { time: point.docs_time || point.time_docs, odometer: point.docs_odometer };
+function firstFilled(point: RouteAnalyticsPoint | undefined): Stage {
+  if (!point) return { time: null, km: null };
+  return stagesOf(point).find((row) => row.time || row.km != null) || { time: null, km: null };
 }
 
-function registrationStage(point: RouteAnalyticsPoint): StageDeltaInput {
-  return { time: point.registration_time || point.time_registration, odometer: point.registration_odometer };
+function lastFilled(point: RouteAnalyticsPoint | undefined): Stage {
+  if (!point) return { time: null, km: null };
+  return [...stagesOf(point)].reverse().find((row) => row.time || row.km != null) || { time: null, km: null };
 }
 
-function lastFilled(point: RouteAnalyticsPoint): StageDeltaInput {
-  const rows: StageDeltaInput[] = [
-    { time: point.docs_time || point.time_docs, odometer: point.docs_odometer },
-    { time: point.gate_time || point.time_put_on_gate, odometer: point.gate_odometer },
-    { time: point.registration_time || point.time_registration, odometer: point.registration_odometer },
-    { time: point.departure_time || point.time_accepted, odometer: point.departure_odometer }
-  ];
-  return rows.find((row) => Boolean((row.time || "").trim() || (row.odometer || "").trim())) || {};
+function registrationOf(point: RouteAnalyticsPoint | undefined): Stage {
+  if (!point) return { time: null, km: null };
+  return stagesOf(point)[1]!;
 }
 
-export function routeAnalyticsForPoints(points: RouteAnalyticsPoint[] | null | undefined): RouteAnalytics {
+function docsOf(point: RouteAnalyticsPoint | undefined): Stage {
+  if (!point) return { time: null, km: null };
+  return stagesOf(point)[3]!;
+}
+
+function spanTime(start: Stage, end: Stage): string {
+  if (!start.time || !end.time) return EMPTY;
+  const minutes = (end.time.getTime() - start.time.getTime()) / 60000;
+  return formatDuration(minutes) || EMPTY;
+}
+
+function spanKm(start: Stage, end: Stage): string {
+  if (start.km == null || end.km == null) return EMPTY;
+  const km = Math.round(end.km - start.km);
+  if (!Number.isFinite(km)) return EMPTY;
+  return km < 0 ? "—" : `${km} км`;
+}
+
+function fromPayload(payload: RouteAnalyticsPayload): RouteAnalyticsView {
+  return {
+    totalTime: payload.total_minutes != null ? formatDuration(payload.total_minutes) || EMPTY : EMPTY,
+    totalKm: payload.total_km != null ? `${payload.total_km} км` : EMPTY,
+    workTime: payload.work_minutes != null ? formatDuration(payload.work_minutes) || EMPTY : EMPTY,
+    workKm: payload.work_km != null ? `${payload.work_km} км` : EMPTY
+  };
+}
+
+function fromPoints(points: RouteAnalyticsPoint[] | null | undefined): RouteAnalyticsView {
   const list = Array.isArray(points) ? points : [];
-  if (!list.length) {
-    return { total: null, work: null };
+  const first = list[0];
+  const last = list[list.length - 1];
+  let end = lastFilled(last);
+  if (!end.time && end.km == null) {
+    for (let i = list.length - 1; i >= 0; i -= 1) {
+      const candidate = lastFilled(list[i]);
+      if (candidate.time || candidate.km != null) {
+        end = candidate;
+        break;
+      }
+    }
   }
-  const first = list[0]!;
-  const last = list[list.length - 1]!;
-  const firstLoading = list.find((point) => (point.type_point || "").trim() === "loading") || first;
-  const total = formatStageDelta(firstFilled(first), lastFilled(last), "начало рейса", "конец рейса");
-  const work = formatStageDelta(
-    registrationStage(firstLoading),
-    docsStage(last),
-    "регистрация на первой загрузке",
-    "документы на последней точке"
-  );
-  return { total, work };
+  const start = firstFilled(first);
+  const workStart = registrationOf(first);
+  const workEnd = docsOf(last);
+  return {
+    totalTime: spanTime(start, end),
+    totalKm: spanKm(start, end),
+    workTime: spanTime(workStart, workEnd),
+    workKm: spanKm(workStart, workEnd)
+  };
 }
 
-export function routeMileageKm(points: RouteAnalyticsPoint[] | null | undefined): number | null {
-  const list = Array.isArray(points) ? points : [];
-  if (!list.length) return null;
-  const start = parseOdometerKm(firstFilled(list[0]!).odometer);
-  const end = parseOdometerKm(lastFilled(list[list.length - 1]!).odometer);
-  if (start == null || end == null) return null;
-  const km = Math.round(end - start);
-  return Number.isFinite(km) ? km : null;
+function prefer(server: string, local: string): string {
+  return server !== EMPTY ? server : local;
+}
+
+export function routeAnalyticsView(
+  points: RouteAnalyticsPoint[] | null | undefined,
+  payload?: RouteAnalyticsPayload | null
+): RouteAnalyticsView {
+  const local = fromPoints(points);
+  if (!payload) {
+    return local;
+  }
+  const server = fromPayload(payload);
+  return {
+    totalTime: prefer(server.totalTime, local.totalTime),
+    totalKm: prefer(server.totalKm, local.totalKm),
+    workTime: prefer(server.workTime, local.workTime),
+    workKm: prefer(server.workKm, local.workKm)
+  };
 }

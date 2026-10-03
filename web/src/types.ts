@@ -233,6 +233,12 @@ export interface AdminRoute {
   last_loading_point_name?: string | null;
   last_loading_date?: string | null;
   last_loading_time?: string | null;
+  analytics?: {
+    total_minutes?: number | null;
+    total_km?: number | null;
+    work_minutes?: number | null;
+    work_km?: number | null;
+  } | null;
   points: Array<
     {
       id: number;

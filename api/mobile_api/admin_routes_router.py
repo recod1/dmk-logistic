@@ -3,6 +3,7 @@ from __future__ import annotations
 from urllib.parse import unquote
 from datetime import datetime, timezone
 import json
+import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -373,6 +374,86 @@ def _point_out(db: Session, point: Point, order_index: int) -> dict:
     }
 
 
+def _aware(dt: datetime | None) -> datetime | None:
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
+
+
+def _odo_km(raw: str | None) -> float | None:
+    text = (raw or "").strip()
+    if not text:
+        return None
+    match = re.search(r"(-?\d+(?:[.,]\d+)?)", text.replace("\u00a0", " "))
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(",", "."))
+    except ValueError:
+        return None
+
+
+def _point_stages(point: Point) -> list[tuple[datetime | None, float | None]]:
+    return [
+        (_aware(point.departure_time or point.time_accepted or point.time_departure), _odo_km(point.departure_odometer)),
+        (_aware(point.registration_time or point.time_registration), _odo_km(point.registration_odometer)),
+        (_aware(point.gate_time or point.time_put_on_gate), _odo_km(point.gate_odometer)),
+        (_aware(point.docs_time or point.time_docs), _odo_km(point.docs_odometer or point.odometer)),
+    ]
+
+
+def _first_filled_stage(point: Point) -> tuple[datetime | None, float | None]:
+    for time, km in _point_stages(point):
+        if time is not None or km is not None:
+            return time, km
+    return None, None
+
+
+def _last_filled_stage(point: Point) -> tuple[datetime | None, float | None]:
+    for time, km in reversed(_point_stages(point)):
+        if time is not None or km is not None:
+            return time, km
+    return None, None
+
+
+def _minutes_between(start: datetime | None, end: datetime | None) -> int | None:
+    if start is None or end is None:
+        return None
+    return int(round((end - start).total_seconds() / 60))
+
+
+def _km_between(start: float | None, end: float | None) -> int | None:
+    if start is None or end is None:
+        return None
+    km = int(round(end - start))
+    return km if km >= 0 else None
+
+
+def _route_analytics(points: list[Point]) -> dict:
+    empty = {"total_minutes": None, "total_km": None, "work_minutes": None, "work_km": None}
+    if not points:
+        return empty
+    first = points[0]
+    last = points[-1]
+    start_t, start_km = _first_filled_stage(first)
+    end_t, end_km = _last_filled_stage(last)
+    if end_t is None and end_km is None:
+        for point in reversed(points):
+            end_t, end_km = _last_filled_stage(point)
+            if end_t is not None or end_km is not None:
+                break
+    stages_first = _point_stages(first)
+    stages_last = _point_stages(last)
+    return {
+        "total_minutes": _minutes_between(start_t, end_t),
+        "total_km": _km_between(start_km, end_km),
+        "work_minutes": _minutes_between(stages_first[1][0], stages_last[3][0]),
+        "work_km": _km_between(stages_first[1][1], stages_last[3][1]),
+    }
+
+
 def _last_loading_fields(point: Point | None) -> tuple[str | None, str | None, str | None]:
     if point is None:
         return None, None, None
@@ -448,6 +529,7 @@ def _route_out(
         "last_loading_point_name": last_loading_name,
         "last_loading_date": last_loading_date,
         "last_loading_time": last_loading_time,
+        "analytics": _route_analytics(points) if include_points else None,
         "points": [_point_out(db, point, idx) for idx, point in enumerate(points)] if include_points else None,
     }
 

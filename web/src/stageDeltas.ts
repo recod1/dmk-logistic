@@ -12,10 +12,12 @@ export const STAGE_PERIOD_LABELS: Record<(typeof STAGE_ORDER)[number], string> =
   docs: "Забрал документы"
 };
 
-function parseStageTime(raw: string | null | undefined): Date | null {
-  const text = (raw || "").trim();
+export function parseStageTime(raw: string | null | undefined): Date | null {
+  const text = (raw || "").trim().replace(/\u00a0/g, " ");
   if (!text) return null;
-  const dmy = text.match(/^(\d{2})\.(\d{2})\.(\d{4})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+  const dmy = text.match(
+    /^(\d{1,2})\.(\d{1,2})\.(\d{4})(?:[,\sT]+(\d{1,2}):(\d{2})(?::(\d{2}))?)?/
+  );
   if (dmy) {
     const [, dd, mm, yyyy, hh = "0", mi = "0", ss = "0"] = dmy;
     const dt = new Date(Number(yyyy), Number(mm) - 1, Number(dd), Number(hh), Number(mi), Number(ss));
@@ -43,7 +45,7 @@ function pluralRu(n: number, one: string, few: string, many: string): string {
   return many;
 }
 
-function formatDuration(deltaMin: number): string | null {
+export function formatDuration(deltaMin: number): string | null {
   const total = Math.abs(Math.round(deltaMin));
   if (!Number.isFinite(total)) return null;
   const hours = Math.floor(total / 60);

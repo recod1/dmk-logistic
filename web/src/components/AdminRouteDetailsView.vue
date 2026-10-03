@@ -4,7 +4,7 @@ import { computed, reactive, ref, watch } from "vue";
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
 import PointDocLinks from "./PointDocLinks.vue";
-import { routeAnalyticsForPoints } from "../routeAnalytics";
+import { routeAnalyticsView } from "../routeAnalytics";
 import { stageDeltasForPoint } from "../stageDeltas";
 import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
 import { plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
@@ -177,7 +177,7 @@ function canCancel(status: RouteWorkflowStatus): boolean {
   return status === "new" || status === "process";
 }
 
-const routeAnalytics = computed(() => routeAnalyticsForPoints(props.route.points || []));
+const routeAnalytics = computed(() => routeAnalyticsView(props.route.points || [], props.route.analytics));
 
 function canCompleteRoute(): boolean {
   if (props.route.status !== "new" && props.route.status !== "process") {
@@ -591,14 +591,6 @@ function removeRoute(): void {
           <span class="k">Статус</span>
           <span class="v">{{ routeStatusWithCurrentPoint(route) }}</span>
         </div>
-        <div v-if="routeAnalytics.total" class="kv">
-          <span class="k">Всего по рейсу</span>
-          <span class="v">{{ routeAnalytics.total }}</span>
-        </div>
-        <div v-if="routeAnalytics.work" class="kv">
-          <span class="k">От регистрации до документов</span>
-          <span class="v">{{ routeAnalytics.work }}</span>
-        </div>
         <div class="kv">
           <span class="k">На телефоне</span>
           <span
@@ -622,6 +614,26 @@ function removeRoute(): void {
           <span class="v">{{ route.registration_number || "—" }}</span>
         </div>
       </div>
+      <section class="analytics-card">
+        <h3>Аналитика рейса</h3>
+        <div class="kv">
+          <span class="k">Общее время</span>
+          <span class="v">{{ routeAnalytics.totalTime }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">Общий пробег</span>
+          <span class="v">{{ routeAnalytics.totalKm }}</span>
+        </div>
+        <p class="analytics-sub">От регистрации на первой точке до «Забрал документы» на последней</p>
+        <div class="kv">
+          <span class="k">Время периода</span>
+          <span class="v">{{ routeAnalytics.workTime }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">Пробег периода</span>
+          <span class="v">{{ routeAnalytics.workKm }}</span>
+        </div>
+      </section>
       <section class="actions top-actions">
         <section class="location-card">
           <h3>Местоположение водителя</h3>
@@ -1125,6 +1137,28 @@ function removeRoute(): void {
   grid-template-columns: 1fr;
   gap: 0.45rem 1rem;
   padding: 0.15rem 0 0.25rem;
+}
+.analytics-card {
+  margin: 0.65rem 0 0.35rem;
+  padding: 0.75rem 0.8rem;
+  border: 1px solid #243043;
+  border-radius: 12px;
+  background: rgba(15, 23, 42, 0.55);
+  display: grid;
+  gap: 0.4rem;
+}
+.analytics-card h3 {
+  margin: 0 0 0.15rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.analytics-sub {
+  margin: 0.2rem 0 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
 }
 .head h2 {
   margin: 0;
