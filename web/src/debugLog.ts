@@ -165,7 +165,8 @@ export function clearDebugErrors(): void {
 }
 
 export function formatDebugDump(snapshot: Record<string, unknown>): string {
-  return JSON.stringify(
+  const diagnosis = typeof snapshot.diagnosis === "string" ? snapshot.diagnosis : "";
+  const body = JSON.stringify(
     {
       captured_at: new Date().toISOString(),
       snapshot,
@@ -174,4 +175,5 @@ export function formatDebugDump(snapshot: Record<string, unknown>): string {
     null,
     2
   );
+  return diagnosis ? `${diagnosis}\n${body}` : body;
 }

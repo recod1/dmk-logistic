@@ -44,7 +44,10 @@ def _notification_to_api_dict(
         "route_id": item.route_id,
         "point_id": item.point_id,
         "driver_full_name": (
-            (drivers_by_id.get(int(routes_by_id[str(item.route_id)].assigned_user_id)).full_name)  # type: ignore[arg-type]
+            (
+                drivers_by_id[int(routes_by_id[str(item.route_id)].assigned_user_id)].full_name
+                or drivers_by_id[int(routes_by_id[str(item.route_id)].assigned_user_id)].login
+            )
             if item.route_id
             and str(item.route_id) in routes_by_id
             and routes_by_id[str(item.route_id)].assigned_user_id
@@ -52,7 +55,10 @@ def _notification_to_api_dict(
             else None
         ),
         "number_auto": (
-            routes_by_id[str(item.route_id)].number_auto
+            (
+                routes_by_id[str(item.route_id)].number_auto
+                or routes_by_id[str(item.route_id)].registration_number
+            )
             if item.route_id and str(item.route_id) in routes_by_id
             else None
         ),
@@ -68,6 +74,11 @@ def _notification_to_api_dict(
         ),
         "point_type_point": (
             points_by_id[int(item.point_id)].type_point
+            if item.point_id is not None and int(item.point_id) in points_by_id
+            else None
+        ),
+        "point_name": (
+            points_by_id[int(item.point_id)].point_name
             if item.point_id is not None and int(item.point_id) in points_by_id
             else None
         ),

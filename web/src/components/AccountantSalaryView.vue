@@ -2,6 +2,7 @@
 import { ref } from "vue";
 
 import type { SalaryRecord } from "../api";
+import { isoDateToRu, ruDateToIso } from "../salaryPeriod";
 import { salaryCommentText, salaryStatusKey, salaryStatusLabel } from "../salaryDisplay";
 
 const props = defineProps<{
@@ -57,6 +58,14 @@ function doExport(): void {
   }
   emit("exportCsv", dateFrom.value.trim(), dateTo.value.trim());
 }
+
+function onIsoFrom(event: Event): void {
+  dateFrom.value = isoDateToRu((event.target as HTMLInputElement).value);
+}
+
+function onIsoTo(event: Event): void {
+  dateTo.value = isoDateToRu((event.target as HTMLInputElement).value);
+}
 </script>
 
 <template>
@@ -85,8 +94,8 @@ function doExport(): void {
     <div v-if="selectedDriver" class="card">
       <h2>Расчёты водителя</h2>
       <div class="period">
-        <input v-model="dateFrom" placeholder="дд.мм.гггг с" />
-        <input v-model="dateTo" placeholder="дд.мм.гггг по" />
+        <input type="date" lang="ru" :value="ruDateToIso(dateFrom)" @input="onIsoFrom" />
+        <input type="date" lang="ru" :value="ruDateToIso(dateTo)" @input="onIsoTo" />
         <div class="period-actions">
           <button type="button" class="ghost" @click="applyMonth">Месяц</button>
           <button type="button" class="secondary" :disabled="loading" @click="emit('refreshList', dateFrom || undefined, dateTo || undefined)">

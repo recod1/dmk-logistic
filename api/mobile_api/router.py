@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone
@@ -157,7 +158,19 @@ def _point_to_dict(
         "odometer": point.odometer,
         "coordinates": {"lat": point.lat, "lng": point.lng},
         "docs_images": docs_meta or [],
+        "manual_edits": _load_manual_edits(point),
     }
+
+
+def _load_manual_edits(point: Point) -> dict:
+    raw = (getattr(point, "manual_edits", None) or "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _get_ordered_points(db: Session, route_id: str) -> list[Point]:

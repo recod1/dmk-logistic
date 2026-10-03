@@ -4,11 +4,12 @@ import { computed, reactive, ref, watch } from "vue";
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
 import PointDocLinks from "./PointDocLinks.vue";
+import { routeAnalyticsForPoints } from "../routeAnalytics";
 import { stageDeltasForPoint } from "../stageDeltas";
 import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
 import { plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
-import { listPointStatusLabel } from "../status";
-import type { AdminRoute, AdminRoutePointPayload, DriverOption, ManualEditMeta, RouteWorkflowStatus } from "../types";
+import { listPointStatusLabel, nextStatus } from "../status";
+import type { AdminRoute, AdminRoutePointPayload, DriverOption, ManualEditMeta, PointStatus, RouteWorkflowStatus } from "../types";
 
 type AdminRoutePoint = NonNullable<AdminRoute["points"]>[number];
 
@@ -78,6 +79,8 @@ const emit = defineEmits<{
   ];
   openChat: [routeId: string];
   updatePoint: [pointId: number, payload: Record<string, unknown>];
+  completeRoute: [routeId: string];
+  uploadPointDocs: [pointId: number, files: File[]];
   requestLocation: [routeId: string];
 }>();
 
@@ -172,6 +175,55 @@ function pointStatusLabel(status: string): string {
 
 function canCancel(status: RouteWorkflowStatus): boolean {
   return status === "new" || status === "process";
+}
+
+const routeAnalytics = computed(() => routeAnalyticsForPoints(props.route.points || []));
+
+function canCompleteRoute(): boolean {
+  if (props.route.status !== "new" && props.route.status !== "process") {
+    return false;
+  }
+  const points = props.route.points || [];
+  return points.length > 0 && points.every((point) => point.status === "docs" || point.status === "success");
+}
+
+function nextPointActionLabel(status: string): string | null {
+  const next = nextStatus(status as PointStatus);
+  return next ? listPointStatusLabel(next) : null;
+}
+
+function advancePointStatus(point: AdminRoutePoint): void {
+  const next = nextStatus(point.status as PointStatus);
+  if (!next) {
+    return;
+  }
+  const occurredAt = new Date().toISOString();
+  const payload: Record<string, unknown> = { status: next };
+  if (next === "process") payload.departure_time = occurredAt;
+  if (next === "registration") payload.registration_time = occurredAt;
+  if (next === "load") payload.gate_time = occurredAt;
+  if (next === "docs") payload.docs_time = occurredAt;
+  emit("updatePoint", point.id, payload);
+}
+
+function managerNames(point: AdminRoutePoint): string {
+  const edits = point.manual_edits;
+  if (!edits) return "";
+  const names = new Set(
+    Object.values(edits)
+      .map((meta) => (meta.full_name || meta.login || "").trim())
+      .filter(Boolean)
+  );
+  return names.size ? [...names].join(", ") : "";
+}
+
+function onDocsPicked(point: AdminRoutePoint, event: Event): void {
+  const input = event.target as HTMLInputElement;
+  const files = Array.from(input.files || []);
+  input.value = "";
+  if (files.length) {
+    emit("uploadPointDocs", point.id, files);
+  }
 }
 
 function phoneReceiptLabel(route: AdminRoute): string {
@@ -539,6 +591,14 @@ function removeRoute(): void {
           <span class="k">Статус</span>
           <span class="v">{{ routeStatusWithCurrentPoint(route) }}</span>
         </div>
+        <div v-if="routeAnalytics.total" class="kv">
+          <span class="k">Всего по рейсу</span>
+          <span class="v">{{ routeAnalytics.total }}</span>
+        </div>
+        <div v-if="routeAnalytics.work" class="kv">
+          <span class="k">От регистрации до документов</span>
+          <span class="v">{{ routeAnalytics.work }}</span>
+        </div>
         <div class="kv">
           <span class="k">На телефоне</span>
           <span
@@ -606,6 +666,9 @@ function removeRoute(): void {
           <button class="secondary" type="button" :disabled="loading || !canAssign" @click="submitReassign">Сохранить</button>
           <button class="ghost" type="button" @click="closeReassign">Отмена</button>
         </div>
+        <button class="secondary" type="button" :disabled="loading || !canCompleteRoute()" @click="emit('completeRoute', route.id)">
+          Завершить рейс
+        </button>
         <button class="danger" type="button" :disabled="loading || !canCancel(route.status)" @click="emit('cancelRoute', route.id)">
           Отменить
         </button>
@@ -710,6 +773,22 @@ function removeRoute(): void {
               <span v-if="point.point_name"> · {{ point.point_name }}</span>
             </strong>
             <span class="status-chip">{{ pointStatusLabel(point.status) }}</span>
+          </div>
+          <p v-if="managerNames(point)" class="manager-note">Изменения менеджера: {{ managerNames(point) }}</p>
+          <div class="manager-actions">
+            <button
+              v-if="nextPointActionLabel(point.status)"
+              class="secondary"
+              type="button"
+              :disabled="loading"
+              @click="advancePointStatus(point)"
+            >
+              {{ nextPointActionLabel(point.status) }}
+            </button>
+            <label class="docs-pick">
+              Прикрепить документы
+              <input type="file" accept="image/*" multiple :disabled="loading" @change="onDocsPicked(point, $event)" />
+            </label>
           </div>
           <p class="meta-line">
             <MapsAddressLink v-if="point.place_point" :address="point.place_point" />
@@ -1181,6 +1260,37 @@ function removeRoute(): void {
   margin: 0;
   color: #94a3b8;
   font-size: 0.86rem;
+}
+.manager-note {
+  margin: 0.2rem 0 0.35rem;
+  color: #fde68a;
+  font-size: 0.8rem;
+}
+.manager-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  align-items: center;
+  margin: 0.35rem 0 0.45rem;
+}
+.docs-pick {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  min-height: 36px;
+  padding: 0.35rem 0.65rem;
+  border-radius: 10px;
+  border: 1px solid #334155;
+  background: #0b1220;
+  color: #cbd5e1;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.docs-pick input {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
 }
 .error {
   margin: 0;

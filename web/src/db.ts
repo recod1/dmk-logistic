@@ -30,6 +30,10 @@ export interface PointStatusOverlay {
   point_id: number;
   status: Exclude<PointStatus, "new">;
   occurred_at_client: string;
+  time?: string | null;
+  odometer?: string | null;
+  time_source?: string | null;
+  odometer_source?: string | null;
   updated_at: string;
 }
 
@@ -206,7 +210,13 @@ export async function savePointOverlay(
   routeId: string,
   pointId: number,
   status: Exclude<PointStatus, "new">,
-  occurredAtClient: string
+  occurredAtClient: string,
+  extras?: {
+    time?: string | null;
+    odometer?: string | null;
+    time_source?: string | null;
+    odometer_source?: string | null;
+  }
 ): Promise<void> {
   const existing = await db.pointOverlay.where("[route_id+point_id]").equals([routeId, pointId]).first();
   const payload: PointStatusOverlay = {
@@ -214,6 +224,10 @@ export async function savePointOverlay(
     point_id: pointId,
     status,
     occurred_at_client: occurredAtClient,
+    time: extras?.time ?? occurredAtClient,
+    odometer: extras?.odometer ?? null,
+    time_source: extras?.time_source ?? null,
+    odometer_source: extras?.odometer_source ?? null,
     updated_at: new Date().toISOString()
   };
   if (existing?.id) {

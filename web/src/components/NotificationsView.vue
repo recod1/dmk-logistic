@@ -90,7 +90,7 @@ onUnmounted(() => {
 function formatExtra(item: NotificationDto): string {
   const parts: string[] = [];
   const driver = (item.driver_full_name || "").trim();
-  if (driver) parts.push(`Водитель: ${driver}`);
+  if (driver) parts.push(`ФИО: ${driver}`);
   const auto = (item.number_auto || "").trim();
   if (auto) parts.push(`ТС: ${auto}`);
   const trailer = (item.trailer_number || "").trim();

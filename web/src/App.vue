@@ -30,6 +30,7 @@ import {
   acceptRoute,
   assignAdminRouteDriver,
   cancelAdminRoute,
+  completeAdminRoute,
   createAdminRouteFromOnec,
   createAdminRoute,
   createAdminUser,
@@ -137,6 +138,7 @@ import { DRIVER_PREFETCH_SYNC_TAG, persistPrefetchPayload, prefetchAssignedRoute
 import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
 import { prepareDocumentImageBlobs } from "./imageUploadPrep";
 import { isAccountantRole, isAdminRole, isLogisticRole, isRouteManagerRole } from "./roles";
+import { applyOverlaysToPoints, applyStageOverlayToPoint } from "./pointOverlay";
 import { isPointDone, nextStatus, nextStatusLabel } from "./status";
 import {
   connectionHint,
@@ -393,6 +395,9 @@ const hasUnreadGenericChats = computed(() => {
 
 const hasUnreadRouteChats = computed(() => Object.values(chatUnreadByRoute.value).some((count) => Number(count) > 0));
 const hasUnreadChatsNav = computed(() => hasUnreadGenericChats.value || hasUnreadRouteChats.value);
+const hasUnreadSalary = computed(() =>
+  notifications.value.some((item) => !item.is_read && item.event_type === "salary_new")
+);
 
 const salaryChatItemsForChatView = computed(() => {
   const sid = salaryChatSalaryId.value;
@@ -650,11 +655,11 @@ const profileMenuItems = computed<Array<{ section: AppSection; label: string; ta
   }
   if (isRouteManagerRole(authUser.value.role_code)) {
     const items: Array<{ section: AppSection; label: string; tabBar?: boolean; headerNav?: boolean }> = [
-      { section: "admin_routes", label: "Рейсы", headerNav: true },
-      { section: "chats", label: "Чаты", headerNav: true }
+      { section: "admin_routes", label: "Рейсы", tabBar: true, headerNav: true },
+      { section: "chats", label: "Чаты", tabBar: true, headerNav: true }
     ];
     if (isAccountantRole(authUser.value.role_code)) {
-      items.push({ section: "salary_accounting", label: "Зарплата", headerNav: true });
+      items.push({ section: "salary_accounting", label: "Зарплата", tabBar: true, headerNav: true });
     }
     return items;
   }
@@ -681,6 +686,16 @@ const bottomNavItems = computed<BottomNavItem[]>(() => {
       { id: "chats", label: "Чаты", section: "chats" },
       { id: "salary", label: "Зарплата", section: "salary_accounting" }
     ];
+  }
+  if (isRouteManager.value) {
+    const items: BottomNavItem[] = [
+      { id: "routes", label: "Рейсы", section: "admin_routes" },
+      { id: "chats", label: "Чаты", section: "chats" }
+    ];
+    if (isAccountant.value) {
+      items.push({ id: "salary", label: "Зарплата", section: "salary_accounting" });
+    }
+    return items;
   }
   return [];
 });
@@ -1245,13 +1260,23 @@ function clearNotificationsSocketTimers(): void {
   }
 }
 
+function notificationContextLine(item: NotificationDto): string {
+  const parts: string[] = [];
+  const driver = (item.driver_full_name || "").trim();
+  if (driver) parts.push(driver);
+  const auto = (item.number_auto || "").trim();
+  if (auto) parts.push(`ТС ${auto}`);
+  return parts.join(" · ");
+}
+
 function showBrowserPushNotification(item: NotificationDto): void {
   if (typeof window === "undefined" || !("Notification" in window)) {
     return;
   }
   if (Notification.permission === "granted") {
+    const context = notificationContextLine(item);
     void new Notification(item.title, {
-      body: item.message,
+      body: context ? `${item.message}\n${context}` : item.message,
       tag: `dmk-notification-${item.id}`
     });
   }
@@ -1627,27 +1652,23 @@ async function applyOverlaysToRoute(baseRoute: RouteDto | null): Promise<RouteDt
   if (!baseRoute) {
     return null;
   }
-  const overlays = await getPointOverlays(baseRoute.id);
-  const pendingAccepts = await getPendingAccepts();
-  const locallyAccepted = pendingAccepts.some((item) => item.route_id === baseRoute.id);
-  const byPointId = new Map(overlays.map((item) => [item.point_id, item]));
-  const points = overlays.length
-    ? baseRoute.points.map((point) => {
-        const overlay = byPointId.get(point.id);
-        if (!overlay) {
-          return point;
-        }
-        return {
-          ...point,
-          status: overlay.status
-        };
-      })
-    : baseRoute.points;
-  return {
-    ...baseRoute,
-    status: locallyAccepted && baseRoute.status === "new" ? "process" : baseRoute.status,
-    points
-  } as RouteDto;
+  try {
+    const overlays = await getPointOverlays(baseRoute.id);
+    const pendingAccepts = await getPendingAccepts();
+    const locallyAccepted = pendingAccepts.some((item) => item.route_id === baseRoute.id);
+    const points = applyOverlaysToPoints(baseRoute, overlays);
+    return {
+      ...baseRoute,
+      status: locallyAccepted && baseRoute.status === "new" ? "process" : baseRoute.status,
+      points
+    } as RouteDto;
+  } catch (error) {
+    reportDebugError({ source: "overlay.apply", error });
+    return {
+      ...baseRoute,
+      points: Array.isArray(baseRoute.points) ? baseRoute.points : []
+    };
+  }
 }
 
 function applyPendingAcceptToLists(
@@ -1959,23 +1980,27 @@ async function hydrateDriverRoutesFromCache(): Promise<void> {
   if (!isDriver.value) {
     return;
   }
-  const cache = await loadDriverRoutesCache();
-  const pending = await getPendingAccepts();
-  const pendingIds = new Set(pending.map((item) => item.route_id));
-  if (cache) {
-    driverAssignedRoutes.value = applyPendingAcceptToLists(cache.assigned, pendingIds);
-    driverHistoryRoutes.value = cache.history;
-    driverActiveRouteId.value = pending[0]?.route_id ?? cache.active_route_id;
-  }
-  const local = await loadActiveRoute();
-  if (local) {
-    route.value = await applyOverlaysToRoute(local);
-  }
-  if (selectedDriverRoute.value) {
-    const snap = await loadRouteSnapshot(selectedDriverRoute.value.id);
-    if (snap) {
-      selectedDriverRoute.value = await applyOverlaysToRoute(snap);
+  try {
+    const cache = await loadDriverRoutesCache();
+    const pending = await getPendingAccepts();
+    const pendingIds = new Set(pending.map((item) => item.route_id));
+    if (cache) {
+      driverAssignedRoutes.value = applyPendingAcceptToLists(cache.assigned, pendingIds);
+      driverHistoryRoutes.value = cache.history;
+      driverActiveRouteId.value = pending[0]?.route_id ?? cache.active_route_id;
     }
+    const local = await loadActiveRoute();
+    if (local) {
+      route.value = await applyOverlaysToRoute(local);
+    }
+    if (selectedDriverRoute.value) {
+      const snap = await loadRouteSnapshot(selectedDriverRoute.value.id);
+      if (snap) {
+        selectedDriverRoute.value = await applyOverlaysToRoute(snap);
+      }
+    }
+  } catch (error) {
+    reportDebugError({ source: "hydrate.cache", error });
   }
 }
 
@@ -2695,6 +2720,39 @@ async function doAssignAdminRoute(
   }
 }
 
+async function doCompleteAdminRoute(routeId: string): Promise<void> {
+  if (!authToken.value || !isRouteManager.value) {
+    return;
+  }
+  routesLoading.value = true;
+  routesError.value = "";
+  try {
+    await completeAdminRoute(authToken.value, routeId);
+    selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
+    await refreshAdminRoutes(routeFilters.value);
+  } catch (error) {
+    routesError.value = `Ошибка завершения рейса: ${(error as Error).message}`;
+  } finally {
+    routesLoading.value = false;
+  }
+}
+
+async function doUploadAdminPointDocs(pointId: number, files: File[]): Promise<void> {
+  if (!authToken.value || !isRouteManager.value || !selectedAdminRoute.value || !files.length) {
+    return;
+  }
+  const routeId = selectedAdminRoute.value.id;
+  routesError.value = "";
+  try {
+    const prepared = await prepareDocumentImageBlobs(files);
+    await uploadPointDocuments(authToken.value, pointId, prepared, { timeoutMs: 45_000 });
+    selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
+    await refreshAdminRoutes(routeFilters.value);
+  } catch (error) {
+    routesError.value = `Ошибка загрузки документов: ${(error as Error).message}`;
+  }
+}
+
 async function doCancelAdminRoute(routeId: string): Promise<void> {
   if (!authToken.value || !isRouteManager.value) {
     return;
@@ -2864,6 +2922,14 @@ async function doMarkNotificationRead(notificationId: number): Promise<void> {
   } finally {
     markReadInFlight.delete(notificationId);
   }
+}
+
+function markUnreadSalaryNotifications(): void {
+  notifications.value
+    .filter((item) => !item.is_read && item.event_type === "salary_new")
+    .forEach((item) => {
+      void doMarkNotificationRead(item.id);
+    });
 }
 
 async function doMarkAllNotificationsRead(): Promise<void> {
@@ -3113,6 +3179,7 @@ function openRoleMainSection(section: AppSection): void {
     salaryAccountantItems.value = [];
     salarySelectedDriver.value = null;
     salaryError.value = "";
+    markUnreadSalaryNotifications();
     return;
   }
   if (section === "admin_users" && isAdminRole(authUser.value.role_code)) {
@@ -3457,14 +3524,21 @@ async function markPointNext(
     }
   }
 
-  current.status = toStatus;
+  const overlayFields = {
+    time: occurredAt,
+    odometer: (options?.odometer || "").trim() || null,
+    time_source: options?.timeSource ?? "device",
+    odometer_source: options?.odometer_source ?? null
+  };
+  const nextPoint = applyStageOverlayToPoint(current, toStatus, overlayFields);
+  Object.assign(current, nextPoint);
   if (selectedDriverRoute.value?.id === route.value.id) {
     const selectedPoint = selectedDriverRoute.value.points.find((point) => point.id === pointId);
     if (selectedPoint) {
-      selectedPoint.status = toStatus;
+      Object.assign(selectedPoint, applyStageOverlayToPoint(selectedPoint, toStatus, overlayFields));
     }
   }
-  await savePointOverlay(route.value.id, pointId, toStatus, occurredAt);
+  await savePointOverlay(route.value.id, pointId, toStatus, occurredAt, overlayFields);
   await persistDriverRoute(route.value);
   await addOutboxEvent({
     ...event,
@@ -3771,6 +3845,7 @@ async function openDriverSalarySection(): Promise<void> {
   salaryDriverFilterFrom.value = `01.${pad2(m + 1)}.${y}`;
   salaryDriverFilterTo.value = `${pad2(last)}.${pad2(m + 1)}.${y}`;
   resetToSection("driver_salary");
+  markUnreadSalaryNotifications();
   await refreshDriverSalaryList(salaryDriverFilterFrom.value, salaryDriverFilterTo.value);
 }
 
@@ -4463,7 +4538,11 @@ onMounted(async () => {
   const token = localStorage.getItem(TOKEN_STORAGE_KEY) || "";
   const rawUser = localStorage.getItem(USER_STORAGE_KEY);
   authToken.value = token;
-  authUser.value = rawUser ? (JSON.parse(rawUser) as AuthUser) : null;
+  try {
+    authUser.value = rawUser ? (JSON.parse(rawUser) as AuthUser) : null;
+  } catch {
+    authUser.value = null;
+  }
   if (token && authUser.value) {
     await persistAuth(token, authUser.value);
   }
@@ -4475,7 +4554,12 @@ onMounted(async () => {
     openDefaultSectionByRole(authUser.value);
   }
   if (token && authUser.value) {
-    await bootstrapByRole(authUser.value);
+    try {
+      await bootstrapByRole(authUser.value);
+    } catch (error) {
+      reportDebugError({ source: "bootstrap", error });
+      syncMessage.value = "Не удалось загрузить данные. Проверьте связь.";
+    }
   }
   window.addEventListener("online", onOnline);
   window.addEventListener("offline", onOffline);
@@ -4583,6 +4667,7 @@ onUnmounted(() => {
           :active-id="activeBottomNavId"
           :chats-unread="hasUnreadChatsNav"
           :routes-unread="hasUnreadRouteChats"
+          :salary-unread="hasUnreadSalary"
           @select="selectBottomNav"
         />
         <div v-if="isAuthed" class="profile-wrap">
@@ -4607,6 +4692,10 @@ onUnmounted(() => {
                 <span v-if="item.section === 'chats' && hasUnreadChatsNav" class="notif-dot menu-dot" />
                 <span
                   v-else-if="(item.section === 'admin_routes' || item.section === 'driver_routes') && hasUnreadRouteChats"
+                  class="notif-dot menu-dot success-dot"
+                />
+                <span
+                  v-else-if="(item.section === 'driver_salary' || item.section === 'salary_accounting') && hasUnreadSalary"
                   class="notif-dot menu-dot success-dot"
                 />
               </button>
@@ -4668,6 +4757,8 @@ onUnmounted(() => {
         @delete-route="doDeleteAdminRoute"
         @update-route="doUpdateAdminRoute"
         @update-point="doUpdateAdminRoutePoint"
+        @complete-route="doCompleteAdminRoute"
+        @upload-point-docs="doUploadAdminPointDocs"
         @open-chat="openChatForRoute"
         @request-location="doRequestDriverLocation"
       />
@@ -4903,6 +4994,7 @@ onUnmounted(() => {
       :active-id="activeBottomNavId"
       :chats-unread="hasUnreadChatsNav"
       :routes-unread="hasUnreadRouteChats"
+      :salary-unread="hasUnreadSalary"
       @select="selectBottomNav"
     />
 

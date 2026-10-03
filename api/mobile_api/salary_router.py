@@ -230,7 +230,7 @@ def _insert_salary_for_driver(db: Session, driver: User, fields: dict[str, Any])
     db.refresh(row)
     create_notification_for_users(
         db,
-        user_ids=[int(driver.id)],
+        user_ids=list(dict.fromkeys([int(driver.id), *_accountant_admin_user_ids(db)])),
         event_type="salary_new",
         title="Новый расчёт зарплаты",
         message=f"Расчёт за {row.date_salary}, итого {_fnum(row.total):.2f} ₽",
@@ -559,7 +559,7 @@ def replace_salary(
     if driver:
         create_notification_for_users(
             db,
-            user_ids=[int(driver.id)],
+            user_ids=list(dict.fromkeys([int(driver.id), *_accountant_admin_user_ids(db)])),
             event_type="salary_new",
             title="Новый расчёт зарплаты",
             message=f"Расчёт за {row.date_salary}, итого {_fnum(row.total):.2f} ₽",

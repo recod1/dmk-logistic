@@ -31,7 +31,7 @@ from utils.route_point_changes import changed_text as _changed_text, diff_route_
 router = APIRouter(prefix="/v1/admin/routes", tags=["admin-routes"])
 
 ROUTE_STATUS_TRANSITIONS: dict[str, set[str]] = {
-    "new": {"process", "cancelled"},
+    "new": {"process", "cancelled", "success"},
     "process": {"success", "cancelled"},
     "success": set(),
     "cancelled": set(),

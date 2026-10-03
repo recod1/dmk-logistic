@@ -7,6 +7,7 @@ defineProps<{
   activeId: BottomNavId | null;
   chatsUnread?: boolean;
   routesUnread?: boolean;
+  salaryUnread?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -26,7 +27,7 @@ const emit = defineEmits<{
     >
       <NavIcon
         :name="item.id"
-        :unread="(item.id === 'chats' && chatsUnread) || (item.id === 'routes' && routesUnread)"
+        :unread="(item.id === 'chats' && chatsUnread) || (item.id === 'routes' && routesUnread) || (item.id === 'salary' && salaryUnread)"
       />
       <span class="label">{{ item.label }}</span>
     </button>

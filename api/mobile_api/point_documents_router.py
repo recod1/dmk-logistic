@@ -12,7 +12,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mobile_api.auth import get_current_driver, get_current_user
+from mobile_api.auth import get_current_user
 from mobile_api.db import get_db
 from mobile_api.models import Point, PointDocumentImage, Route, User
 from mobile_api.roles import ADMIN_ACCESS_ROLES, ROUTE_MANAGER_ROLES, RoleCode, normalize_role_code
@@ -119,7 +119,7 @@ async def upload_point_documents(
     point_id: int,
     files: list[UploadFile] = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_driver),
+    current_user: User = Depends(get_current_user),
 ) -> dict:
     if not files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files")
@@ -130,9 +130,21 @@ async def upload_point_documents(
     if point is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Point not found")
     route = db.get(Route, point.route_id)
-    if route is None or route.assigned_user_id is None or int(route.assigned_user_id) != int(current_user.id):
+    if route is None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Point is not available")
-    if point.status not in {"load", "docs", "success"}:
+    try:
+        role = normalize_role_code(current_user.role_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Point is not available") from exc
+    is_manager = role in ROUTE_MANAGER_ROLES or role in ADMIN_ACCESS_ROLES
+    is_assigned_driver = (
+        role == RoleCode.DRIVER
+        and route.assigned_user_id is not None
+        and int(route.assigned_user_id) == int(current_user.id)
+    )
+    if not is_manager and not is_assigned_driver:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Point is not available")
+    if is_assigned_driver and not is_manager and point.status not in {"load", "docs", "success"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Documents can only be uploaded at the gates / documents stage",

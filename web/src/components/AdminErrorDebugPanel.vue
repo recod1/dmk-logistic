@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import { connectionSnapshot } from "../connectionWatch";
+import { connectionDiagnosis, connectionSnapshot } from "../connectionWatch";
 import { clearDebugErrors, debugErrors, formatDebugDump, latestDebugError, markDebugErrorsRead } from "../debugLog";
 
 const emit = defineEmits<{
@@ -40,6 +40,7 @@ function onClose(): void {
         <button type="button" class="ghost close" @click="onClose">Закрыть</button>
       </header>
       <div class="body">
+        <p class="note diagnosis">{{ connectionDiagnosis }}</p>
         <p class="note">
           Временный разбор для администратора: снимок связи, очередь синка и последние сбои. Скопируйте текст и
           пришлите, если ошибка повторяется.
@@ -155,6 +156,11 @@ h3 {
   max-width: 100%;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+.note.diagnosis {
+  color: #fde68a;
+  font-size: 0.95rem;
+  font-weight: 700;
 }
 .note,
 .muted {

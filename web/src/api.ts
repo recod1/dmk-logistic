@@ -677,6 +677,15 @@ export async function cancelAdminRoute(token: string, routeId: string): Promise<
   });
 }
 
+export async function completeAdminRoute(token: string, routeId: string): Promise<AdminRoute> {
+  return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${encodeRouteId(routeId)}/complete`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}
+
 export async function deleteAdminRoute(token: string, routeId: string): Promise<void> {
   const response = await fetch(`${API_BASE}/v1/admin/routes/${encodeRouteId(routeId)}`, {
     method: "DELETE",

@@ -3,6 +3,7 @@ import { computed } from "vue";
 
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
+import { routeAnalyticsForPoints } from "../routeAnalytics";
 import { stageDeltasForPoint } from "../stageDeltas";
 import {
   canRevertPointStatus,
@@ -32,8 +33,10 @@ const emit = defineEmits<{
 }>();
 
 const firstIncompletePoint = computed(
-  () => props.route.points.find((point) => !isPointDone(point.status)) ?? null
+  () => (props.route.points || []).find((point) => !isPointDone(point.status)) ?? null
 );
+
+const routeAnalytics = computed(() => routeAnalyticsForPoints(props.route.points));
 
 const isAcceptedCurrentRoute = computed(
   () => props.route.status === "process" && props.route.id === props.activeRouteId
@@ -131,15 +134,26 @@ function actionLabel(status: string): string {
 }
 
 function canAdvancePoint(pointId: number): boolean {
-  const point = props.route.points.find((item) => item.id === pointId);
+  const point = (props.route.points || []).find((item) => item.id === pointId);
   if (!point) {
     return false;
   }
   return !isPointDone(point.status) && props.route.status === "process";
 }
 
+function managerNames(point: RouteDto["points"][number]): string {
+  const edits = point.manual_edits;
+  if (!edits) return "";
+  const names = new Set(
+    Object.values(edits)
+      .map((meta) => (meta.full_name || meta.login || "").trim())
+      .filter(Boolean)
+  );
+  return names.size ? [...names].join(", ") : "";
+}
+
 function showRevert(pointId: number): boolean {
-  const point = props.route.points.find((item) => item.id === pointId);
+  const point = (props.route.points || []).find((item) => item.id === pointId);
   if (!point) {
     return false;
   }
@@ -159,6 +173,14 @@ function showRevert(pointId: number): boolean {
         <div class="kv">
           <span class="k">Статус рейса</span>
           <span class="v">{{ routeStatusLabel(route.status) }}</span>
+        </div>
+        <div v-if="routeAnalytics.total" class="kv">
+          <span class="k">Всего по рейсу</span>
+          <span class="v">{{ routeAnalytics.total }}</span>
+        </div>
+        <div v-if="routeAnalytics.work" class="kv">
+          <span class="k">От регистрации до документов</span>
+          <span class="v">{{ routeAnalytics.work }}</span>
         </div>
         <div class="kv">
           <span class="k">ТС</span>
@@ -241,6 +263,7 @@ function showRevert(pointId: number): boolean {
               <strong>{{ point.type_point === "unloading" ? "Выгрузка" : "Загрузка" }}</strong>
               <span class="chip">{{ statusLabel(point.status) }}</span>
             </div>
+            <p v-if="managerNames(point)" class="manager-note">Изменения менеджера: {{ managerNames(point) }}</p>
             <p v-if="point.point_name" class="org">{{ point.point_name }}</p>
             <p v-if="point.place_point" class="addr">
               <MapsAddressLink :address="point.place_point" />
@@ -402,6 +425,11 @@ function showRevert(pointId: number): boolean {
   padding: 0.7rem;
   display: grid;
   gap: 0.35rem;
+}
+.manager-note {
+  margin: 0;
+  color: #fde68a;
+  font-size: 0.8rem;
 }
 .row {
   display: flex;

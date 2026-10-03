@@ -86,9 +86,23 @@ export const connectionTone = computed<ConnectionTone>(() => {
   return "ok";
 });
 
+export const connectionDiagnosis = computed(() => {
+  if (!online.value) {
+    return "Нет интернета";
+  }
+  if (serverOk.value === false) {
+    return "Нет связи с сервером";
+  }
+  if (serverOk.value === null) {
+    return "Проверка связи с сервером…";
+  }
+  return "Интернет есть, сервер отвечает";
+});
+
 export const connectionHint = computed(() => {
   const net = connectionNetInfo();
   const parts = [
+    connectionDiagnosis.value,
     online.value ? "Интернет: есть" : "Интернет: нет",
     serverOk.value === true ? "Сервер: отвечает" : serverOk.value === false ? "Сервер: нет ответа" : "Сервер: проверка",
     `Уведомления: ${wsLabel(wsNotifications.value)}`,
@@ -117,6 +131,7 @@ export function connectionSnapshot(): Record<string, unknown> {
   const net = connectionNetInfo();
   return {
     ...net,
+    diagnosis: connectionDiagnosis.value,
     label: connectionLabel.value,
     tone: connectionTone.value,
     online: online.value,
