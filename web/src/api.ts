@@ -49,6 +49,16 @@ export class ApiError extends Error {
   }
 }
 
+export function humanizeAdminError(error: unknown, fallback: string): string {
+  const err = error as { message?: string; detail?: string | null; status?: number };
+  const raw = `${err?.detail || ""} ${err?.message || ""}`.toLowerCase();
+  if (err?.status === 409 || raw.includes("already exists")) {
+    return "Рейс с таким номером уже есть. Укажите другой ID.";
+  }
+  const message = (err?.message || "").trim();
+  return message ? `${fallback}: ${message}` : fallback;
+}
+
 function isCoarsePointer(): boolean {
   return typeof window !== "undefined" && Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
 }
@@ -248,7 +258,8 @@ async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs
     }
     const message = detail || bodyText || `HTTP ${response.status}`;
     const apiError = new ApiError(message, { status: response.status, bodyText, detail, url, method });
-    if (response.status !== 401) {
+    const isExpectedClientError = response.status >= 400 && response.status < 500;
+    if (!isExpectedClientError) {
       reportDebugError({
         source: "api.http",
         error: apiError,

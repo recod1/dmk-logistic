@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 import type { SalaryRecord } from "../api";
-import { isoDateToRu, ruDateToIso } from "../salaryPeriod";
+import { formatMoney, isoDateToRu, ruDateToIso, summarizeSalaryPeriod } from "../salaryPeriod";
 import { salaryCommentText, salaryStatusKey, salaryStatusLabel } from "../salaryDisplay";
 
 const props = defineProps<{
@@ -66,6 +66,8 @@ function onIsoFrom(event: Event): void {
 function onIsoTo(event: Event): void {
   dateTo.value = isoDateToRu((event.target as HTMLInputElement).value);
 }
+
+const periodSummary = computed(() => summarizeSalaryPeriod(props.items));
 </script>
 
 <template>
@@ -106,6 +108,18 @@ function onIsoTo(event: Event): void {
             {{ includeArchived ? "Скрыть архив" : "Архив" }}
           </button>
         </div>
+      </div>
+      <div v-if="items.length" class="summary">
+        <h3>Срез периода</h3>
+        <span>Дней: {{ periodSummary.days }}</span>
+        <span>Пробег: {{ periodSummary.mileage }} км</span>
+        <span>Загр. 2р: {{ periodSummary.load2 }}</span>
+        <span>5 ₽/км: {{ formatMoney(periodSummary.rate5) }}</span>
+        <span>10 ₽/км: {{ formatMoney(periodSummary.rate10) }}</span>
+        <span>Доп. точки: {{ periodSummary.extraPoints }}</span>
+        <span>Паллеты: {{ periodSummary.pallets }}</span>
+        <span>Суточные: {{ formatMoney(periodSummary.daily) }}</span>
+        <span>Зарплата: {{ formatMoney(periodSummary.salary) }}</span>
       </div>
       <div class="list">
         <button v-for="r in items" :key="r.id" type="button" class="row-item" @click="emit('select', r)">
@@ -226,6 +240,23 @@ input {
   margin: 0.5rem 0 0;
   color: #a5b4fc;
   font-weight: 600;
+}
+.summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.35rem 0.6rem;
+  margin: 0.65rem 0 0.2rem;
+  font-size: 0.86rem;
+  color: #e2e8f0;
+}
+.summary h3 {
+  grid-column: 1 / -1;
+  margin: 0 0 0.1rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-label);
 }
 .list {
   display: grid;

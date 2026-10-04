@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref } from "vue";
+import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 
 import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel } from "../status";
 import { plannedDateDisplay, plannedTimeDisplay } from "../plannedTime";
@@ -74,6 +74,17 @@ const statusTabs: Array<{ label: string; value: RouteWorkflowStatus | "" }> = [
 const showCreate = ref(false);
 const showCreateOnec = ref(false);
 const createCardEl = ref<HTMLElement | null>(null);
+
+watch(
+  () => [props.loading, props.error] as const,
+  ([loading, error], prev) => {
+    if (!prev?.[0] || loading || error) {
+      return;
+    }
+    showCreate.value = false;
+    showCreateOnec.value = false;
+  }
+);
 const searchOpen = ref(
   Boolean(
     props.initialFilters?.route_id || props.initialFilters?.number_auto || props.initialFilters?.driver_query
@@ -444,7 +455,6 @@ function submitCreate(): void {
     trailer_number: createForm.trailer_number.trim(),
     points: toPointPayload(createForm.points).filter((point) => point.place_point && point.date_point)
   });
-  showCreate.value = false;
 }
 
 function submitCreateOnec(): void {
@@ -459,7 +469,6 @@ function submitCreateOnec(): void {
     number_auto: onecForm.number_auto.trim() || undefined,
     trailer_number: onecForm.trailer_number.trim() || undefined
   });
-  showCreateOnec.value = false;
 }
 
 onMounted(() => {
@@ -619,6 +628,7 @@ onMounted(() => {
 
     <section v-if="showCreateOnec" ref="createCardEl" class="card create-card">
       <h2>Создать рейс из 1С</h2>
+      <p v-if="error" class="error">{{ error }}</p>
       <label class="driver-search">
         Водитель (если в тексте не найден / не однозначно)
         <input
@@ -675,6 +685,7 @@ onMounted(() => {
 
     <section v-if="showCreate" ref="createCardEl" class="card create-card">
       <h2>Создать рейс</h2>
+      <p v-if="error" class="error">{{ error }}</p>
       <div class="create-grid">
         <label>
           ID рейса

@@ -39,6 +39,7 @@ import {
   getActiveRoute,
   getAdminRoute,
   getDriverRoute,
+  humanizeAdminError,
   getPointTelemetry,
   getUnreadNotificationsCount,
   getVapidPublicKey,
@@ -613,9 +614,12 @@ watch(syncMessage, (value) => {
 const toastVisible = computed(() => Boolean(toastText.value));
 
 watch(
-  () => latestDebugError.value?.id ?? 0,
-  (id, prev) => {
-    if (!id || id === prev || !isAdmin.value || !isAuthed.value) {
+  () => latestDebugError.value,
+  (err, prev) => {
+    if (!err || err.id === prev?.id || !isAdmin.value || !isAuthed.value) {
+      return;
+    }
+    if (err.status != null && err.status >= 400 && err.status < 500) {
       return;
     }
     adminDebugOpen.value = true;
@@ -2596,7 +2600,7 @@ async function doCreateAdminRoute(payload: AdminRouteCreatePayload): Promise<voi
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeCreated.id);
     pushSection("admin_route_details");
   } catch (error) {
-    routesError.value = `Ошибка создания рейса: ${(error as Error).message}`;
+    routesError.value = humanizeAdminError(error, "Ошибка создания рейса");
   } finally {
     routesLoading.value = false;
   }
@@ -2620,7 +2624,7 @@ async function doCreateAdminRouteFromOnec(payload: {
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeCreated.id);
     pushSection("admin_route_details");
   } catch (error) {
-    routesError.value = `Ошибка создания рейса: ${(error as Error).message}`;
+    routesError.value = humanizeAdminError(error, "Ошибка создания рейса");
   } finally {
     routesLoading.value = false;
   }
