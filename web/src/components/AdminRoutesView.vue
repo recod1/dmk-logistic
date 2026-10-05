@@ -358,6 +358,13 @@ function defaultContactsText(): string {
   return items.map((item) => `${(item.name || "").trim()} ${(item.phone || "").trim()}`.trim()).join("; ");
 }
 
+function fillLogistContactsIfEmpty(): void {
+  if (!showCreate.value || createForm.logist_contacts.trim()) {
+    return;
+  }
+  createForm.logist_contacts = defaultContactsText();
+}
+
 function openCreate(): void {
   showCreate.value = true;
   showCreateOnec.value = false;
@@ -374,6 +381,11 @@ function openCreate(): void {
   createForm.points = [];
   scrollCreateCardIntoView();
 }
+
+watch(
+  () => props.logisticsContacts,
+  () => fillLogistContactsIfEmpty()
+);
 
 function openCreateOnec(): void {
   showCreateOnec.value = true;
@@ -633,15 +645,6 @@ onMounted(() => {
       >
         <template #label>Водитель (если в тексте не найден / не однозначно)</template>
       </SuggestField>
-      <label>
-        Логист
-        <select v-model.number="onecForm.created_by_user_id">
-          <option :value="0">Из текста 1С или не назначать</option>
-          <option v-for="person in logistics || []" :key="person.id" :value="person.id">
-            {{ person.full_name || person.login }}
-          </option>
-        </select>
-      </label>
       <div class="create-grid onec-grid">
         <SuggestField
           v-model="onecForm.number_auto"
@@ -692,15 +695,6 @@ onMounted(() => {
         >
           <template #label>Водитель</template>
         </SuggestField>
-        <label>
-          Логист
-          <select v-model.number="createForm.created_by_user_id">
-            <option :value="0">Не выбран</option>
-            <option v-for="person in logistics || []" :key="person.id" :value="person.id">
-              {{ person.full_name || person.login }}
-            </option>
-          </select>
-        </label>
         <SuggestField
           v-model="createForm.number_auto"
           :items="vehicleSuggest"
@@ -716,11 +710,11 @@ onMounted(() => {
         </label>
         <label>
           Контакты диспетчера
-          <input v-model="createForm.dispatcher_contacts" placeholder="Из 1С или вручную" />
+          <input v-model="createForm.dispatcher_contacts" placeholder="Вручную, без подстановки из настроек" />
         </label>
         <label>
           Контакты логиста
-          <input v-model="createForm.logist_contacts" />
+          <input v-model="createForm.logist_contacts" placeholder="Из настроек, можно изменить" />
         </label>
         <label>
           Номер регистрации

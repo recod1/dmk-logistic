@@ -588,7 +588,7 @@ function removeRoute(): void {
           <span class="v">{{ route.driver?.full_name || route.driver?.login || "—" }}</span>
         </div>
         <div class="kv">
-          <span class="k">Логист</span>
+          <span class="k">Ответственный</span>
           <span class="v">{{ route.created_by?.full_name || route.created_by?.login || "—" }}</span>
         </div>
         <div class="kv">
@@ -740,7 +740,7 @@ function removeRoute(): void {
             <template #label>Номер прицепа</template>
           </SuggestField>
           <label>
-            Логист
+            Ответственный
             <select v-model.number="editForm.created_by_user_id">
               <option :value="0">Не выбран</option>
               <option v-for="person in logistics || []" :key="person.id" :value="person.id">

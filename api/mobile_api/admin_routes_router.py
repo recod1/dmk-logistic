@@ -906,11 +906,7 @@ def create_route_from_onec(
         strict=False,
     )
     contacts = (parsed.dispatcher_contacts or "").strip()
-    logist_contacts = _resolve_logist_contacts(
-        db,
-        (parsed.logistic_contacts or "").strip() or None,
-        fallback_settings=True,
-    )
+    logist_contacts = _default_logist_contacts(db)
     route = Route(
         id=parsed.route_id,
         legacy_driver_tg_id=legacy_driver_tg_id,

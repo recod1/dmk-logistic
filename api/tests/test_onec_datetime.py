@@ -75,7 +75,10 @@ class OnecParseTests(TestCase):
         self.assertEqual(parsed.route_id, "00ЭК-036813")
         self.assertEqual(parsed.logistic_name, "Петров Пётр")
         self.assertEqual(parsed.dispatcher_contacts, "+7 915 170-05-89")
+        self.assertEqual(parsed.logistic_contacts, "+7 999 123-45-67")
         self.assertNotIn("999 123", parsed.dispatcher_contacts)
+        self.assertNotIn("Петров", parsed.dispatcher_contacts)
+        self.assertNotIn("Петров", parsed.logistic_contacts)
         self.assertEqual(parsed.points[0].date_point, "21.09.2026")
         self.assertEqual(parsed.points[0].point_time, "17:00")
 
@@ -95,6 +98,7 @@ class OnecParseTests(TestCase):
         parsed = parse_onec_message("00ЭК-1\nЗагр: 21.09.2026 17:00 Организация: Склад\n")
         self.assertEqual(parsed.dispatcher_contacts, "")
         self.assertEqual(parsed.logistic_name, "")
+        self.assertEqual(parsed.logistic_contacts, "")
 
     def test_logist_contacts_not_used_as_dispatcher(self) -> None:
         from mobile_api.onec_routes import parse_onec_message
@@ -105,6 +109,19 @@ class OnecParseTests(TestCase):
         self.assertEqual(parsed.dispatcher_contacts, "")
         self.assertEqual(parsed.logistic_contacts, "+7 999 111-22-33")
         self.assertEqual(parsed.points[0].point_time, "13:00")
+
+    def test_logistic_name_is_not_contacts(self) -> None:
+        from mobile_api.onec_routes import parse_onec_message
+
+        parsed = parse_onec_message(
+            "00ЭК-1\nЛогист: Иванов Иван\nКонтакты ООО ДМК: +7 915 170-05-89\n"
+            "Загр: 21.09.2026 13:00 Организация: Склад\n"
+        )
+        self.assertEqual(parsed.logistic_name, "Иванов Иван")
+        self.assertEqual(parsed.logistic_contacts, "")
+        self.assertEqual(parsed.dispatcher_contacts, "+7 915 170-05-89")
+        self.assertNotIn("Иванов", parsed.dispatcher_contacts)
+        self.assertNotIn("Иванов", parsed.logistic_contacts)
 
     def test_splits_org_address_contacts_inkerman_novabev(self) -> None:
         from mobile_api.onec_routes import parse_onec_message
