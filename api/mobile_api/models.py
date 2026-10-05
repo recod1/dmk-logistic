@@ -283,6 +283,18 @@ class WebPushSubscription(Base):
     user: Mapped[User] = relationship(back_populates="web_push_subscriptions")
 
 
+class UserNotificationPref(Base):
+    __tablename__ = "user_notification_prefs"
+
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    mute_point: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    mute_chat: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    mute_routes: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class RouteChatMessage(Base):
     __tablename__ = "route_chat_messages"
 

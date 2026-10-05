@@ -14,7 +14,6 @@ const props = defineProps<{
   saving: boolean;
   error: string;
   includeArchived?: boolean;
-  historyItems?: SalaryRecord[];
 }>();
 
 const emit = defineEmits<{
@@ -23,13 +22,15 @@ const emit = defineEmits<{
   pickDriver: [id: number];
   refreshList: [dateFrom?: string, dateTo?: string];
   toggleArchive: [show: boolean];
-  history: [salaryId: number];
   create: [payload: { driver_user_id: number; salary_line: string }];
   select: [row: SalaryRecord];
   exportCsv: [dateFrom: string, dateTo: string];
 }>();
 
 const q = ref("");
+const createOpen = ref(false);
+const createQuery = ref("");
+const createDriverId = ref(0);
 const salaryLine = ref("");
 const dateFrom = ref("");
 const dateTo = ref("");
@@ -40,6 +41,9 @@ const driverSuggest = computed(() =>
 );
 const orderedItems = computed(() => sortSalaryChronoDesc(props.items));
 const visibleItems = computed(() => orderedItems.value.filter((row) => salaryMatchesTab(row.status_driver, listTab.value)));
+const createDriver = computed(
+  () => props.drivers.find((d) => d.id === createDriverId.value) || props.selectedDriver
+);
 
 const help =
   "37 значений через пробел, как в боте:\nдата г/мг/рд/пр оклад сутки загр2р шаттл загр/выгр дт возврат доп_шаттл доп_точка азс паллет_гипер паллет_метро паллет_ашан 3т 3.5т 5т 10т 12т 12.5т пробег комп_связи стаж 10% премия удержать возмещение др без_сут_др_прем_стажа в_день итого адрес_загр адрес_выгр транспорт прицеп №рейса";
@@ -56,8 +60,16 @@ function applyMonth(): void {
 }
 
 function submit(): void {
-  if (!props.selectedDriver) return;
-  emit("create", { driver_user_id: props.selectedDriver.id, salary_line: salaryLine.value.trim() });
+  const driverId = createDriver.value?.id;
+  if (!driverId || !salaryLine.value.trim()) return;
+  emit("create", { driver_user_id: driverId, salary_line: salaryLine.value.trim() });
+  salaryLine.value = "";
+  createOpen.value = false;
+}
+
+function pickCreateDriver(id: number): void {
+  createDriverId.value = id;
+  emit("pickDriver", id);
 }
 
 function doExport(): void {
@@ -80,8 +92,30 @@ const periodSummary = computed(() => summarizeSalaryPeriod(props.items));
 
 <template>
   <section class="wrap">
-    <button class="ghost back" type="button" @click="emit('back')">← Назад</button>
+    <div class="toolbar">
+      <button class="ghost back" type="button" @click="emit('back')">← Назад</button>
+      <button class="primary create-toggle" type="button" @click="createOpen = !createOpen">
+        {{ createOpen ? "Скрыть форму" : "Создать расчёт" }}
+      </button>
+    </div>
     <p v-if="error" class="error">{{ error }}</p>
+    <div v-if="createOpen" class="card">
+      <h2>Новый расчёт</h2>
+      <SuggestField
+        v-model="createQuery"
+        :items="driverSuggest"
+        :picked="Boolean(createDriver)"
+        placeholder="Начните вводить ФИО или логин"
+        @pick="(item) => pickCreateDriver(item.id)"
+      >
+        <template #label>Водитель</template>
+      </SuggestField>
+      <p class="hint">{{ help }}</p>
+      <textarea v-model="salaryLine" rows="4" class="ta" placeholder="Вставьте строку из 37 значений…" />
+      <button type="button" class="primary" :disabled="saving || !salaryLine.trim() || !createDriver" @click="submit">
+        Сохранить расчёт
+      </button>
+    </div>
     <div class="card">
       <h2>Водитель</h2>
       <SuggestField
@@ -91,12 +125,6 @@ const periodSummary = computed(() => summarizeSalaryPeriod(props.items));
         @pick="(item) => emit('pickDriver', item.id)"
       />
       <p v-if="selectedDriver" class="picked">Выбран: {{ selectedDriver.full_name || selectedDriver.login }} (#{{ selectedDriver.id }})</p>
-    </div>
-    <div v-if="selectedDriver" class="card">
-      <h2>Новый расчёт</h2>
-      <p class="hint">{{ help }}</p>
-      <textarea v-model="salaryLine" rows="4" class="ta" placeholder="Вставьте строку из 37 значений…" />
-      <button type="button" class="primary" :disabled="saving || !salaryLine.trim()" @click="submit">Сохранить расчёт</button>
     </div>
     <div v-if="selectedDriver" class="card">
       <h2>Расчёты водителя</h2>
@@ -133,20 +161,20 @@ const periodSummary = computed(() => summarizeSalaryPeriod(props.items));
         <button type="button" class="tab-btn" :class="{ active: listTab === 'confirmed' }" @click="listTab = 'confirmed'">Подтверждены</button>
       </div>
       <div class="list">
-        <button v-for="r in visibleItems" :key="r.id" type="button" class="row-item" @click="emit('select', r)">
+        <article
+          v-for="r in visibleItems"
+          :key="r.id"
+          class="row-item"
+          role="button"
+          tabindex="0"
+          @click="emit('select', r)"
+          @keydown.enter.prevent="emit('select', r)"
+        >
           <span class="t1">#{{ r.id }} · {{ r.date_salary }}</span>
           <span class="t2">{{ r.total.toFixed(2) }} ₽</span>
           <span class="status" :class="`status--${salaryStatusKey(r.status_driver)}`">{{ salaryStatusLabel(r.status_driver) }}</span>
           <span v-if="salaryCommentText(r.comment_driver)" class="comment">Комментарий: {{ salaryCommentText(r.comment_driver) }}</span>
-          <button type="button" class="ghost" @click.stop="emit('history', r.id)">История</button>
-        </button>
-      </div>
-      <div v-if="historyItems?.length" class="history">
-        <h3>История</h3>
-        <p v-for="h in historyItems" :key="h.id">
-          #{{ h.id }} · {{ h.date_salary }} · {{ h.total.toFixed(2) }} ₽ · {{ salaryStatusLabel(h.status_driver) }}
-          <span v-if="salaryCommentText(h.comment_driver)"> · {{ salaryCommentText(h.comment_driver) }}</span>
-        </p>
+        </article>
       </div>
     </div>
   </section>
@@ -198,11 +226,11 @@ h2 {
 }
 input {
   width: 100%;
-  border-radius: 8px;
-  border: 1px solid #334155;
-  background: #0b1220;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
   color: #fff;
-  padding: 0.45rem 0.55rem;
+  padding: 0.5rem 0.62rem;
   min-width: 0;
 }
 .period {
@@ -293,6 +321,22 @@ input {
   gap: 0.35rem;
   margin-top: 0.5rem;
 }
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.back,
+.create-toggle {
+  width: auto;
+}
+.back {
+  justify-self: start;
+  flex: 0 0 auto;
+}
+.create-toggle {
+  flex: 1 1 auto;
+}
 .row-item {
   text-align: left;
   border: 1px solid #334155;
@@ -302,6 +346,7 @@ input {
   color: #e2e8f0;
   display: grid;
   gap: 0.15rem;
+  cursor: pointer;
 }
 .t1 {
   font-weight: 600;
@@ -344,6 +389,7 @@ input {
   margin: 0 0 0.35rem;
 }
 .ghost {
+  width: auto;
   border: 1px solid #334155;
   border-radius: 8px;
   background: transparent;

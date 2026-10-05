@@ -699,15 +699,14 @@ function removeRoute(): void {
       <section v-if="showEdit" class="edit-card">
         <h3>Редактирование рейса</h3>
         <div class="edit-grid">
-          <label>
-            Номер авто
-            <SuggestField
-              v-model="editForm.number_auto"
-              :items="vehicleSuggest"
-              @update:model-value="(v) => (editForm.number_auto = normalizePlate(v))"
-              @pick="(item) => (editForm.number_auto = item.label)"
-            />
-          </label>
+          <SuggestField
+            v-model="editForm.number_auto"
+            :items="vehicleSuggest"
+            @update:model-value="(v) => (editForm.number_auto = normalizePlate(v))"
+            @pick="(item) => (editForm.number_auto = item.label)"
+          >
+            <template #label>Номер авто</template>
+          </SuggestField>
           <label>
             Температура
             <input v-model="editForm.temperature" />
@@ -720,15 +719,14 @@ function removeRoute(): void {
             Номер регистрации
             <input v-model="editForm.registration_number" />
           </label>
-          <label>
-            Номер прицепа
-            <SuggestField
-              v-model="editForm.trailer_number"
-              :items="trailerSuggest"
-              @update:model-value="(v) => (editForm.trailer_number = normalizePlate(v))"
-              @pick="(item) => (editForm.trailer_number = item.label)"
-            />
-          </label>
+          <SuggestField
+            v-model="editForm.trailer_number"
+            :items="trailerSuggest"
+            @update:model-value="(v) => (editForm.trailer_number = normalizePlate(v))"
+            @pick="(item) => (editForm.trailer_number = item.label)"
+          >
+            <template #label>Номер прицепа</template>
+          </SuggestField>
           <label>
             Логист
             <select v-model.number="editForm.created_by_user_id">

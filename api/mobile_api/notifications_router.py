@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_user
 from mobile_api.db import SessionLocal, get_db
-from mobile_api.models import Notification, Point, Route, User, WebPushSubscription
+from mobile_api.models import Notification, Point, Route, User, UserNotificationPref, WebPushSubscription
 from mobile_api.notifications_realtime import notifications_realtime_hub
 from mobile_api.settings import mobile_settings
 
@@ -513,6 +513,47 @@ def mark_all_notifications_read(
     )
     db.commit()
     return {"updated": int(updated)}
+
+
+class NotificationPrefsPayload(BaseModel):
+    mute_point: bool = False
+    mute_chat: bool = False
+    mute_routes: bool = False
+
+
+def _prefs_to_dict(row: UserNotificationPref | None) -> dict[str, bool]:
+    return {
+        "mute_point": bool(row.mute_point) if row else False,
+        "mute_chat": bool(row.mute_chat) if row else False,
+        "mute_routes": bool(row.mute_routes) if row else False,
+    }
+
+
+@router.get("/v1/notifications/prefs")
+def get_notification_prefs(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    row = db.get(UserNotificationPref, current_user.id)
+    return _prefs_to_dict(row)
+
+
+@router.put("/v1/notifications/prefs")
+def put_notification_prefs(
+    payload: NotificationPrefsPayload,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    row = db.get(UserNotificationPref, current_user.id)
+    if row is None:
+        row = UserNotificationPref(user_id=current_user.id)
+    row.mute_point = payload.mute_point
+    row.mute_chat = payload.mute_chat
+    row.mute_routes = payload.mute_routes
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    return _prefs_to_dict(row)
 
 
 @router.websocket("/v1/notifications/ws")

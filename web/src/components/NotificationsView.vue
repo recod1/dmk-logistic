@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
+import type { NotificationPrefs } from "../api";
+import { NOTIFICATION_KIND_LABELS, notificationKind, type NotificationKind } from "../notificationKinds";
 import type { NotificationDto } from "../types";
 
-defineProps<{
+const props = defineProps<{
   items: NotificationDto[];
   loading: boolean;
   error: string;
@@ -11,6 +13,8 @@ defineProps<{
   canPush?: boolean;
   pushEnabled?: boolean;
   pushHint?: string;
+  showKindTabs?: boolean;
+  prefs?: NotificationPrefs;
 }>();
 
 const emit = defineEmits<{
@@ -20,7 +24,46 @@ const emit = defineEmits<{
   markRead: [notificationId: number];
   markAllRead: [];
   openFromNotification: [item: NotificationDto];
+  updatePrefs: [prefs: NotificationPrefs];
 }>();
+
+const kindTab = ref<NotificationKind>("point");
+
+const visibleItems = computed(() => {
+  if (!props.showKindTabs) {
+    return props.items;
+  }
+  return props.items.filter((item) => notificationKind(item.event_type) === kindTab.value);
+});
+
+const unreadByKind = computed(() => {
+  const counts: Record<NotificationKind, number> = { point: 0, chat: 0, routes: 0 };
+  for (const item of props.items) {
+    if (!item.is_read) {
+      counts[notificationKind(item.event_type)] += 1;
+    }
+  }
+  return counts;
+});
+
+const currentMuted = computed(() => {
+  const prefs = props.prefs;
+  if (!prefs) {
+    return false;
+  }
+  if (kindTab.value === "point") return prefs.mute_point;
+  if (kindTab.value === "chat") return prefs.mute_chat;
+  return prefs.mute_routes;
+});
+
+function toggleKindMute(): void {
+  const prefs = props.prefs ?? { mute_point: false, mute_chat: false, mute_routes: false };
+  const next = { ...prefs };
+  if (kindTab.value === "point") next.mute_point = !prefs.mute_point;
+  else if (kindTab.value === "chat") next.mute_chat = !prefs.mute_chat;
+  else next.mute_routes = !prefs.mute_routes;
+  emit("updatePrefs", next);
+}
 
 function payloadNumber(payload: Record<string, unknown> | null | undefined, key: string): number | null {
   if (!payload || typeof payload !== "object") return null;
@@ -125,18 +168,35 @@ function formatExtra(item: NotificationDto): string {
           <button :disabled="loading || !items.some((item) => !item.is_read)" @click="emit('markAllRead')">Прочитать всё</button>
         </div>
       </div>
+      <div v-if="showKindTabs" class="kind-tabs">
+        <button
+          v-for="kind in (['point', 'chat', 'routes'] as NotificationKind[])"
+          :key="kind"
+          type="button"
+          class="kind-btn"
+          :class="{ active: kindTab === kind }"
+          @click="kindTab = kind"
+        >
+          {{ NOTIFICATION_KIND_LABELS[kind] }}
+          <span v-if="unreadByKind[kind]" class="kind-count">{{ unreadByKind[kind] }}</span>
+        </button>
+      </div>
+      <label v-if="showKindTabs" class="mute-row">
+        <input type="checkbox" :checked="!currentMuted" @change="toggleKindMute" />
+        Оповещения этого типа включены
+      </label>
       <p v-if="pushHint" class="hint">{{ pushHint }}</p>
     </div>
 
     <p v-if="error" class="error">{{ error }}</p>
 
-    <article v-if="!items.length && !loading" class="card empty-card">
+    <article v-if="!visibleItems.length && !loading" class="card empty-card">
       <p>Пока нет событий.</p>
     </article>
 
     <section class="list">
       <article
-        v-for="item in items"
+        v-for="item in visibleItems"
         :key="item.id"
         class="card item-card"
         :class="{ unread: !item.is_read, clickable: notificationIsNavigable(item), stale: item.event_type === 'point_status_stale' }"
@@ -204,6 +264,43 @@ function formatExtra(item: NotificationDto): string {
   border: 1px solid var(--border-strong);
   color: #e2e8f0;
 }
+.kind-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+.kind-btn {
+  width: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: #dbeafe;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+}
+.kind-btn.active {
+  background: var(--primary-strong);
+  border-color: #60a5fa;
+}
+.kind-count {
+  margin-left: 0.3rem;
+  color: #fca5a5;
+  font-weight: 700;
+}
+.mute-row {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-top: 0.45rem;
+  color: var(--text-muted);
+  font-size: 0.82rem;
+}
+.mute-row input {
+  width: 1rem;
+  height: 1rem;
+  accent-color: var(--primary);
+}
 @media (max-width: 760px) {
   .notifications-wrap {
     margin-top: -0.85rem;
@@ -231,6 +328,12 @@ function formatExtra(item: NotificationDto): string {
     font-size: 0.72rem;
     line-height: 1.15;
     white-space: normal;
+  }
+  .kind-btn {
+    flex: 1 1 0;
+    min-width: 0;
+    white-space: normal;
+    line-height: 1.2;
   }
 }
 .list {

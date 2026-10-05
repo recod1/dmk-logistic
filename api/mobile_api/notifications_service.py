@@ -10,7 +10,8 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from mobile_api.models import Notification, Point, Route, User
+from mobile_api.notification_kinds import notification_kind, pref_allows
+from mobile_api.models import Notification, Point, Route, User, UserNotificationPref
 from mobile_api.notifications_realtime import notifications_realtime_hub
 from mobile_api.push_notification_format import build_push_body, resolve_push_context_line
 
@@ -22,6 +23,17 @@ POINT_STATUS_LABELS_RU: dict[str, str] = {
     "docs": "Забрал документы",
     "success": "Выехал с точки",
 }
+
+
+def _filter_recipients_by_pref(db: Session, user_ids: list[int], event_type: str) -> list[int]:
+    if not user_ids:
+        return []
+    kind = notification_kind(event_type)
+    prefs = {
+        int(row.user_id): row
+        for row in db.scalars(select(UserNotificationPref).where(UserNotificationPref.user_id.in_(user_ids))).all()
+    }
+    return [user_id for user_id in user_ids if pref_allows(prefs.get(user_id), kind)]
 
 
 def create_notification_for_users(
@@ -38,6 +50,7 @@ def create_notification_for_users(
 ) -> None:
     skip = {int(x) for x in skip_user_ids or []}
     unique_ids = sorted({int(user_id) for user_id in user_ids if user_id and int(user_id) not in skip})
+    unique_ids = _filter_recipients_by_pref(db, unique_ids, event_type)
     if not unique_ids:
         return
 
@@ -113,18 +126,23 @@ def create_notification_for_users(
                 .where(Notification.user_id == created["user_id"], Notification.is_read.is_(False))
             )
             badge = int(unread or 0)
+            push_extra: dict[str, Any] = {
+                "event_type": event_type,
+                "route_id": route_id,
+                "sync": "driver_routes",
+                "badge": badge,
+                "badgeCount": badge,
+            }
+            if isinstance(payload, dict):
+                for key in ("room_id", "salary_id", "chat_message_id", "salary_chat_message_id"):
+                    if payload.get(key) is not None:
+                        push_extra[key] = payload[key]
             send_web_push_to_users(
                 subscriptions=subs,
                 title=title,
                 body=push_body,
                 notification_id=row.id,
-                extra={
-                    "event_type": event_type,
-                    "route_id": route_id,
-                    "sync": "driver_routes",
-                    "badge": badge,
-                    "badgeCount": badge,
-                },
+                extra=push_extra,
             )
 
 

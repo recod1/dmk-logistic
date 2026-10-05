@@ -820,6 +820,36 @@ export async function markAllNotificationsRead(token: string): Promise<number> {
   return data.updated ?? 0;
 }
 
+export type NotificationPrefs = {
+  mute_point: boolean;
+  mute_chat: boolean;
+  mute_routes: boolean;
+};
+
+export async function getNotificationPrefs(token: string): Promise<NotificationPrefs> {
+  const data = await requestJson<NotificationPrefs>(`${API_BASE}/v1/notifications/prefs`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return {
+    mute_point: Boolean(data.mute_point),
+    mute_chat: Boolean(data.mute_chat),
+    mute_routes: Boolean(data.mute_routes)
+  };
+}
+
+export async function saveNotificationPrefs(token: string, prefs: NotificationPrefs): Promise<NotificationPrefs> {
+  const data = await requestJson<NotificationPrefs>(`${API_BASE}/v1/notifications/prefs`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(prefs)
+  });
+  return {
+    mute_point: Boolean(data.mute_point),
+    mute_chat: Boolean(data.mute_chat),
+    mute_routes: Boolean(data.mute_routes)
+  };
+}
+
 export async function getVapidPublicKey(token: string): Promise<{ public_key: string | null }> {
   return requestJson<{ public_key: string | null }>(`${API_BASE}/v1/notifications/push/vapid-public-key`, {
     headers: {

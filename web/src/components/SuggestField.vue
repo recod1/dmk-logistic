@@ -36,8 +36,8 @@ function onPick(item: SuggestItem): void {
 </script>
 
 <template>
-  <label class="suggest-wrap">
-    <slot name="label" />
+  <div class="suggest-wrap">
+    <span v-if="$slots.label" class="suggest-label"><slot name="label" /></span>
     <input
       :value="modelValue"
       :placeholder="placeholder || 'Начните вводить'"
@@ -61,18 +61,41 @@ function onPick(item: SuggestItem): void {
         {{ item.label }}
       </button>
     </div>
-  </label>
+  </div>
 </template>
 
 <style scoped>
 .suggest-wrap {
   position: relative;
   display: grid;
-  gap: 0.28rem;
+  gap: 0.26rem;
+  min-width: 0;
+  width: 100%;
+}
+.suggest-label {
+  min-width: 0;
+}
+.suggest-wrap input {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text);
+  padding: 0.5rem 0.62rem;
+  font: inherit;
+  font-size: 16px;
+  box-shadow: none;
+}
+.suggest-wrap input::placeholder {
+  color: var(--text-faint);
 }
 .picked {
   margin: 0.15rem 0 0;
-  color: #86efac;
+  color: var(--text-muted);
   font-size: 0.82rem;
 }
 .suggest {
@@ -83,25 +106,27 @@ function onPick(item: SuggestItem): void {
   top: calc(100% + 4px);
   max-height: 220px;
   overflow: auto;
-  border: 1px solid #334155;
+  border: 1px solid var(--border-strong);
   border-radius: 10px;
-  background: #0b1220;
-  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.35);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow);
 }
 .suggest-item {
   width: 100%;
   text-align: left;
   background: transparent;
   border-radius: 0;
-  border-bottom: 1px solid #1e293b;
-  color: #e2e8f0;
+  border: none;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-body);
   padding: 0.45rem 0.65rem;
+  font: inherit;
 }
 .suggest-item:last-child {
   border-bottom: none;
 }
 .suggest-item:hover,
 .suggest-item:focus {
-  background: rgba(37, 99, 235, 0.2);
+  background: var(--primary-soft);
 }
 </style>

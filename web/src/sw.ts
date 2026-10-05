@@ -3,6 +3,7 @@
 import { clientsClaim } from "workbox-core";
 import { precacheAndRoute } from "workbox-precaching";
 
+import { deliverChatFromPush } from "./chatDeliveryBg";
 import { DRIVER_PREFETCH_SYNC_TAG, prefetchAssignedRoutesFromSession } from "./offlinePrefetch";
 
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: string[] };
@@ -35,6 +36,7 @@ self.addEventListener("push", (event: PushEvent) => {
   let title = "ДМК";
   let body = "";
   let badgeCount: number | null = null;
+  let deliveryHint: Record<string, unknown> | null = null;
   try {
     if (event.data) {
       const parsed = event.data.json() as {
@@ -43,11 +45,18 @@ self.addEventListener("push", (event: PushEvent) => {
         badge?: number;
         badgeCount?: number;
         sync?: string;
+        event_type?: string;
+        route_id?: string | null;
+        room_id?: number | string | null;
+        salary_id?: number | string | null;
+        chat_message_id?: number | string | null;
+        salary_chat_message_id?: number | string | null;
       };
       title = parsed.title || title;
       body = parsed.body || body;
       const rawBadge = typeof parsed.badgeCount === "number" ? parsed.badgeCount : parsed.badge;
       badgeCount = typeof rawBadge === "number" && Number.isFinite(rawBadge) ? rawBadge : null;
+      deliveryHint = parsed;
     }
   } catch {
     try {
@@ -58,6 +67,19 @@ self.addEventListener("push", (event: PushEvent) => {
   }
 
   const tasks: Array<Promise<unknown>> = [];
+  if (deliveryHint) {
+    tasks.push(
+      deliverChatFromPush(deliveryHint).then(async (ok) => {
+        if (!ok) {
+          return;
+        }
+        const windows = await self.clients.matchAll({ type: "window", includeUncontrolled: true });
+        for (const client of windows) {
+          client.postMessage({ type: "DMK_CHAT_DELIVERED" });
+        }
+      })
+    );
+  }
 
   const nav = self.navigator as Navigator & {
     setAppBadge?: (count?: number) => Promise<void>;

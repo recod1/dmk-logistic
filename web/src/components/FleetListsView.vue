@@ -99,7 +99,6 @@ function remove(item: FleetItem): void {
       <button type="button" class="tab-btn" :class="{ active: tab === 'trailers' }" @click="switchTab('trailers')">
         Прицепы
       </button>
-      <button type="button" class="ghost" :disabled="loading" @click="emit('refresh')">Обновить</button>
     </div>
     <div class="card">
       <h2>{{ tab === "vehicles" ? "Транспорт" : "Прицепы" }}</h2>
@@ -118,14 +117,30 @@ function remove(item: FleetItem): void {
       <ul class="list">
         <li v-for="item in currentItems" :key="item.id" class="item">
           <template v-if="editId === item.id">
-            <input v-model="editPlate" class="upper" autocapitalize="characters" @input="editPlate = normalizePlate(editPlate)" />
+            <input v-model="editPlate" class="upper grow" autocapitalize="characters" @input="editPlate = normalizePlate(editPlate)" />
             <button type="button" class="secondary" :disabled="saving" @click="saveEdit">Сохранить</button>
             <button type="button" class="ghost" @click="editId = null">Отмена</button>
           </template>
           <template v-else>
             <strong>{{ item.plate }}</strong>
-            <button type="button" class="ghost" :disabled="saving" @click="startEdit(item)">Изменить</button>
-            <button type="button" class="danger" :disabled="saving" @click="remove(item)">Удалить</button>
+            <div class="item-actions">
+              <button type="button" class="icon-btn" :disabled="saving" title="Изменить" aria-label="Изменить" @click="startEdit(item)">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M4 17.25V20h2.75L17.81 8.94l-2.75-2.75L4 17.25Zm16.71-9.96a.996.996 0 0 0 0-1.41l-2.59-2.59a.996.996 0 0 0-1.41 0l-1.83 1.83 4 4 1.83-1.83Z"
+                  />
+                </svg>
+              </button>
+              <button type="button" class="icon-btn danger" :disabled="saving" title="Удалить" aria-label="Удалить" @click="remove(item)">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path
+                    fill="currentColor"
+                    d="M6 19a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V7H6v12ZM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4Z"
+                  />
+                </svg>
+              </button>
+            </div>
           </template>
         </li>
       </ul>
@@ -174,7 +189,7 @@ h2 {
 }
 .hint,
 .empty {
-  color: #94a3b8;
+  color: var(--text-muted);
   font-size: 0.85rem;
 }
 .error {
@@ -190,14 +205,17 @@ h2 {
   flex: 1 1 12rem;
 }
 input {
-  border-radius: 8px;
-  border: 1px solid #334155;
-  background: #0b1220;
-  color: #fff;
-  padding: 0.45rem 0.55rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--bg-elevated);
+  color: var(--text);
+  padding: 0.5rem 0.62rem;
 }
 .upper {
   text-transform: uppercase;
+}
+.grow {
+  flex: 1 1 10rem;
 }
 .list {
   list-style: none;
@@ -212,15 +230,56 @@ input {
   gap: 0.4rem;
   align-items: center;
   padding: 0.55rem 0.2rem;
-  border-bottom: 1px solid #1e293b;
+  border-bottom: 1px solid var(--border);
 }
 .item strong {
   flex: 1 1 8rem;
   letter-spacing: 0.04em;
 }
-.danger {
-  background: transparent;
+.item-actions {
+  display: flex;
+  gap: 0.3rem;
+}
+.icon-btn {
+  width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 10px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: #bfdbfe;
+}
+.icon-btn svg {
+  width: 1.05rem;
+  height: 1.05rem;
+}
+.icon-btn.danger {
   color: #fca5a5;
-  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-color: rgba(248, 113, 113, 0.35);
+  background: rgba(127, 29, 29, 0.25);
+}
+.primary {
+  border: none;
+  border-radius: 10px;
+  background: var(--success-strong);
+  color: #fff;
+  padding: 0.45rem 0.75rem;
+}
+.secondary {
+  border: none;
+  border-radius: 10px;
+  background: var(--primary);
+  color: #fff;
+  padding: 0.4rem 0.7rem;
+}
+.ghost {
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: transparent;
+  color: #cbd5e1;
+  padding: 0.4rem 0.7rem;
 }
 </style>

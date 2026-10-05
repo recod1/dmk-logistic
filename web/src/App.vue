@@ -88,7 +88,9 @@ import {
   commentSalary,
   deleteSalary,
   replaceSalary,
-  getSalaryHistory,
+  getNotificationPrefs,
+  saveNotificationPrefs,
+  type NotificationPrefs,
   requestDriverLocation,
   reportDriverLocation,
   isOfflineLikeError,
@@ -150,6 +152,7 @@ import {
 import { DRIVER_PREFETCH_SYNC_TAG, persistPrefetchPayload, prefetchAssignedRoutesFromSession, routeToListItem } from "./offlinePrefetch";
 import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
 import { prepareDocumentImageBlobs } from "./imageUploadPrep";
+import { parseChatDeliveryHint } from "./chatDeliveryBg";
 import { isAccountantRole, isAdminRole, isFleetEditorRole, isLogisticRole, isRouteManagerRole } from "./roles";
 import { applyOverlaysToPoints, applyStageOverlayToPoint } from "./pointOverlay";
 import { isPointDone, nextStatus, nextStatusLabel } from "./status";
@@ -222,6 +225,7 @@ const driverAssignedRoutes = ref<DriverRouteListItem[]>([]);
 const driverHistoryRoutes = ref<DriverRouteListItem[]>([]);
 const driverRoutesLoading = ref(false);
 const unreadNotificationsCount = ref(0);
+const notificationPrefs = ref<NotificationPrefs>({ mute_point: false, mute_chat: false, mute_routes: false });
 
 const adminUsers = ref<AdminUser[]>([]);
 const usersLoading = ref(false);
@@ -350,7 +354,6 @@ const salaryChatError = ref("");
 const salaryAccountantDrivers = ref<Array<{ id: number; login: string; full_name: string | null; legacy_tg_id: string | null }>>([]);
 const salaryAccountantItems = ref<SalaryRecord[]>([]);
 const salaryIncludeArchived = ref(false);
-const salaryHistoryItems = ref<SalaryRecord[]>([]);
 const salarySelectedDriver = ref<{ id: number; login: string; full_name: string | null } | null>(null);
 const salarySaving = ref(false);
 const salaryDetailBackSection = ref<AppSection>("driver_salary");
@@ -374,6 +377,7 @@ const isDriver = computed(() => authUser.value?.role_code === "driver");
 const isLogistic = computed(() => isLogisticRole(authUser.value?.role_code || ""));
 const isFleetEditor = computed(() => isFleetEditorRole(authUser.value?.role_code || ""));
 const isAccountant = computed(() => isAccountantRole(authUser.value?.role_code || ""));
+const showNotificationKindTabs = computed(() => isAdmin.value || isLogistic.value);
 const salaryDriverOptions = computed(() => {
   const fromRoutes = routeDrivers.value.map((d) => ({
     id: d.id,
@@ -1215,6 +1219,51 @@ function noteChatDelivered(kind: "route" | "room" | "salary", id: string | numbe
   }
 }
 
+function catchUpOpenChatDeliveries(): void {
+  const myId = authUser.value?.id;
+  if (!myId) {
+    return;
+  }
+  const lastRoute = [...chatMessages.value].reverse().find((m) => m.user_id !== myId);
+  if (lastRoute && chatRouteId.value) {
+    noteChatDelivered("route", chatRouteId.value, lastRoute.id, lastRoute.user_id);
+  }
+  const lastRoom = [...chatRoomMessages.value].reverse().find((m) => m.user_id !== myId);
+  if (lastRoom && chatRoomId.value) {
+    noteChatDelivered("room", chatRoomId.value, lastRoom.id, lastRoom.user_id);
+  }
+  const lastSalary = [...salaryChatMessages.value].reverse().find((m) => m.user_id !== myId);
+  if (lastSalary && salaryChatSalaryId.value) {
+    noteChatDelivered("salary", salaryChatSalaryId.value, lastSalary.id, lastSalary.user_id);
+  }
+}
+
+function catchUpChatDeliveriesFromNotifications(items: NotificationDto[]): void {
+  const best = new Map<string, { kind: "route" | "room" | "salary"; id: string | number; messageId: number }>();
+  for (const item of items) {
+    const payload = item.payload && typeof item.payload === "object" ? item.payload : {};
+    const hint = parseChatDeliveryHint({
+      event_type: item.event_type,
+      route_id: item.route_id || (typeof payload.route_id === "string" ? payload.route_id : null),
+      room_id: payload.room_id as number | string | null | undefined,
+      salary_id: payload.salary_id as number | string | null | undefined,
+      chat_message_id: payload.chat_message_id as number | string | null | undefined,
+      salary_chat_message_id: payload.salary_chat_message_id as number | string | null | undefined
+    });
+    if (!hint) {
+      continue;
+    }
+    const key = `${hint.kind}:${hint.id}`;
+    const prev = best.get(key);
+    if (!prev || hint.messageId > prev.messageId) {
+      best.set(key, hint);
+    }
+  }
+  for (const hint of best.values()) {
+    noteChatDelivered(hint.kind, hint.id, hint.messageId, -1);
+  }
+}
+
 function connectChatSocket(): void {
   if (!authToken.value || !realtimeSocketsAllowed || isPageHidden()) {
     return;
@@ -1470,6 +1519,9 @@ function handleIncomingNotification(
     }
     if ((options.bumpChatNav ?? playEffects) && !item.is_read && item.event_type === "chat_message") {
       applyChatNavFromNotification(item);
+    }
+    if (item.event_type === "chat_message") {
+      catchUpChatDeliveriesFromNotifications([item]);
     }
   }
 
@@ -2129,10 +2181,13 @@ async function hydrateDriverRoutesFromCache(): Promise<void> {
 }
 
 function onServiceWorkerMessage(event: MessageEvent): void {
-  if (event.data?.type !== "DMK_ROUTES_PREFETCHED") {
+  if (event.data?.type === "DMK_ROUTES_PREFETCHED") {
+    void hydrateDriverRoutesFromCache();
     return;
   }
-  void hydrateDriverRoutesFromCache();
+  if (event.data?.type === "DMK_CHAT_DELIVERED") {
+    catchUpOpenChatDeliveries();
+  }
 }
 
 function onForegroundResume(): void {
@@ -2144,7 +2199,10 @@ function onForegroundResume(): void {
     forceReconnectRealtimeSockets();
   }
   startNotificationsPolling();
-  void refreshNotifications();
+  catchUpOpenChatDeliveries();
+  void refreshNotifications().then(() => {
+    catchUpChatDeliveriesFromNotifications(notifications.value);
+  });
   void flushPendingNotificationReads();
   void refreshRouteChatUnread();
   void refreshChatNavUnread();
@@ -2997,6 +3055,7 @@ async function refreshNotifications(): Promise<void> {
     const latestNotifications = await listNotifications(authToken.value, 50);
     latestNotifications.forEach((item) => handleIncomingNotification(item, { playEffects: false, syncDriverState: true }));
     notifications.value = latestNotifications;
+    catchUpChatDeliveriesFromNotifications(latestNotifications);
     try {
       unreadNotificationsCount.value = await getUnreadNotificationsCount(authToken.value);
     } catch (error) {
@@ -3767,8 +3826,32 @@ function openNotifications(): void {
   pushSection("notifications");
   void refreshWebPushSubscriptionState();
   void refreshNotifications();
+  void refreshNotificationPrefs();
   if (!webPushSubscribed.value) {
     void trySubscribeWebPush();
+  }
+}
+
+async function refreshNotificationPrefs(): Promise<void> {
+  if (!authToken.value || !showNotificationKindTabs.value) {
+    return;
+  }
+  try {
+    notificationPrefs.value = await getNotificationPrefs(authToken.value);
+  } catch {
+    // keep last known prefs
+  }
+}
+
+async function updateNotificationPrefs(prefs: NotificationPrefs): Promise<void> {
+  if (!authToken.value) {
+    return;
+  }
+  notificationPrefs.value = prefs;
+  try {
+    notificationPrefs.value = await saveNotificationPrefs(authToken.value, prefs);
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
   }
 }
 
@@ -4163,15 +4246,6 @@ async function doSalaryReplace(): Promise<void> {
   }
 }
 
-async function loadSalaryHistory(salaryId: number): Promise<void> {
-  if (!authToken.value) return;
-  try {
-    salaryHistoryItems.value = await getSalaryHistory(authToken.value, salaryId);
-  } catch (error) {
-    salaryError.value = (error as Error).message;
-  }
-}
-
 async function toggleSalaryArchive(show: boolean): Promise<void> {
   salaryIncludeArchived.value = show;
   await refreshAccountantSalaryList();
@@ -4313,6 +4387,12 @@ async function createSalaryFromAccountant(payload: { driver_user_id: number; sal
   salaryError.value = "";
   try {
     await createSalaryManual(authToken.value, payload);
+    const d =
+      salaryAccountantDrivers.value.find((x) => x.id === payload.driver_user_id) ||
+      routeDrivers.value.find((x) => x.id === payload.driver_user_id);
+    if (d) {
+      salarySelectedDriver.value = { id: d.id, login: d.login, full_name: d.full_name };
+    }
     syncMessage.value = "Расчёт создан";
     await refreshAccountantSalaryList();
   } catch (error) {
@@ -5153,10 +5233,8 @@ onUnmounted(() => {
         @search="(q) => void searchSalaryDriversForAccounting(q)"
         @pick-driver="(id) => void pickSalaryAccountantDriver(id)"
         :include-archived="salaryIncludeArchived"
-        :history-items="salaryHistoryItems"
         @refresh-list="(a, b) => void refreshAccountantSalaryList(a, b)"
         @toggle-archive="(v) => void toggleSalaryArchive(v)"
-        @history="(id) => void loadSalaryHistory(id)"
         @create="(p) => void createSalaryFromAccountant(p)"
         @select="(r) => openSalaryDetail(r, 'salary_accounting')"
         @export-csv="exportAccountantSalaryCsv"
@@ -5231,12 +5309,15 @@ onUnmounted(() => {
         :can-push="pushIsSupported"
         :push-enabled="webPushSubscribed"
         :push-hint="pushHint"
+        :show-kind-tabs="showNotificationKindTabs"
+        :prefs="notificationPrefs"
         @refresh="refreshNotifications"
         @enable-push="trySubscribeWebPush"
         @disable-push="tryUnsubscribeWebPush"
         @mark-read="doMarkNotificationRead"
         @mark-all-read="doMarkAllNotificationsRead"
         @open-from-notification="openNotificationFromItem"
+        @update-prefs="(p) => void updateNotificationPrefs(p)"
       />
     </section>
 

@@ -16,8 +16,7 @@ const LATIN_TO_CYR: Record<string, string> = {
 const PATTERN_STD = /^[А-ЯA-Z]\d{3}[А-ЯA-Z]{2}\d{2,3}$/;
 const PATTERN_SPEC = /^[А-ЯA-Z]{2}\d{6}$/;
 
-export const PLATE_HINT =
-  "Формат: А111АА22 / А111АА222 или ЕН068477 (2 буквы + 6 цифр)";
+export const PLATE_HINT = "Формат: А111АА22 / А111АА222 или ЕН068477";
 
 export function normalizePlate(raw?: string | null): string {
   const text = (raw || "").trim().toUpperCase().replace(/[\s-]/g, "");
