@@ -49,6 +49,7 @@ const emit = defineEmits<{
       number_auto?: string;
       temperature?: string;
       dispatcher_contacts?: string;
+      logist_contacts?: string;
       registration_number?: string;
       trailer_number?: string;
       points: AdminRoutePointPayload[];
@@ -248,6 +249,7 @@ const createForm = reactive({
   number_auto: "",
   temperature: "",
   dispatcher_contacts: "",
+  logist_contacts: "",
   registration_number: "",
   trailer_number: "",
   points: [] as PointForm[]
@@ -365,7 +367,8 @@ function openCreate(): void {
   createDriverQuery.value = "";
   createForm.number_auto = "";
   createForm.temperature = "";
-  createForm.dispatcher_contacts = defaultContactsText();
+  createForm.dispatcher_contacts = "";
+  createForm.logist_contacts = defaultContactsText();
   createForm.registration_number = "";
   createForm.trailer_number = "";
   createForm.points = [];
@@ -441,6 +444,7 @@ function submitCreate(): void {
     number_auto: createForm.number_auto.trim(),
     temperature: createForm.temperature.trim(),
     dispatcher_contacts: createForm.dispatcher_contacts.trim(),
+    logist_contacts: createForm.logist_contacts.trim(),
     registration_number: createForm.registration_number.trim(),
     trailer_number: createForm.trailer_number.trim(),
     points: toPointPayload(createForm.points).filter((point) => point.place_point && point.date_point)
@@ -711,8 +715,12 @@ onMounted(() => {
           <input v-model="createForm.temperature" />
         </label>
         <label>
+          Контакты диспетчера
+          <input v-model="createForm.dispatcher_contacts" placeholder="Из 1С или вручную" />
+        </label>
+        <label>
           Контакты логиста
-          <input v-model="createForm.dispatcher_contacts" />
+          <input v-model="createForm.logist_contacts" />
         </label>
         <label>
           Номер регистрации

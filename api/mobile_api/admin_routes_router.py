@@ -174,6 +174,7 @@ class AdminRouteCreatePayload(BaseModel):
     number_auto: str = ""
     temperature: str = ""
     dispatcher_contacts: str = ""
+    logist_contacts: str | None = None
     registration_number: str = ""
     trailer_number: str = ""
     points: list[AdminRoutePointCreate] = Field(default_factory=list, max_items=200)
@@ -200,6 +201,7 @@ class UpdateAdminRoutePayload(BaseModel):
     number_auto: str | None = Field(default=None, max_length=64)
     temperature: str | None = Field(default=None, max_length=64)
     dispatcher_contacts: str | None = Field(default=None, max_length=2000)
+    logist_contacts: str | None = Field(default=None, max_length=2000)
     registration_number: str | None = Field(default=None, max_length=64)
     trailer_number: str | None = Field(default=None, max_length=64)
     created_by_user_id: int | None = None
@@ -506,6 +508,7 @@ def _route_out(
         "number_auto": route.number_auto,
         "temperature": route.temperature,
         "dispatcher_contacts": route.dispatcher_contacts,
+        "logist_contacts": route.logist_contacts,
         "registration_number": route.registration_number,
         "trailer_number": route.trailer_number,
         "accepted_at": route.accepted_at.isoformat() if route.accepted_at else None,
@@ -614,6 +617,14 @@ def _default_logist_contacts(db: Session) -> str:
     items = logistics_contacts_payload(db)
     parts = [f"{(row.get('name') or '').strip()} {(row.get('phone') or '').strip()}".strip() for row in items]
     return "; ".join(part for part in parts if part)
+
+
+def _resolve_logist_contacts(db: Session, raw: str | None, *, fallback_settings: bool) -> str:
+    if raw is not None:
+        return raw.strip()
+    if fallback_settings:
+        return _default_logist_contacts(db)
+    return ""
 
 
 def _optional_plate(raw: str | None, *, required: bool = False) -> str:
@@ -825,7 +836,8 @@ def create_route(
         number_auto=(payload.number_auto or "").strip(),
         trailer_number=(payload.trailer_number or "").strip(),
     )
-    contacts = (payload.dispatcher_contacts or "").strip() or _default_logist_contacts(db)
+    contacts = (payload.dispatcher_contacts or "").strip()
+    logist_contacts = _resolve_logist_contacts(db, payload.logist_contacts, fallback_settings=True)
     route = Route(
         id=route_id,
         legacy_driver_tg_id=legacy_driver_tg_id,
@@ -835,6 +847,7 @@ def create_route(
         number_auto=number_auto,
         temperature=(payload.temperature or "").strip(),
         dispatcher_contacts=contacts,
+        logist_contacts=logist_contacts,
         registration_number=(payload.registration_number or "").strip(),
         trailer_number=trailer_number,
     )
@@ -892,7 +905,12 @@ def create_route_from_onec(
         trailer_number=((payload.trailer_number or parsed.trailer_number) or "").strip(),
         strict=False,
     )
-    contacts = (parsed.dispatcher_contacts or "").strip() or _default_logist_contacts(db)
+    contacts = (parsed.dispatcher_contacts or "").strip()
+    logist_contacts = _resolve_logist_contacts(
+        db,
+        (parsed.logistic_contacts or "").strip() or None,
+        fallback_settings=True,
+    )
     route = Route(
         id=parsed.route_id,
         legacy_driver_tg_id=legacy_driver_tg_id,
@@ -902,6 +920,7 @@ def create_route_from_onec(
         number_auto=number_auto,
         temperature=(parsed.temperature or "").strip(),
         dispatcher_contacts=contacts,
+        logist_contacts=logist_contacts,
         registration_number=(parsed.registration_number or "").strip(),
         trailer_number=trailer_number,
     )
@@ -1319,8 +1338,13 @@ def update_route(
         if item:
             changes.append(item)
     if payload.dispatcher_contacts is not None:
-        item = _changed_text("Контакты логиста", route.dispatcher_contacts, payload.dispatcher_contacts)
+        item = _changed_text("Контакты диспетчера", route.dispatcher_contacts, payload.dispatcher_contacts)
         route.dispatcher_contacts = payload.dispatcher_contacts.strip()
+        if item:
+            changes.append(item)
+    if payload.logist_contacts is not None:
+        item = _changed_text("Контакты логиста", route.logist_contacts, payload.logist_contacts)
+        route.logist_contacts = payload.logist_contacts.strip()
         if item:
             changes.append(item)
     if payload.registration_number is not None:

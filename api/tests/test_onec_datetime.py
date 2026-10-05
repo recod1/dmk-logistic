@@ -96,13 +96,14 @@ class OnecParseTests(TestCase):
         self.assertEqual(parsed.dispatcher_contacts, "")
         self.assertEqual(parsed.logistic_name, "")
 
-    def test_logist_contacts_fill_when_no_dispatcher(self) -> None:
+    def test_logist_contacts_not_used_as_dispatcher(self) -> None:
         from mobile_api.onec_routes import parse_onec_message
 
         parsed = parse_onec_message(
             "00ЭК-1\nКонтакты логистов: +7 999 111-22-33\nЗагр: 21.09.2026 13:00 Организация: Склад\n"
         )
-        self.assertEqual(parsed.dispatcher_contacts, "+7 999 111-22-33")
+        self.assertEqual(parsed.dispatcher_contacts, "")
+        self.assertEqual(parsed.logistic_contacts, "+7 999 111-22-33")
         self.assertEqual(parsed.points[0].point_time, "13:00")
 
     def test_splits_org_address_contacts_inkerman_novabev(self) -> None:

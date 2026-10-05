@@ -82,6 +82,8 @@ function splitPhones(raw: string): string[] {
 }
 
 const dispatcherPhones = computed(() => splitPhones(props.route.dispatcher_contacts || ""));
+const logistContactText = computed(() => (props.route.logist_contacts || "").trim());
+const logistPhones = computed(() => splitPhones(logistContactText.value));
 
 const logisticsContacts = computed(() => {
   const fromSettings = (props.logisticsContacts ?? []).filter((item) => (item.name || "").trim() && (item.phone || "").trim());
@@ -212,7 +214,7 @@ function showRevert(pointId: number): boolean {
           <span class="v">{{ route.temperature || "—" }}</span>
         </div>
         <div class="kv">
-          <span class="k">Логист</span>
+          <span class="k">Контакты диспетчера</span>
           <span class="v">
             <span v-if="route.dispatcher_contacts" class="contacts">
               <a
@@ -229,9 +231,21 @@ function showRevert(pointId: number): boolean {
           </span>
         </div>
         <div class="kv kv-contacts">
-          <span class="k">Контакты логистов</span>
+          <span class="k">Контакты логиста</span>
           <span class="v">
-            <span v-if="logisticsContacts.length" class="contacts">
+            <span v-if="logistContactText" class="contacts">
+              <a
+                v-for="phone in logistPhones"
+                :key="phone"
+                class="tel"
+                :href="`tel:${phone}`"
+                @click.stop
+              >
+                {{ phone }}
+              </a>
+              <span v-if="!logistPhones.length">{{ logistContactText }}</span>
+            </span>
+            <span v-else-if="logisticsContacts.length" class="contacts">
               <a
                 v-for="c in logisticsContacts"
                 :key="`${c.name}-${c.phone}`"

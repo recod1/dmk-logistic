@@ -28,6 +28,7 @@ class OnecParsedRoute:
     dispatcher_contacts: str
     registration_number: str
     points: list[OnecPoint]
+    logistic_contacts: str = ""
 
 
 def _clean_lines(raw: str) -> list[str]:
@@ -231,7 +232,8 @@ def parse_onec_message(raw: str) -> OnecParsedRoute:
         number_auto=number_auto.strip(),
         trailer_number=trailer_number.strip(),
         temperature=temperature.strip(),
-        dispatcher_contacts=_pick_dispatcher_contacts(contact_hits) or logistic_contacts.strip(),
+        dispatcher_contacts=_pick_dispatcher_contacts(contact_hits),
         registration_number=registration_number.strip(),
         points=points,
+        logistic_contacts=logistic_contacts.strip(),
     )

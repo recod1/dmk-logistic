@@ -68,6 +68,7 @@ class Route(Base):
     number_auto: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
     temperature: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
     dispatcher_contacts: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    logist_contacts: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     registration_number: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
     trailer_number: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
     accepted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

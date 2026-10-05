@@ -717,6 +717,7 @@ export async function updateAdminRoute(
     number_auto?: string;
     temperature?: string;
     dispatcher_contacts?: string;
+    logist_contacts?: string;
     registration_number?: string;
     trailer_number?: string;
     created_by_user_id?: number;

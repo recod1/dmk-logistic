@@ -67,6 +67,19 @@ function submit(): void {
   createOpen.value = false;
 }
 
+function openCreate(): void {
+  createOpen.value = true;
+  createQuery.value = props.selectedDriver
+    ? `${props.selectedDriver.full_name || props.selectedDriver.login}`.trim()
+    : "";
+  createDriverId.value = props.selectedDriver?.id || 0;
+  salaryLine.value = "";
+}
+
+function closeCreate(): void {
+  createOpen.value = false;
+}
+
 function pickCreateDriver(id: number): void {
   createDriverId.value = id;
   emit("pickDriver", id);
@@ -91,15 +104,12 @@ const periodSummary = computed(() => summarizeSalaryPeriod(props.items));
 </script>
 
 <template>
-  <section class="wrap">
+  <section v-if="createOpen" class="wrap">
     <div class="toolbar">
-      <button class="ghost back" type="button" @click="emit('back')">← Назад</button>
-      <button class="primary create-toggle" type="button" @click="createOpen = !createOpen">
-        {{ createOpen ? "Скрыть форму" : "Создать расчёт" }}
-      </button>
+      <button class="ghost back" type="button" @click="closeCreate">← Назад</button>
     </div>
     <p v-if="error" class="error">{{ error }}</p>
-    <div v-if="createOpen" class="card">
+    <div class="card">
       <h2>Новый расчёт</h2>
       <SuggestField
         v-model="createQuery"
@@ -116,6 +126,13 @@ const periodSummary = computed(() => summarizeSalaryPeriod(props.items));
         Сохранить расчёт
       </button>
     </div>
+  </section>
+  <section v-else class="wrap">
+    <div class="toolbar">
+      <button class="ghost back" type="button" @click="emit('back')">← Назад</button>
+      <button class="primary" type="button" @click="openCreate">Создать расчёт</button>
+    </div>
+    <p v-if="error" class="error">{{ error }}</p>
     <div class="card">
       <h2>Водитель</h2>
       <SuggestField
@@ -323,19 +340,16 @@ input {
 }
 .toolbar {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 0.5rem;
 }
-.back,
-.create-toggle {
+.toolbar button {
   width: auto;
+  flex: 0 0 auto;
 }
 .back {
   justify-self: start;
-  flex: 0 0 auto;
-}
-.create-toggle {
-  flex: 1 1 auto;
 }
 .row-item {
   text-align: left;
@@ -404,6 +418,7 @@ input {
   padding: 0.35rem 0.55rem;
 }
 .primary {
+  width: auto;
   border: none;
   border-radius: 8px;
   background: #16a34a;

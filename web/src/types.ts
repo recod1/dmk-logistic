@@ -86,6 +86,7 @@ export interface RouteDto {
   number_auto: string;
   temperature: string;
   dispatcher_contacts: string;
+  logist_contacts?: string;
   registration_number: string;
   trailer_number: string;
   created_at: string | null;
@@ -198,6 +199,7 @@ export interface AdminRouteCreatePayload {
   number_auto?: string;
   temperature?: string;
   dispatcher_contacts?: string;
+  logist_contacts?: string;
   registration_number?: string;
   trailer_number?: string;
   points?: AdminRoutePointPayload[];
@@ -211,6 +213,7 @@ export interface AdminRoute {
   number_auto: string;
   temperature: string;
   dispatcher_contacts: string;
+  logist_contacts?: string;
   registration_number: string;
   trailer_number: string;
   accepted_at: string | null;
@@ -339,6 +342,7 @@ export interface DriverRouteListItem {
   number_auto: string;
   temperature: string;
   dispatcher_contacts: string;
+  logist_contacts?: string;
   registration_number: string;
   trailer_number: string;
   created_at: string | null;

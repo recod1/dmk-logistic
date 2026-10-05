@@ -75,6 +75,7 @@ const emit = defineEmits<{
       number_auto?: string;
       temperature?: string;
       dispatcher_contacts?: string;
+      logist_contacts?: string;
       registration_number?: string;
       trailer_number?: string;
       created_by_user_id?: number;
@@ -115,6 +116,7 @@ const editForm = reactive({
   number_auto: "",
   temperature: "",
   dispatcher_contacts: "",
+  logist_contacts: "",
   registration_number: "",
   trailer_number: "",
   created_by_user_id: 0,
@@ -483,6 +485,7 @@ watch(
     editForm.number_auto = route.number_auto || "";
     editForm.temperature = route.temperature || "";
     editForm.dispatcher_contacts = route.dispatcher_contacts || "";
+    editForm.logist_contacts = route.logist_contacts || "";
     editForm.registration_number = route.registration_number || "";
     editForm.trailer_number = route.trailer_number || "";
     editForm.created_by_user_id = route.created_by?.id ?? 0;
@@ -539,6 +542,7 @@ function submitEdit(): void {
     number_auto: editForm.number_auto.trim(),
     temperature: editForm.temperature.trim(),
     dispatcher_contacts: editForm.dispatcher_contacts.trim(),
+    logist_contacts: editForm.logist_contacts.trim(),
     registration_number: editForm.registration_number.trim(),
     trailer_number: editForm.trailer_number.trim(),
     created_by_user_id: editForm.created_by_user_id || undefined,
@@ -614,8 +618,12 @@ function removeRoute(): void {
           <span class="v">{{ route.temperature || "—" }}</span>
         </div>
         <div class="kv">
-          <span class="k">Контакты логиста</span>
+          <span class="k">Контакты диспетчера</span>
           <span class="v">{{ route.dispatcher_contacts || "—" }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">Контакты логиста</span>
+          <span class="v">{{ route.logist_contacts || "—" }}</span>
         </div>
         <div class="kv">
           <span class="k">N регистрации</span>
@@ -712,8 +720,12 @@ function removeRoute(): void {
             <input v-model="editForm.temperature" />
           </label>
           <label>
-            Контакты логиста
+            Контакты диспетчера
             <input v-model="editForm.dispatcher_contacts" />
+          </label>
+          <label>
+            Контакты логиста
+            <input v-model="editForm.logist_contacts" />
           </label>
           <label>
             Номер регистрации
