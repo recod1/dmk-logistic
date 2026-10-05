@@ -212,7 +212,7 @@ function showRevert(pointId: number): boolean {
           <span class="v">{{ route.temperature || "—" }}</span>
         </div>
         <div class="kv">
-          <span class="k">Диспетчер</span>
+          <span class="k">Логист</span>
           <span class="v">
             <span v-if="route.dispatcher_contacts" class="contacts">
               <a

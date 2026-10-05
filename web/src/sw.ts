@@ -66,7 +66,11 @@ self.addEventListener("push", (event: PushEvent) => {
   if (typeof nav?.setAppBadge === "function") {
     try {
       tasks.push(
-        badgeCount != null && badgeCount > 0 ? nav.setAppBadge(badgeCount) : nav.setAppBadge()
+        badgeCount != null && badgeCount > 0
+          ? nav.setAppBadge(badgeCount)
+          : typeof nav.clearAppBadge === "function"
+            ? nav.clearAppBadge()
+            : nav.setAppBadge(0)
       );
     } catch {
       // ignore
@@ -117,5 +121,22 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
   const type = (event.data as { type?: string } | null)?.type;
   if (type === "DMK_PREFETCH") {
     event.waitUntil(prefetchDriverRoutesInBackground());
+  }
+  if (type === "DMK_SET_BADGE") {
+    const count = Number((event.data as { count?: number } | null)?.count);
+    const nav = self.navigator as Navigator & {
+      setAppBadge?: (count?: number) => Promise<void>;
+      clearAppBadge?: () => Promise<void>;
+    };
+    if (typeof nav?.setAppBadge !== "function") {
+      return;
+    }
+    if (Number.isFinite(count) && count > 0) {
+      event.waitUntil(nav.setAppBadge(count));
+    } else if (typeof nav.clearAppBadge === "function") {
+      event.waitUntil(nav.clearAppBadge());
+    } else {
+      event.waitUntil(nav.setAppBadge(0));
+    }
   }
 });

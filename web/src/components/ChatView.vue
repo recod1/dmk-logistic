@@ -9,6 +9,7 @@ export type ChatMessage = {
   text: string;
   created_at: string;
   read?: boolean;
+  delivered?: boolean;
   attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
 };
 
@@ -66,6 +67,12 @@ const canSubmit = computed(() => props.canSend && draft.value.trim().length > 0 
 
 function isMine(message: ChatMessage): boolean {
   return Boolean(props.currentUserId) && message.user_id === props.currentUserId;
+}
+
+function tickTitle(message: ChatMessage): string {
+  if (message.read) return "Прочитано";
+  if (message.delivered) return "Получено";
+  return "Отправлено";
 }
 
 function messageDayKey(value: string): string {
@@ -348,11 +355,19 @@ onUnmounted(() => {
             </div>
             <div class="bubble-foot">
               <span class="time">{{ new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }}</span>
-              <span v-if="isMine(m)" class="ticks" :class="{ read: Boolean(m.read) }" :title="m.read ? 'Прочитано' : 'Отправлено'">
+              <span
+                v-if="isMine(m)"
+                class="ticks"
+                :class="{ delivered: Boolean(m.delivered) && !m.read, read: Boolean(m.read) }"
+                :title="tickTitle(m)"
+              >
                 <svg viewBox="0 0 12 10" aria-hidden="true">
                   <path d="M1.2 5.2 4.1 8.1 10.6 1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
-                <svg v-if="m.read" class="tick-2" viewBox="0 0 12 10" aria-hidden="true">
+                <svg v-if="m.delivered || m.read" class="tick-2" viewBox="0 0 12 10" aria-hidden="true">
+                  <path d="M1.2 5.2 4.1 8.1 10.6 1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <svg v-if="m.read" class="tick-3" viewBox="0 0 12 10" aria-hidden="true">
                   <path d="M1.2 5.2 4.1 8.1 10.6 1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
                 </svg>
               </span>
@@ -587,6 +602,12 @@ onUnmounted(() => {
 }
 .ticks .tick-2 {
   margin-left: -7px;
+}
+.ticks .tick-3 {
+  margin-left: -7px;
+}
+.ticks.delivered {
+  color: rgba(255, 255, 255, 0.72);
 }
 .ticks.read {
   color: #7ec8f5;

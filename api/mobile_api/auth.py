@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.db import get_db
 from mobile_api.models import User
-from mobile_api.roles import ADMIN_ACCESS_ROLES, ROUTE_MANAGER_ROLES, RoleCode, normalize_role_code
+from mobile_api.roles import ADMIN_ACCESS_ROLES, FLEET_EDITOR_ROLES, ROUTE_MANAGER_ROLES, RoleCode, normalize_role_code
 from mobile_api.settings import mobile_settings
 
 
@@ -81,6 +81,16 @@ def get_current_route_manager(current_user: User = Depends(get_current_user)) ->
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Route manager role required") from exc
     if role_code not in ROUTE_MANAGER_ROLES:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Route manager role required")
+    return current_user
+
+
+def get_current_fleet_editor(current_user: User = Depends(get_current_user)) -> User:
+    try:
+        role_code = normalize_role_code(current_user.role_code)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Fleet editor role required") from exc
+    if role_code not in FLEET_EDITOR_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Fleet editor role required")
     return current_user
 
 

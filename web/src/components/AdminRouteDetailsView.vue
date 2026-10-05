@@ -10,6 +10,8 @@ import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLoc
 import { plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
 import { listPointStatusLabel, nextStatus } from "../status";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, ManualEditMeta, PointStatus, RouteWorkflowStatus } from "../types";
+import { normalizePlate } from "../vehiclePlate";
+import SuggestField from "./SuggestField.vue";
 
 type AdminRoutePoint = NonNullable<AdminRoute["points"]>[number];
 
@@ -54,6 +56,8 @@ const props = defineProps<{
   drivers: DriverOption[];
   logistics?: DriverOption[];
   logisticsContacts?: Array<{ name: string; phone: string }>;
+  fleetVehicles?: Array<{ id: number; plate: string }>;
+  fleetTrailers?: Array<{ id: number; plate: string }>;
   loading: boolean;
   authToken: string;
   unreadChatCount?: number;
@@ -96,8 +100,15 @@ function locationAtLabel(value: string | null | undefined): string {
 const showReassign = ref(false);
 const showEdit = ref(false);
 const reassignDriverId = ref(0);
+const reassignDriverQuery = ref("");
 const reassignNumberAuto = ref("");
 const reassignTrailerNumber = ref("");
+
+const driverSuggest = computed(() =>
+  (props.drivers || []).map((driver) => ({ id: driver.id, label: (driver.full_name || driver.login || "").trim() }))
+);
+const vehicleSuggest = computed(() => (props.fleetVehicles || []).map((item) => ({ id: item.id, label: item.plate })));
+const trailerSuggest = computed(() => (props.fleetTrailers || []).map((item) => ({ id: item.id, label: item.plate })));
 const editingPointId = ref<number | null>(null);
 
 const editForm = reactive({
@@ -124,10 +135,6 @@ function statusLabel(status: RouteWorkflowStatus): string {
     cancelled: "Отменён"
   };
   return labels[status] ?? status;
-}
-
-function upperOnly(value: string): string {
-  return (value || "").toUpperCase();
 }
 
 function routeStatusWithCurrentPoint(route: AdminRoute): string {
@@ -488,6 +495,7 @@ watch(
       point_name: point.point_name || ""
     }));
     reassignDriverId.value = route.driver?.id ?? 0;
+    reassignDriverQuery.value = (route.driver?.full_name || route.driver?.login || "").trim();
     reassignNumberAuto.value = route.number_auto || "";
     reassignTrailerNumber.value = route.trailer_number || "";
     if (editingPointId.value != null) {
@@ -543,8 +551,8 @@ function submitReassign(): void {
     return;
   }
   emit("assignDriver", props.route.id, reassignDriverId.value, {
-    number_auto: upperOnly(reassignNumberAuto.value.trim()),
-    trailer_number: upperOnly(reassignTrailerNumber.value.trim())
+    number_auto: normalizePlate(reassignNumberAuto.value.trim()),
+    trailer_number: normalizePlate(reassignTrailerNumber.value.trim())
   });
   showReassign.value = false;
 }
@@ -606,7 +614,7 @@ function removeRoute(): void {
           <span class="v">{{ route.temperature || "—" }}</span>
         </div>
         <div class="kv">
-          <span class="k">Контакты диспетчера</span>
+          <span class="k">Контакты логиста</span>
           <span class="v">{{ route.dispatcher_contacts || "—" }}</span>
         </div>
         <div class="kv">
@@ -655,25 +663,26 @@ function removeRoute(): void {
           Переназначить
         </button>
         <div v-if="showReassign" class="reassign-wrap">
-          <select v-model.number="reassignDriverId">
-            <option :value="0">Выберите водителя</option>
-            <option v-for="driver in drivers" :key="driver.id" :value="driver.id">
-              {{ driver.full_name || driver.login }}
-            </option>
-          </select>
-          <input
-            v-model="reassignNumberAuto"
-            class="upper"
-            placeholder="ТС"
-            autocapitalize="characters"
-            @input="(e) => (reassignNumberAuto = upperOnly((e.target as HTMLInputElement).value))"
+          <SuggestField
+            v-model="reassignDriverQuery"
+            :items="driverSuggest"
+            :picked="reassignDriverId > 0"
+            placeholder="Начните вводить ФИО"
+            @pick="(item) => (reassignDriverId = item.id)"
           />
-          <input
+          <SuggestField
+            v-model="reassignNumberAuto"
+            :items="vehicleSuggest"
+            placeholder="ТС"
+            @update:model-value="(v) => (reassignNumberAuto = normalizePlate(v))"
+            @pick="(item) => (reassignNumberAuto = item.label)"
+          />
+          <SuggestField
             v-model="reassignTrailerNumber"
-            class="upper"
+            :items="trailerSuggest"
             placeholder="Прицеп"
-            autocapitalize="characters"
-            @input="(e) => (reassignTrailerNumber = upperOnly((e.target as HTMLInputElement).value))"
+            @update:model-value="(v) => (reassignTrailerNumber = normalizePlate(v))"
+            @pick="(item) => (reassignTrailerNumber = item.label)"
           />
           <button class="secondary" type="button" :disabled="loading || !canAssign" @click="submitReassign">Сохранить</button>
           <button class="ghost" type="button" @click="closeReassign">Отмена</button>
@@ -692,11 +701,11 @@ function removeRoute(): void {
         <div class="edit-grid">
           <label>
             Номер авто
-            <input
+            <SuggestField
               v-model="editForm.number_auto"
-              class="upper"
-              autocapitalize="characters"
-              @input="(e) => (editForm.number_auto = upperOnly((e.target as HTMLInputElement).value))"
+              :items="vehicleSuggest"
+              @update:model-value="(v) => (editForm.number_auto = normalizePlate(v))"
+              @pick="(item) => (editForm.number_auto = item.label)"
             />
           </label>
           <label>
@@ -704,7 +713,7 @@ function removeRoute(): void {
             <input v-model="editForm.temperature" />
           </label>
           <label>
-            Контакты диспетчера
+            Контакты логиста
             <input v-model="editForm.dispatcher_contacts" />
           </label>
           <label>
@@ -713,11 +722,11 @@ function removeRoute(): void {
           </label>
           <label>
             Номер прицепа
-            <input
+            <SuggestField
               v-model="editForm.trailer_number"
-              class="upper"
-              autocapitalize="characters"
-              @input="(e) => (editForm.trailer_number = upperOnly((e.target as HTMLInputElement).value))"
+              :items="trailerSuggest"
+              @update:model-value="(v) => (editForm.trailer_number = normalizePlate(v))"
+              @pick="(item) => (editForm.trailer_number = item.label)"
             />
           </label>
           <label>
@@ -762,7 +771,7 @@ function removeRoute(): void {
             </label>
             <label>
               Время
-              <input v-model="point.point_time" type="time" step="60" lang="ru" />
+              <input v-model="point.point_time" type="text" inputmode="numeric" placeholder="13:00" lang="ru" />
             </label>
             <label>
               Организация
@@ -842,7 +851,7 @@ function removeRoute(): void {
               </label>
               <label>
                 Время плана
-                <input v-model="pointEdit.point_time" type="time" step="60" lang="ru" />
+                <input v-model="pointEdit.point_time" type="text" inputmode="numeric" placeholder="13:00" lang="ru" />
                 <small v-if="editHint(point.manual_edits, 'point_time')" class="edit-hint">{{ editHint(point.manual_edits, 'point_time') }}</small>
               </label>
               <label class="full">

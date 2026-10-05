@@ -3,7 +3,8 @@ import { computed, ref } from "vue";
 
 import type { SalaryRecord } from "../api";
 import { formatMoney, isoDateToRu, ruDateToIso, summarizeSalaryPeriod } from "../salaryPeriod";
-import { salaryCommentText, salaryStatusKey, salaryStatusLabel } from "../salaryDisplay";
+import { salaryCommentText, salaryMatchesTab, salaryStatusKey, salaryStatusLabel, sortSalaryChronoDesc, type SalaryListTab } from "../salaryDisplay";
+import SuggestField from "./SuggestField.vue";
 
 const props = defineProps<{
   drivers: Array<{ id: number; login: string; full_name: string | null; legacy_tg_id: string | null }>;
@@ -32,6 +33,13 @@ const q = ref("");
 const salaryLine = ref("");
 const dateFrom = ref("");
 const dateTo = ref("");
+const listTab = ref<SalaryListTab>("all");
+
+const driverSuggest = computed(() =>
+  props.drivers.map((d) => ({ id: d.id, label: `${d.full_name || d.login}`.trim() }))
+);
+const orderedItems = computed(() => sortSalaryChronoDesc(props.items));
+const visibleItems = computed(() => orderedItems.value.filter((row) => salaryMatchesTab(row.status_driver, listTab.value)));
 
 const help =
   "37 значений через пробел, как в боте:\nдата г/мг/рд/пр оклад сутки загр2р шаттл загр/выгр дт возврат доп_шаттл доп_точка азс паллет_гипер паллет_метро паллет_ашан 3т 3.5т 5т 10т 12т 12.5т пробег комп_связи стаж 10% премия удержать возмещение др без_сут_др_прем_стажа в_день итого адрес_загр адрес_выгр транспорт прицеп №рейса";
@@ -76,15 +84,12 @@ const periodSummary = computed(() => summarizeSalaryPeriod(props.items));
     <p v-if="error" class="error">{{ error }}</p>
     <div class="card">
       <h2>Водитель</h2>
-      <div class="row">
-        <input v-model="q" placeholder="ФИО или логин" @keyup.enter="emit('search', q.trim())" />
-        <button type="button" class="secondary" @click="emit('search', q.trim())">Найти</button>
-      </div>
-      <div v-if="drivers.length" class="drivers">
-        <button v-for="d in drivers" :key="d.id" type="button" class="d-btn" @click="emit('pickDriver', d.id)">
-          {{ d.full_name || d.login }} <span class="meta">#{{ d.id }}</span>
-        </button>
-      </div>
+      <SuggestField
+        v-model="q"
+        :items="driverSuggest"
+        placeholder="Начните вводить ФИО или логин"
+        @pick="(item) => emit('pickDriver', item.id)"
+      />
       <p v-if="selectedDriver" class="picked">Выбран: {{ selectedDriver.full_name || selectedDriver.login }} (#{{ selectedDriver.id }})</p>
     </div>
     <div v-if="selectedDriver" class="card">
@@ -121,8 +126,14 @@ const periodSummary = computed(() => summarizeSalaryPeriod(props.items));
         <span>Суточные: {{ formatMoney(periodSummary.daily) }}</span>
         <span>Зарплата: {{ formatMoney(periodSummary.salary) }}</span>
       </div>
+      <div class="tabs">
+        <button type="button" class="tab-btn" :class="{ active: listTab === 'all' }" @click="listTab = 'all'">Все</button>
+        <button type="button" class="tab-btn" :class="{ active: listTab === 'pending' }" @click="listTab = 'pending'">Не подтверждены</button>
+        <button type="button" class="tab-btn" :class="{ active: listTab === 'commented' }" @click="listTab = 'commented'">С комментарием</button>
+        <button type="button" class="tab-btn" :class="{ active: listTab === 'confirmed' }" @click="listTab = 'confirmed'">Подтверждены</button>
+      </div>
       <div class="list">
-        <button v-for="r in items" :key="r.id" type="button" class="row-item" @click="emit('select', r)">
+        <button v-for="r in visibleItems" :key="r.id" type="button" class="row-item" @click="emit('select', r)">
           <span class="t1">#{{ r.id }} · {{ r.date_salary }}</span>
           <span class="t2">{{ r.total.toFixed(2) }} ₽</span>
           <span class="status" :class="`status--${salaryStatusKey(r.status_driver)}`">{{ salaryStatusLabel(r.status_driver) }}</span>
@@ -218,6 +229,25 @@ input {
 }
 .ta + .primary {
   margin-top: 0.35rem;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin: 0.55rem 0;
+}
+.tab-btn {
+  width: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: #dbeafe;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+}
+.tab-btn.active {
+  background: var(--primary-strong);
+  border-color: #60a5fa;
 }
 .drivers {
   display: grid;

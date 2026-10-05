@@ -17,7 +17,8 @@ from sqlalchemy.orm import Session
 from mobile_api.auth import get_current_user
 from mobile_api.chat_realtime import chat_realtime_hub
 from mobile_api.db import get_db
-from mobile_api.models import Salary, SalaryChatAttachment, SalaryChatMessage, SalaryChatRead, User
+from mobile_api.models import Salary, SalaryChatAttachment, SalaryChatDelivery, SalaryChatMessage, SalaryChatRead, User
+from mobile_api.chat_receipts import others_watermark, upsert_watermark
 from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.point_documents_router import _upload_root as _mobile_upload_root
 from mobile_api.roles import RoleCode, normalize_role_code
@@ -195,7 +196,9 @@ def _salary_chat_recipient_ids(db: Session, salary: Salary) -> list[int]:
     return sorted(set(ids))
 
 
-def _chat_message_out(db: Session, msg: SalaryChatMessage, *, read: bool | None = None) -> dict[str, Any]:
+def _chat_message_out(
+    db: Session, msg: SalaryChatMessage, *, read: bool | None = None, delivered: bool | None = None
+) -> dict[str, Any]:
     author = db.get(User, msg.user_id)
     author_name = (author.full_name or author.login) if author else f"user#{msg.user_id}"
     atts = db.scalars(
@@ -220,6 +223,7 @@ def _chat_message_out(db: Session, msg: SalaryChatMessage, *, read: bool | None 
             for a in atts
         ],
         "read": bool(read) if read is not None else False,
+        "delivered": bool(delivered) if delivered is not None else bool(read),
     }
 
 
@@ -710,6 +714,14 @@ def list_salary_chat_messages(
         else:
             existing.last_read_message_id = max(int(existing.last_read_message_id or 0), last_id)
             db.add(existing)
+        upsert_watermark(
+            db,
+            model=SalaryChatDelivery,
+            match={"user_id": current_user.id, "salary_id": salary_id},
+            field="last_delivered_message_id",
+            value=last_id,
+            factory=lambda: SalaryChatDelivery(),
+        )
         db.commit()
         _publish_salary_chat(
             _salary_chat_recipient_ids(db, s),
@@ -720,23 +732,74 @@ def list_salary_chat_messages(
                     "salary_id": int(salary_id),
                     "user_id": int(current_user.id),
                     "last_read_message_id": last_id,
+                    "last_delivered_message_id": last_id,
                 },
             },
         )
-    watermark = int(
-        db.scalar(
-            select(func.max(SalaryChatRead.last_read_message_id)).where(
-                SalaryChatRead.salary_id == salary_id,
-                SalaryChatRead.user_id != current_user.id,
-            )
-        )
-        or 0
+    read_wm = others_watermark(
+        db,
+        SalaryChatRead.last_read_message_id,
+        SalaryChatRead.salary_id == salary_id,
+        SalaryChatRead.user_id != current_user.id,
+    )
+    delivered_wm = max(
+        read_wm,
+        others_watermark(
+            db,
+            SalaryChatDelivery.last_delivered_message_id,
+            SalaryChatDelivery.salary_id == salary_id,
+            SalaryChatDelivery.user_id != current_user.id,
+        ),
     )
     return {
         "items": [
-            _chat_message_out(db, r, read=int(r.user_id) == int(current_user.id) and int(r.id) <= watermark) for r in rows
+            _chat_message_out(
+                db,
+                r,
+                delivered=int(r.user_id) == int(current_user.id) and int(r.id) <= delivered_wm,
+                read=int(r.user_id) == int(current_user.id) and int(r.id) <= read_wm,
+            )
+            for r in rows
         ]
     }
+
+
+class SalaryChatDeliveredIn(BaseModel):
+    last_message_id: int = Field(ge=1)
+
+
+@router.post("/v1/salary/{salary_id}/chat/delivered")
+def mark_salary_chat_delivered(
+    salary_id: int,
+    payload: SalaryChatDeliveredIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    s = _get_salary_or_404(db, salary_id)
+    _assert_can_view_salary(db, current_user, s)
+    last_id = upsert_watermark(
+        db,
+        model=SalaryChatDelivery,
+        match={"user_id": current_user.id, "salary_id": salary_id},
+        field="last_delivered_message_id",
+        value=int(payload.last_message_id),
+        factory=lambda: SalaryChatDelivery(),
+    )
+    recipients = _salary_chat_recipient_ids(db, s)
+    db.commit()
+    _publish_salary_chat(
+        recipients,
+        {
+            "type": "chat_messages_delivered",
+            "item": {
+                "scope": "salary",
+                "salary_id": int(salary_id),
+                "user_id": int(current_user.id),
+                "last_delivered_message_id": last_id,
+            },
+        },
+    )
+    return {"ok": True, "last_delivered_message_id": last_id}
 
 
 @router.post("/v1/salary/{salary_id}/chat/messages", status_code=status.HTTP_201_CREATED)

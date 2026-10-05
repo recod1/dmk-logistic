@@ -7,6 +7,7 @@ import re
 _DATE_ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 _DATE_DMY = re.compile(r"(\d{1,2})[./](\d{1,2})[./](\d{2,4})")
 _TIME = re.compile(r"(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp][Mm]))?")
+_TIME_FLEX = re.compile(r"(?<!\d)(\d{1,2})[.\-](\d{2})(?:[.\-](\d{2}))?(?!\d)")
 
 
 def _pad2(value: int) -> str:
@@ -65,13 +66,25 @@ def split_onec_wall_datetime(raw: str | None) -> tuple[str, str]:
             date_s = format_planned_date(year, month, day)
         rest = (text[: dmy.start()] + " " + text[dmy.end() :]).strip()
 
-    search_in = rest or text
+    search_in = rest if date_s else text
     time_s = ""
     tm = _TIME.search(search_in)
+    ampm = None
+    hour = minute = None
     if tm:
         hour = _hour_from_token(int(tm.group(1)), tm.group(4))
         minute = int(tm.group(2))
-        if 0 <= hour <= 23 and 0 <= minute <= 59:
+        ampm = tm.group(4)
+    else:
+        flex = _TIME_FLEX.search(search_in)
+        if flex:
+            hour = int(flex.group(1))
+            minute = int(flex.group(2))
+    if hour is not None and minute is not None and 0 <= hour <= 23 and 0 <= minute <= 59:
+        # Keep 13:00 as 13:00. AM/PM is applied only when the token is present.
+        if not ampm and hour > 12:
+            time_s = format_planned_time(hour, minute)
+        else:
             time_s = format_planned_time(hour, minute)
     return date_s, time_s
 

@@ -20,6 +20,7 @@ ROLE_LABELS_RU: dict[RoleCode, str] = {
 }
 
 ADMIN_ACCESS_ROLES: set[RoleCode] = {RoleCode.ADMIN, RoleCode.SUPERADMIN}
+FLEET_EDITOR_ROLES: set[RoleCode] = {RoleCode.ADMIN, RoleCode.SUPERADMIN, RoleCode.LOGISTIC}
 ROUTE_MANAGER_ROLES: set[RoleCode] = {
     RoleCode.ADMIN,
     RoleCode.SUPERADMIN,

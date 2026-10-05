@@ -50,6 +50,12 @@ defineProps<{
         stroke-linejoin="round"
       />
     </svg>
+    <svg v-else-if="name === 'lists'" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M8 7h12M8 12h12M8 17h12" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" />
+      <circle cx="4.5" cy="7" r="1.2" fill="currentColor" />
+      <circle cx="4.5" cy="12" r="1.2" fill="currentColor" />
+      <circle cx="4.5" cy="17" r="1.2" fill="currentColor" />
+    </svg>
     <svg v-else viewBox="0 0 24 24" aria-hidden="true">
       <rect x="3.5" y="6.5" width="17" height="11" rx="2.2" fill="none" stroke="currentColor" stroke-width="1.8" />
       <path d="M3.5 10.5h17" fill="none" stroke="currentColor" stroke-width="1.8" />

@@ -122,6 +122,7 @@ def parse_onec_message(raw: str) -> OnecParsedRoute:
     route_id = ""
     driver_fio = ""
     logistic_name = ""
+    logistic_contacts = ""
     number_auto = ""
     trailer_number = ""
     temperature = ""
@@ -154,6 +155,8 @@ def parse_onec_message(raw: str) -> OnecParsedRoute:
             elif "температура" in key_lower:
                 temperature = value
             else:
+                if "логист" in key_lower and "контакт" in key_lower and value:
+                    logistic_contacts = value
                 priority = _contact_priority(key_lower)
                 if priority is not None and value:
                     contact_hits.append((priority, value))
@@ -228,7 +231,7 @@ def parse_onec_message(raw: str) -> OnecParsedRoute:
         number_auto=number_auto.strip(),
         trailer_number=trailer_number.strip(),
         temperature=temperature.strip(),
-        dispatcher_contacts=_pick_dispatcher_contacts(contact_hits),
+        dispatcher_contacts=_pick_dispatcher_contacts(contact_hits) or logistic_contacts.strip(),
         registration_number=registration_number.strip(),
         points=points,
     )

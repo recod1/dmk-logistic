@@ -7,6 +7,7 @@ import AdminRouteDetailsView from "./components/AdminRouteDetailsView.vue";
 import AdminRoutesView from "./components/AdminRoutesView.vue";
 import AdminUsersView from "./components/AdminUsersView.vue";
 import AdminLogisticsContactsView from "./components/AdminLogisticsContactsView.vue";
+import FleetListsView from "./components/FleetListsView.vue";
 import BottomNav from "./components/BottomNav.vue";
 import type { BottomNavItem } from "./components/BottomNav.vue";
 import HeaderNav from "./components/HeaderNav.vue";
@@ -64,6 +65,18 @@ import {
   fetchChatRoomAttachmentBlob,
   type SalaryRecord,
   type LogisticsContact,
+  listLogisticsContacts,
+  listFleetVehicles,
+  listFleetTrailers,
+  createFleetVehicle,
+  updateFleetVehicle,
+  deleteFleetVehicle,
+  createFleetTrailer,
+  updateFleetTrailer,
+  deleteFleetTrailer,
+  markRouteChatDelivered,
+  markRoomChatDelivered,
+  markSalaryChatDelivered,
   listMySalaries,
   fetchMySalaryCsvBlob,
   fetchDriverSalaryCsvBlob,
@@ -84,7 +97,6 @@ import {
   sendSalaryChatMessage,
   uploadSalaryChatAttachments,
   fetchSalaryChatAttachmentBlob,
-  listLogisticsContacts,
   saveLogisticsContacts,
   listAdminRoutes,
   listAdminUsers,
@@ -138,7 +150,7 @@ import {
 import { DRIVER_PREFETCH_SYNC_TAG, persistPrefetchPayload, prefetchAssignedRoutesFromSession, routeToListItem } from "./offlinePrefetch";
 import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
 import { prepareDocumentImageBlobs } from "./imageUploadPrep";
-import { isAccountantRole, isAdminRole, isLogisticRole, isRouteManagerRole } from "./roles";
+import { isAccountantRole, isAdminRole, isFleetEditorRole, isLogisticRole, isRouteManagerRole } from "./roles";
 import { applyOverlaysToPoints, applyStageOverlayToPoint } from "./pointOverlay";
 import { isPointDone, nextStatus, nextStatusLabel } from "./status";
 import {
@@ -185,6 +197,7 @@ type AppSection =
   | "notifications"
   | "admin_users"
   | "admin_logistics_contacts"
+  | "admin_fleet_lists"
   | "admin_routes"
   | "admin_route_details"
   | "driver_salary"
@@ -233,7 +246,7 @@ const notificationsLoading = ref(false);
 const notificationsError = ref("");
 
 const chatRouteId = ref<string | null>(null);
-const chatMessages = ref<Array<{ id: number; route_id: string; user_id: number; author_name: string; text: string; created_at: string; read?: boolean }>>([]);
+const chatMessages = ref<Array<{ id: number; route_id: string; user_id: number; author_name: string; text: string; created_at: string; read?: boolean; delivered?: boolean }>>([]);
 const chatLoading = ref(false);
 const chatError = ref("");
 const chatUnreadByRoute = ref<Record<string, number>>({});
@@ -345,6 +358,11 @@ const logisticsContacts = ref<LogisticsContact[]>([]);
 const logisticsContactsLoading = ref(false);
 const logisticsContactsSaving = ref(false);
 const logisticsContactsError = ref("");
+const fleetVehicles = ref<Array<{ id: number; plate: string }>>([]);
+const fleetTrailers = ref<Array<{ id: number; plate: string }>>([]);
+const fleetLoading = ref(false);
+const fleetSaving = ref(false);
+const fleetError = ref("");
 
 const isAuthed = computed(() => Boolean(authToken.value));
 const isChatSection = computed(
@@ -354,7 +372,20 @@ const isAdmin = computed(() => isAdminRole(authUser.value?.role_code || ""));
 const isRouteManager = computed(() => isRouteManagerRole(authUser.value?.role_code || ""));
 const isDriver = computed(() => authUser.value?.role_code === "driver");
 const isLogistic = computed(() => isLogisticRole(authUser.value?.role_code || ""));
+const isFleetEditor = computed(() => isFleetEditorRole(authUser.value?.role_code || ""));
 const isAccountant = computed(() => isAccountantRole(authUser.value?.role_code || ""));
+const salaryDriverOptions = computed(() => {
+  const fromRoutes = routeDrivers.value.map((d) => ({
+    id: d.id,
+    login: d.login,
+    full_name: d.full_name,
+    legacy_tg_id: null as string | null
+  }));
+  if (!fromRoutes.length) {
+    return salaryAccountantDrivers.value;
+  }
+  return fromRoutes;
+});
 
 const chatsRoomsForDisplay = computed(() => {
   const bump = roomUnreadBump.value;
@@ -491,6 +522,11 @@ function updateUiNotificationIndicators(): void {
       void nav.setAppBadge(0);
     }
   }
+  if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+    void navigator.serviceWorker.ready.then((reg) => {
+      reg.active?.postMessage({ type: "DMK_SET_BADGE", count: unread });
+    });
+  }
 }
 
 watchEffect(() => {
@@ -558,6 +594,9 @@ const currentPageTitle = computed(() => {
   }
   if (currentSection.value === "admin_logistics_contacts") {
     return "Настройки";
+  }
+  if (currentSection.value === "admin_fleet_lists") {
+    return "Списки";
   }
   if (currentSection.value === "notifications") {
     return "Уведомления";
@@ -652,6 +691,7 @@ const profileMenuItems = computed<Array<{ section: AppSection; label: string; ta
     return [
       { section: "admin_routes", label: "Рейсы", tabBar: true, headerNav: true },
       { section: "chats", label: "Чаты", tabBar: true, headerNav: true },
+      { section: "admin_fleet_lists", label: "Списки", tabBar: true, headerNav: true },
       { section: "salary_accounting", label: "Зарплата", tabBar: true, headerNav: true },
       { section: "admin_users", label: "Пользователи", headerNav: true },
       { section: "admin_logistics_contacts", label: "Настройки", headerNav: true }
@@ -662,6 +702,9 @@ const profileMenuItems = computed<Array<{ section: AppSection; label: string; ta
       { section: "admin_routes", label: "Рейсы", tabBar: true, headerNav: true },
       { section: "chats", label: "Чаты", tabBar: true, headerNav: true }
     ];
+    if (isLogisticRole(authUser.value.role_code)) {
+      items.push({ section: "admin_fleet_lists", label: "Списки", tabBar: true, headerNav: true });
+    }
     if (isAccountantRole(authUser.value.role_code)) {
       items.push({ section: "salary_accounting", label: "Зарплата", tabBar: true, headerNav: true });
     }
@@ -688,6 +731,7 @@ const bottomNavItems = computed<BottomNavItem[]>(() => {
     return [
       { id: "routes", label: "Рейсы", section: "admin_routes" },
       { id: "chats", label: "Чаты", section: "chats" },
+      { id: "lists", label: "Списки", section: "admin_fleet_lists" },
       { id: "salary", label: "Зарплата", section: "salary_accounting" }
     ];
   }
@@ -696,6 +740,9 @@ const bottomNavItems = computed<BottomNavItem[]>(() => {
       { id: "routes", label: "Рейсы", section: "admin_routes" },
       { id: "chats", label: "Чаты", section: "chats" }
     ];
+    if (isLogistic.value) {
+      items.push({ id: "lists", label: "Списки", section: "admin_fleet_lists" });
+    }
     if (isAccountant.value) {
       items.push({ id: "salary", label: "Зарплата", section: "salary_accounting" });
     }
@@ -721,6 +768,8 @@ const headerNavItems = computed<BottomNavItem[]>(() =>
         id = "users";
       } else if (item.section === "admin_logistics_contacts") {
         id = "settings";
+      } else if (item.section === "admin_fleet_lists") {
+        id = "lists";
       }
       return { id, label: item.label, section: item.section };
     })
@@ -746,6 +795,9 @@ const activeBottomNavId = computed(() => {
   }
   if (section === "admin_logistics_contacts") {
     return "settings";
+  }
+  if (section === "admin_fleet_lists") {
+    return "lists";
   }
   if (section === "chats" || section === "chat" || section === "chat_room") {
     return "chats";
@@ -1075,9 +1127,10 @@ type ChatReadReceipt = {
   salary_id?: number;
   user_id?: number;
   last_read_message_id?: number;
+  last_delivered_message_id?: number;
 };
 
-function markOwnMessagesRead<T extends { id: number; user_id: number; read?: boolean }>(
+function markOwnMessagesRead<T extends { id: number; user_id: number; read?: boolean; delivered?: boolean }>(
   items: T[],
   myId: number,
   lastReadId: number
@@ -1088,7 +1141,23 @@ function markOwnMessagesRead<T extends { id: number; user_id: number; read?: boo
       return item;
     }
     changed = true;
-    return { ...item, read: true };
+    return { ...item, read: true, delivered: true };
+  });
+  return changed ? next : items;
+}
+
+function markOwnMessagesDelivered<T extends { id: number; user_id: number; delivered?: boolean; read?: boolean }>(
+  items: T[],
+  myId: number,
+  lastDeliveredId: number
+): T[] {
+  let changed = false;
+  const next = items.map((item) => {
+    if (item.user_id !== myId || item.id > lastDeliveredId || item.delivered || item.read) {
+      return item;
+    }
+    changed = true;
+    return { ...item, delivered: true };
   });
   return changed ? next : items;
 }
@@ -1096,17 +1165,53 @@ function markOwnMessagesRead<T extends { id: number; user_id: number; read?: boo
 function applyIncomingReadReceipt(item: ChatReadReceipt): void {
   const myId = authUser.value?.id;
   const lastReadId = Number(item.last_read_message_id || 0);
-  if (!myId || !lastReadId || item.user_id === myId) {
+  const lastDeliveredId = Number(item.last_delivered_message_id || lastReadId || 0);
+  if (!myId || item.user_id === myId) {
+    return;
+  }
+  if (lastReadId) {
+    if (item.route_id && chatRouteId.value === item.route_id) {
+      chatMessages.value = markOwnMessagesRead(chatMessages.value, myId, lastReadId);
+    }
+    if (item.room_id && chatRoomId.value === item.room_id) {
+      chatRoomMessages.value = markOwnMessagesRead(chatRoomMessages.value, myId, lastReadId);
+    }
+    if (item.salary_id && salaryChatSalaryId.value === item.salary_id) {
+      salaryChatMessages.value = markOwnMessagesRead(salaryChatMessages.value, myId, lastReadId);
+    }
+  }
+  if (lastDeliveredId) {
+    applyIncomingDeliveredReceipt({ ...item, last_delivered_message_id: lastDeliveredId });
+  }
+}
+
+function applyIncomingDeliveredReceipt(item: ChatReadReceipt): void {
+  const myId = authUser.value?.id;
+  const lastDeliveredId = Number(item.last_delivered_message_id || 0);
+  if (!myId || !lastDeliveredId || item.user_id === myId) {
     return;
   }
   if (item.route_id && chatRouteId.value === item.route_id) {
-    chatMessages.value = markOwnMessagesRead(chatMessages.value, myId, lastReadId);
+    chatMessages.value = markOwnMessagesDelivered(chatMessages.value, myId, lastDeliveredId);
   }
   if (item.room_id && chatRoomId.value === item.room_id) {
-    chatRoomMessages.value = markOwnMessagesRead(chatRoomMessages.value, myId, lastReadId);
+    chatRoomMessages.value = markOwnMessagesDelivered(chatRoomMessages.value, myId, lastDeliveredId);
   }
   if (item.salary_id && salaryChatSalaryId.value === item.salary_id) {
-    salaryChatMessages.value = markOwnMessagesRead(salaryChatMessages.value, myId, lastReadId);
+    salaryChatMessages.value = markOwnMessagesDelivered(salaryChatMessages.value, myId, lastDeliveredId);
+  }
+}
+
+function noteChatDelivered(kind: "route" | "room" | "salary", id: string | number, messageId: number, fromUserId: number): void {
+  if (!authToken.value || !authUser.value || fromUserId === authUser.value.id || !messageId) {
+    return;
+  }
+  if (kind === "route") {
+    void markRouteChatDelivered(authToken.value, String(id), messageId);
+  } else if (kind === "room") {
+    void markRoomChatDelivered(authToken.value, Number(id), messageId);
+  } else {
+    void markSalaryChatDelivered(authToken.value, Number(id), messageId);
   }
 }
 
@@ -1157,11 +1262,14 @@ function connectChatSocket(): void {
           if (chatRouteId.value && item.route_id === chatRouteId.value) {
             const exists = chatMessages.value.some((m) => m.id === item.id);
             if (!exists) {
-              chatMessages.value = [...chatMessages.value, { ...item, read: Boolean(item.read) }];
+              chatMessages.value = [...chatMessages.value, { ...item, read: Boolean(item.read), delivered: Boolean(item.delivered) }];
             }
           } else if (authUser.value?.id && item.user_id !== authUser.value.id) {
             const current = chatUnreadByRoute.value[item.route_id] ?? 0;
             chatUnreadByRoute.value = { ...chatUnreadByRoute.value, [item.route_id]: current + 1 };
+          }
+          if (authUser.value?.id && item.user_id !== authUser.value.id) {
+            noteChatDelivered("route", item.route_id, item.id, item.user_id);
           }
         }
         if (payload.type === "chat_room_message_created" && payload.item) {
@@ -1177,12 +1285,15 @@ function connectChatSocket(): void {
           if (currentSection.value === "chat_room" && chatRoomId.value && item.room_id === chatRoomId.value) {
             const exists = chatRoomMessages.value.some((m) => m.id === item.id);
             if (!exists) {
-              chatRoomMessages.value = [...chatRoomMessages.value, { ...item, read: Boolean(item.read) }];
+              chatRoomMessages.value = [...chatRoomMessages.value, { ...item, read: Boolean(item.read), delivered: Boolean(item.delivered) }];
             }
           } else if (authUser.value?.id && item.user_id !== authUser.value.id) {
             const rid = item.room_id;
             const cur = roomUnreadBump.value[rid] ?? 0;
             roomUnreadBump.value = { ...roomUnreadBump.value, [rid]: cur + 1 };
+          }
+          if (authUser.value?.id && item.user_id !== authUser.value.id) {
+            noteChatDelivered("room", item.room_id, item.id, item.user_id);
           }
         }
         if (payload.type === "salary_chat_message_created" && payload.item) {
@@ -1202,12 +1313,18 @@ function connectChatSocket(): void {
           ) {
             const exists = salaryChatMessages.value.some((m) => m.id === item.id);
             if (!exists) {
-              salaryChatMessages.value = [...salaryChatMessages.value, { ...item, read: Boolean(item.read) }];
+              salaryChatMessages.value = [...salaryChatMessages.value, { ...item, read: Boolean(item.read), delivered: Boolean(item.delivered) }];
             }
+          }
+          if (authUser.value?.id && item.user_id !== authUser.value.id) {
+            noteChatDelivered("salary", item.salary_id, item.id, item.user_id);
           }
         }
         if (payload.type === "chat_messages_read" && payload.item) {
           applyIncomingReadReceipt(payload.item as ChatReadReceipt);
+        }
+        if (payload.type === "chat_messages_delivered" && payload.item) {
+          applyIncomingDeliveredReceipt(payload.item as ChatReadReceipt);
         }
       } catch {
         // ignore
@@ -1597,6 +1714,9 @@ function clearAuth(): void {
   salaryError.value = "";
   logisticsContacts.value = [];
   logisticsContactsError.value = "";
+  fleetVehicles.value = [];
+  fleetTrailers.value = [];
+  fleetError.value = "";
   sectionStack.value = [];
   currentSection.value = "driver_home";
   profileMenuOpen.value = false;
@@ -3144,6 +3264,9 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
     await refreshNotifications();
     void refreshChatNavUnread();
     await refreshLogisticsContacts();
+    if (isRouteManager.value) {
+      void refreshFleetLists();
+    }
   } finally {
     if (!realtimeSocketsAllowed) {
       allowRealtimeSockets();
@@ -3193,6 +3316,11 @@ function openRoleMainSection(section: AppSection): void {
   if (section === "admin_logistics_contacts" && isAdminRole(authUser.value.role_code)) {
     resetToSection(section);
     void refreshLogisticsContacts();
+    return;
+  }
+  if (section === "admin_fleet_lists" && isFleetEditorRole(authUser.value.role_code)) {
+    resetToSection(section);
+    void refreshFleetLists();
     return;
   }
   if ((section === "admin_routes" || section === "admin_route_details") && isRouteManagerRole(authUser.value.role_code)) {
@@ -3639,6 +3767,9 @@ function openNotifications(): void {
   pushSection("notifications");
   void refreshWebPushSubscriptionState();
   void refreshNotifications();
+  if (!webPushSubscribed.value) {
+    void trySubscribeWebPush();
+  }
 }
 
 async function openChatForRoute(routeId: string): Promise<void> {
@@ -4148,7 +4279,9 @@ async function searchSalaryDriversForAccounting(q: string): Promise<void> {
 
 async function pickSalaryAccountantDriver(userId: number): Promise<void> {
   if (!authToken.value) return;
-  const d = salaryAccountantDrivers.value.find((x) => x.id === userId);
+  const d =
+    salaryAccountantDrivers.value.find((x) => x.id === userId) ||
+    routeDrivers.value.find((x) => x.id === userId);
   if (!d) return;
   salarySelectedDriver.value = { id: d.id, login: d.login, full_name: d.full_name };
   await refreshAccountantSalaryList();
@@ -4228,6 +4361,113 @@ async function doSaveLogisticsContacts(items: Array<{ name: string; phone: strin
     logisticsContactsError.value = (error as Error).message;
   } finally {
     logisticsContactsSaving.value = false;
+  }
+}
+
+async function refreshFleetLists(): Promise<void> {
+  if (!authToken.value || !isRouteManager.value) {
+    return;
+  }
+  fleetLoading.value = true;
+  fleetError.value = "";
+  try {
+    const [vehicles, trailers] = await Promise.all([
+      listFleetVehicles(authToken.value),
+      listFleetTrailers(authToken.value)
+    ]);
+    fleetVehicles.value = vehicles;
+    fleetTrailers.value = trailers;
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
+    fleetError.value = (error as Error).message;
+  } finally {
+    fleetLoading.value = false;
+  }
+}
+
+async function doCreateFleetVehicle(plate: string): Promise<void> {
+  if (!authToken.value) return;
+  fleetSaving.value = true;
+  fleetError.value = "";
+  try {
+    await createFleetVehicle(authToken.value, plate);
+    await refreshFleetLists();
+  } catch (error) {
+    fleetError.value = (error as Error).message;
+  } finally {
+    fleetSaving.value = false;
+  }
+}
+
+async function doUpdateFleetVehicle(payload: { id: number; plate: string }): Promise<void> {
+  if (!authToken.value) return;
+  fleetSaving.value = true;
+  fleetError.value = "";
+  try {
+    await updateFleetVehicle(authToken.value, payload.id, payload.plate);
+    await refreshFleetLists();
+  } catch (error) {
+    fleetError.value = (error as Error).message;
+  } finally {
+    fleetSaving.value = false;
+  }
+}
+
+async function doDeleteFleetVehicle(id: number): Promise<void> {
+  if (!authToken.value) return;
+  fleetSaving.value = true;
+  fleetError.value = "";
+  try {
+    await deleteFleetVehicle(authToken.value, id);
+    await refreshFleetLists();
+  } catch (error) {
+    fleetError.value = (error as Error).message;
+  } finally {
+    fleetSaving.value = false;
+  }
+}
+
+async function doCreateFleetTrailer(plate: string): Promise<void> {
+  if (!authToken.value) return;
+  fleetSaving.value = true;
+  fleetError.value = "";
+  try {
+    await createFleetTrailer(authToken.value, plate);
+    await refreshFleetLists();
+  } catch (error) {
+    fleetError.value = (error as Error).message;
+  } finally {
+    fleetSaving.value = false;
+  }
+}
+
+async function doUpdateFleetTrailer(payload: { id: number; plate: string }): Promise<void> {
+  if (!authToken.value) return;
+  fleetSaving.value = true;
+  fleetError.value = "";
+  try {
+    await updateFleetTrailer(authToken.value, payload.id, payload.plate);
+    await refreshFleetLists();
+  } catch (error) {
+    fleetError.value = (error as Error).message;
+  } finally {
+    fleetSaving.value = false;
+  }
+}
+
+async function doDeleteFleetTrailer(id: number): Promise<void> {
+  if (!authToken.value) return;
+  fleetSaving.value = true;
+  fleetError.value = "";
+  try {
+    await deleteFleetTrailer(authToken.value, id);
+    await refreshFleetLists();
+  } catch (error) {
+    fleetError.value = (error as Error).message;
+  } finally {
+    fleetSaving.value = false;
   }
 }
 
@@ -4731,6 +4971,8 @@ onUnmounted(() => {
         :drivers="routeDrivers"
         :logistics="routeLogistics"
         :logistics-contacts="logisticsContacts"
+        :fleet-vehicles="fleetVehicles"
+        :fleet-trailers="fleetTrailers"
         :current-user-id="authUser?.id ?? 0"
         :loading="routesLoading"
         :error="routesError"
@@ -4751,6 +4993,8 @@ onUnmounted(() => {
         :drivers="routeDrivers"
         :logistics="routeLogistics"
         :logistics-contacts="logisticsContacts"
+        :fleet-vehicles="fleetVehicles"
+        :fleet-trailers="fleetTrailers"
         :loading="routesLoading"
         :auth-token="authToken"
         :unread-chat-count="chatUnreadByRoute[selectedAdminRoute.id] ?? 0"
@@ -4788,6 +5032,23 @@ onUnmounted(() => {
         :error="logisticsContactsError"
         @refresh="refreshLogisticsContacts"
         @save="doSaveLogisticsContacts"
+      />
+    </section>
+
+    <section v-else-if="isFleetEditor && currentSection === 'admin_fleet_lists'">
+      <FleetListsView
+        :vehicles="fleetVehicles"
+        :trailers="fleetTrailers"
+        :loading="fleetLoading"
+        :saving="fleetSaving"
+        :error="fleetError"
+        @refresh="refreshFleetLists"
+        @create-vehicle="(plate) => void doCreateFleetVehicle(plate)"
+        @update-vehicle="(payload) => void doUpdateFleetVehicle(payload)"
+        @delete-vehicle="(id) => void doDeleteFleetVehicle(id)"
+        @create-trailer="(plate) => void doCreateFleetTrailer(plate)"
+        @update-trailer="(payload) => void doUpdateFleetTrailer(payload)"
+        @delete-trailer="(id) => void doDeleteFleetTrailer(id)"
       />
     </section>
 
@@ -4882,7 +5143,7 @@ onUnmounted(() => {
 
     <section v-else-if="(isAdmin || isAccountant) && currentSection === 'salary_accounting'">
       <AccountantSalaryView
-        :drivers="salaryAccountantDrivers"
+        :drivers="salaryDriverOptions"
         :items="salaryAccountantItems"
         :selected-driver="salarySelectedDriver"
         :loading="salaryListLoading"

@@ -3,7 +3,7 @@ import { computed, onMounted, ref, watch } from "vue";
 
 import type { SalaryRecord } from "../api";
 import { formatMoney, isoDateToRu, ruDateToIso, summarizeSalaryPeriod } from "../salaryPeriod";
-import { salaryCommentText, salaryStatusKey, salaryStatusLabel } from "../salaryDisplay";
+import { salaryCommentText, salaryMatchesTab, salaryStatusKey, salaryStatusLabel, sortSalaryChronoDesc, type SalaryListTab } from "../salaryDisplay";
 
 const props = defineProps<{
   items: SalaryRecord[];
@@ -22,6 +22,10 @@ const emit = defineEmits<{
 
 const dateFrom = ref("");
 const dateTo = ref("");
+const listTab = ref<SalaryListTab>("all");
+
+const orderedItems = computed(() => sortSalaryChronoDesc(props.items));
+const visibleItems = computed(() => orderedItems.value.filter((row) => salaryMatchesTab(row.status_driver, listTab.value)));
 
 function applyCurrentMonth(): void {
   const d = new Date();
@@ -112,9 +116,15 @@ watch(
     </div>
     <div class="card">
       <h2>Расчёты</h2>
-      <p v-if="!items.length && !loading" class="hint">Нет записей за выбранный период.</p>
+      <div class="tabs">
+        <button type="button" class="tab-btn" :class="{ active: listTab === 'all' }" @click="listTab = 'all'">Все</button>
+        <button type="button" class="tab-btn" :class="{ active: listTab === 'pending' }" @click="listTab = 'pending'">Не подтверждены</button>
+        <button type="button" class="tab-btn" :class="{ active: listTab === 'commented' }" @click="listTab = 'commented'">С комментарием</button>
+        <button type="button" class="tab-btn" :class="{ active: listTab === 'confirmed' }" @click="listTab = 'confirmed'">Подтверждены</button>
+      </div>
+      <p v-if="!visibleItems.length && !loading" class="hint">Нет записей за выбранный период.</p>
       <div class="list">
-        <button v-for="r in items" :key="r.id" type="button" class="row-item" @click="emit('select', r)">
+        <button v-for="r in visibleItems" :key="r.id" type="button" class="row-item" @click="emit('select', r)">
           <span class="t1">#{{ r.id }} · {{ r.date_salary }}</span>
           <span class="t2">{{ r.total.toFixed(2) }} ₽</span>
           <span class="status" :class="`status--${salaryStatusKey(r.status_driver)}`">{{ salaryStatusLabel(r.status_driver) }}</span>
@@ -175,6 +185,25 @@ input {
   flex-wrap: wrap;
   gap: 0.45rem;
   margin-top: 0.5rem;
+}
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+  margin-bottom: 0.55rem;
+}
+.tab-btn {
+  width: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: #dbeafe;
+  padding: 0.35rem 0.7rem;
+  font-size: 0.78rem;
+}
+.tab-btn.active {
+  background: var(--primary-strong);
+  border-color: #60a5fa;
 }
 .list {
   display: grid;

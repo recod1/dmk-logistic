@@ -3,7 +3,9 @@ import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 
 import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel } from "../status";
 import { plannedDateDisplay, plannedTimeDisplay } from "../plannedTime";
+import { normalizePlate } from "../vehiclePlate";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, RouteWorkflowStatus } from "../types";
+import SuggestField from "./SuggestField.vue";
 
 type RouteSearchFilters = {
   status?: string;
@@ -26,6 +28,8 @@ const props = defineProps<{
   drivers: DriverOption[];
   logistics?: DriverOption[];
   logisticsContacts?: Array<{ name: string; phone: string }>;
+  fleetVehicles?: Array<{ id: number; plate: string }>;
+  fleetTrailers?: Array<{ id: number; plate: string }>;
   currentUserId?: number;
   loading: boolean;
   error: string;
@@ -258,44 +262,32 @@ const onecForm = reactive({
 });
 
 const createDriverQuery = ref("");
-const createDriverOpen = ref(false);
 const onecDriverQuery = ref("");
-const onecDriverOpen = ref(false);
 
-function driverMatches(query: string): DriverOption[] {
-  const q = query.trim().toLowerCase();
-  const list = props.drivers;
-  if (!q) {
-    return list.slice(0, 12);
-  }
-  return list
-    .filter((driver) => {
-      const name = (driver.full_name || "").toLowerCase();
-      const login = (driver.login || "").toLowerCase();
-      return name.includes(q) || login.includes(q);
-    })
-    .slice(0, 12);
+function driverSuggestItems(): Array<{ id: number; label: string }> {
+  return (props.drivers || []).map((driver) => ({
+    id: driver.id,
+    label: (driver.full_name || driver.login || "").trim()
+  }));
 }
 
-const createDriverMatches = computed(() => driverMatches(createDriverQuery.value));
-const onecDriverMatches = computed(() => driverMatches(onecDriverQuery.value));
+const vehicleSuggest = computed(() => (props.fleetVehicles || []).map((item) => ({ id: item.id, label: item.plate })));
+const trailerSuggest = computed(() => (props.fleetTrailers || []).map((item) => ({ id: item.id, label: item.plate })));
+const filterDriverSuggest = computed(() => driverSuggestItems());
+const createDriverSuggest = computed(() => driverSuggestItems());
+const onecDriverSuggest = computed(() => driverSuggestItems());
 
-function pickCreateDriver(driver: DriverOption): void {
-  createForm.driver_user_id = driver.id;
-  createDriverQuery.value = driver.full_name || driver.login;
-  createDriverOpen.value = false;
+function pickCreateDriver(item: { id: number; label: string }): void {
+  createForm.driver_user_id = item.id;
 }
 
-function pickOnecDriver(driver: DriverOption): void {
-  onecForm.driver_user_id = driver.id;
-  onecDriverQuery.value = driver.full_name || driver.login;
-  onecDriverOpen.value = false;
+function pickOnecDriver(item: { id: number; label: string }): void {
+  onecForm.driver_user_id = item.id;
 }
 
 function clearOnecDriver(): void {
   onecForm.driver_user_id = 0;
   onecDriverQuery.value = "";
-  onecDriverOpen.value = false;
 }
 
 function makeEmptyPoint(): PointForm {
@@ -371,7 +363,6 @@ function openCreate(): void {
   createForm.driver_user_id = 0;
   createForm.created_by_user_id = props.currentUserId || 0;
   createDriverQuery.value = "";
-  createDriverOpen.value = false;
   createForm.number_auto = "";
   createForm.temperature = "";
   createForm.dispatcher_contacts = defaultContactsText();
@@ -388,7 +379,6 @@ function openCreateOnec(): void {
   onecForm.driver_user_id = 0;
   onecForm.created_by_user_id = 0;
   onecDriverQuery.value = "";
-  onecDriverOpen.value = false;
   onecForm.number_auto = "";
   onecForm.trailer_number = "";
   scrollCreateCardIntoView();
@@ -516,10 +506,9 @@ onMounted(() => {
           <h2>{{ filteredTitle }}</h2>
         </div>
       <div class="filters-grid" :class="{ open: searchOpen }">
-        <label>
-          Водитель (часть ФИО)
-          <input v-model="filters.driver_query" placeholder="Иванов" />
-        </label>
+        <SuggestField v-model="filters.driver_query" :items="filterDriverSuggest" placeholder="Начните вводить ФИО">
+          <template #label>Водитель (часть ФИО)</template>
+        </SuggestField>
         <label>
           № рейса
           <input v-model="filters.route_id" placeholder="R-2026-01" />
@@ -629,28 +618,17 @@ onMounted(() => {
     <section v-if="showCreateOnec" ref="createCardEl" class="card create-card">
       <h2>Создать рейс из 1С</h2>
       <p v-if="error" class="error">{{ error }}</p>
-      <label class="driver-search">
-        Водитель (если в тексте не найден / не однозначно)
-        <input
-          v-model="onecDriverQuery"
-          placeholder="Начните вводить ФИО или оставьте пустым для авто"
-          autocomplete="off"
-          @focus="onecDriverOpen = true"
-        />
-        <p v-if="onecForm.driver_user_id" class="picked">Выбран: {{ onecDriverQuery }}</p>
-        <div v-if="onecDriverOpen" class="driver-suggest">
-          <button type="button" class="suggest-item" @click="clearOnecDriver">Авто (по ФИО из текста)</button>
-          <button
-            v-for="driver in onecDriverMatches"
-            :key="driver.id"
-            type="button"
-            class="suggest-item"
-            @click="pickOnecDriver(driver)"
-          >
-            {{ driver.full_name || driver.login }}
-          </button>
-        </div>
-      </label>
+      <SuggestField
+        v-model="onecDriverQuery"
+        :items="onecDriverSuggest"
+        :picked="Boolean(onecForm.driver_user_id)"
+        empty-label="Авто (по ФИО из текста)"
+        placeholder="Начните вводить ФИО или оставьте пустым для авто"
+        @pick="pickOnecDriver"
+        @clear="clearOnecDriver"
+      >
+        <template #label>Водитель (если в тексте не найден / не однозначно)</template>
+      </SuggestField>
       <label>
         Логист
         <select v-model.number="onecForm.created_by_user_id">
@@ -661,14 +639,24 @@ onMounted(() => {
         </select>
       </label>
       <div class="create-grid onec-grid">
-        <label>
-          Номер ТС
-          <input v-model="onecForm.number_auto" class="upper" autocapitalize="characters" />
-        </label>
-        <label>
-          Номер прицепа
-          <input v-model="onecForm.trailer_number" class="upper" autocapitalize="characters" />
-        </label>
+        <SuggestField
+          v-model="onecForm.number_auto"
+          :items="vehicleSuggest"
+          placeholder="Начните вводить госномер"
+          @update:model-value="(v) => (onecForm.number_auto = normalizePlate(v))"
+          @pick="(item) => (onecForm.number_auto = item.label)"
+        >
+          <template #label>Номер ТС</template>
+        </SuggestField>
+        <SuggestField
+          v-model="onecForm.trailer_number"
+          :items="trailerSuggest"
+          placeholder="Начните вводить госномер"
+          @update:model-value="(v) => (onecForm.trailer_number = normalizePlate(v))"
+          @pick="(item) => (onecForm.trailer_number = item.label)"
+        >
+          <template #label>Номер прицепа</template>
+        </SuggestField>
         <div class="onec-fill">
           <button class="secondary" type="button" @click="fillFromOnecText">Взять из текста</button>
         </div>
@@ -691,27 +679,15 @@ onMounted(() => {
           ID рейса
           <input v-model="createForm.route_id" placeholder="R-2026-0001" />
         </label>
-        <label class="driver-search">
-          Водитель
-          <input
-            v-model="createDriverQuery"
-            placeholder="Начните вводить ФИО"
-            autocomplete="off"
-            @focus="createDriverOpen = true"
-          />
-          <p v-if="createForm.driver_user_id" class="picked">Выбран: {{ createDriverQuery }}</p>
-          <div v-if="createDriverOpen && createDriverMatches.length" class="driver-suggest">
-            <button
-              v-for="driver in createDriverMatches"
-              :key="driver.id"
-              type="button"
-              class="suggest-item"
-              @click="pickCreateDriver(driver)"
-            >
-              {{ driver.full_name || driver.login }}
-            </button>
-          </div>
-        </label>
+        <SuggestField
+          v-model="createDriverQuery"
+          :items="createDriverSuggest"
+          :picked="Boolean(createForm.driver_user_id)"
+          placeholder="Начните вводить ФИО"
+          @pick="pickCreateDriver"
+        >
+          <template #label>Водитель</template>
+        </SuggestField>
         <label>
           Логист
           <select v-model.number="createForm.created_by_user_id">
@@ -721,36 +697,36 @@ onMounted(() => {
             </option>
           </select>
         </label>
-        <label>
-          Номер авто
-          <input
-            v-model="createForm.number_auto"
-            class="upper"
-            autocapitalize="characters"
-            @input="(e) => (createForm.number_auto = upperOnly((e.target as HTMLInputElement).value))"
-          />
-        </label>
+        <SuggestField
+          v-model="createForm.number_auto"
+          :items="vehicleSuggest"
+          placeholder="Начните вводить госномер"
+          @update:model-value="(v) => (createForm.number_auto = normalizePlate(v))"
+          @pick="(item) => (createForm.number_auto = item.label)"
+        >
+          <template #label>Номер авто</template>
+        </SuggestField>
         <label>
           Температура
           <input v-model="createForm.temperature" />
         </label>
         <label>
-          Контакты диспетчера
+          Контакты логиста
           <input v-model="createForm.dispatcher_contacts" />
         </label>
         <label>
           Номер регистрации
           <input v-model="createForm.registration_number" />
         </label>
-        <label>
-          Номер прицепа
-          <input
-            v-model="createForm.trailer_number"
-            class="upper"
-            autocapitalize="characters"
-            @input="(e) => (createForm.trailer_number = upperOnly((e.target as HTMLInputElement).value))"
-          />
-        </label>
+        <SuggestField
+          v-model="createForm.trailer_number"
+          :items="trailerSuggest"
+          placeholder="Начните вводить госномер"
+          @update:model-value="(v) => (createForm.trailer_number = normalizePlate(v))"
+          @pick="(item) => (createForm.trailer_number = item.label)"
+        >
+          <template #label>Номер прицепа</template>
+        </SuggestField>
       </div>
       <article v-for="(point, idx) in createForm.points" :key="`new-${idx}`" class="point-card">
         <div class="point-top">
@@ -783,7 +759,7 @@ onMounted(() => {
           </label>
           <label>
             Время
-            <input v-model="point.point_time" type="time" step="60" lang="ru" />
+            <input v-model="point.point_time" type="text" inputmode="numeric" placeholder="13:00" lang="ru" />
           </label>
         </div>
       </article>

@@ -1407,6 +1407,94 @@ export async function saveLogisticsContacts(token: string, items: Array<{ name: 
   return data.items ?? [];
 }
 
+export type FleetPlate = { id: number; plate: string; updated_at?: string };
+
+async function fleetList(token: string, kind: "vehicles" | "trailers"): Promise<FleetPlate[]> {
+  const data = await requestJson<{ items: FleetPlate[] }>(`${API_BASE}/v1/fleet/${kind}`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return data.items ?? [];
+}
+
+export async function listFleetVehicles(token: string): Promise<FleetPlate[]> {
+  return fleetList(token, "vehicles");
+}
+
+export async function listFleetTrailers(token: string): Promise<FleetPlate[]> {
+  return fleetList(token, "trailers");
+}
+
+export async function createFleetVehicle(token: string, plate: string): Promise<FleetPlate> {
+  return requestJson<FleetPlate>(`${API_BASE}/v1/fleet/vehicles`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ plate })
+  });
+}
+
+export async function updateFleetVehicle(token: string, id: number, plate: string): Promise<FleetPlate> {
+  return requestJson<FleetPlate>(`${API_BASE}/v1/fleet/vehicles/${id}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ plate })
+  });
+}
+
+export async function deleteFleetVehicle(token: string, id: number): Promise<void> {
+  await requestJson(`${API_BASE}/v1/fleet/vehicles/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export async function createFleetTrailer(token: string, plate: string): Promise<FleetPlate> {
+  return requestJson<FleetPlate>(`${API_BASE}/v1/fleet/trailers`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ plate })
+  });
+}
+
+export async function updateFleetTrailer(token: string, id: number, plate: string): Promise<FleetPlate> {
+  return requestJson<FleetPlate>(`${API_BASE}/v1/fleet/trailers/${id}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ plate })
+  });
+}
+
+export async function deleteFleetTrailer(token: string, id: number): Promise<void> {
+  await requestJson(`${API_BASE}/v1/fleet/trailers/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export async function markRouteChatDelivered(token: string, routeId: string, lastMessageId: number): Promise<void> {
+  await requestJson(`${API_BASE}/v1/chat/routes/${encodeRouteId(routeId)}/delivered`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ last_message_id: lastMessageId })
+  });
+}
+
+export async function markRoomChatDelivered(token: string, roomId: number, lastMessageId: number): Promise<void> {
+  await requestJson(`${API_BASE}/v1/chats/rooms/${roomId}/delivered`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ last_message_id: lastMessageId })
+  });
+}
+
+export async function markSalaryChatDelivered(token: string, salaryId: number, lastMessageId: number): Promise<void> {
+  await requestJson(`${API_BASE}/v1/salary/${salaryId}/chat/delivered`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ last_message_id: lastMessageId })
+  });
+}
+
 export async function listSalariesForDriver(
   token: string,
   driverUserId: number,

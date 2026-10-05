@@ -18,6 +18,7 @@ from mobile_api.auth import get_current_user
 from mobile_api.db import get_db
 from mobile_api.models import (
     ChatAttachment,
+    ChatDelivery,
     ChatMessage,
     ChatRead,
     ChatRoom,
@@ -27,6 +28,7 @@ from mobile_api.models import (
 )
 from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.roles import ADMIN_ACCESS_ROLES, RoleCode, normalize_role_code, role_label_ru
+from mobile_api.chat_receipts import others_watermark, upsert_watermark
 from mobile_api.chat_realtime import chat_realtime_hub
 from mobile_api.point_documents_router import _upload_root as _mobile_upload_root
 
@@ -96,6 +98,19 @@ def _spawn_publish_chat_read(recipients: list[int], item: dict) -> None:
     def _run() -> None:
         try:
             asyncio.run(chat_realtime_hub.publish_to_users(recipients, {"type": "chat_messages_read", "item": item}))
+        except Exception:
+            return
+
+    try:
+        threading.Thread(target=_run, daemon=True).start()
+    except Exception:
+        pass
+
+
+def _spawn_publish_chat_delivered(recipients: list[int], item: dict) -> None:
+    def _run() -> None:
+        try:
+            asyncio.run(chat_realtime_hub.publish_to_users(recipients, {"type": "chat_messages_delivered", "item": item}))
         except Exception:
             return
 
@@ -226,7 +241,7 @@ def _room_out(db: Session, room: ChatRoom, current_user: User, unread_by_room: d
     }
 
 
-def _message_out(db: Session, msg: ChatMessage, *, read: bool | None = None) -> dict:
+def _message_out(db: Session, msg: ChatMessage, *, read: bool | None = None, delivered: bool | None = None) -> dict:
     author = db.get(User, msg.user_id)
     author_name = (author.full_name or author.login) if author else f"user#{msg.user_id}"
     atts = db.scalars(
@@ -249,17 +264,38 @@ def _message_out(db: Session, msg: ChatMessage, *, read: bool | None = None) -> 
             for a in atts
         ],
         "read": bool(read) if read is not None else False,
+        "delivered": bool(delivered) if delivered is not None else bool(read),
     }
 
 
 def _others_room_read_watermark(db: Session, room_id: int, exclude_user_id: int) -> int:
-    value = db.scalar(
-        select(func.max(ChatRead.last_read_message_id)).where(
-            ChatRead.room_id == room_id,
-            ChatRead.user_id != exclude_user_id,
-        )
+    return others_watermark(
+        db,
+        ChatRead.last_read_message_id,
+        ChatRead.room_id == room_id,
+        ChatRead.user_id != exclude_user_id,
     )
-    return int(value or 0)
+
+
+def _others_room_delivered_watermark(db: Session, room_id: int, exclude_user_id: int) -> int:
+    delivered = others_watermark(
+        db,
+        ChatDelivery.last_delivered_message_id,
+        ChatDelivery.room_id == room_id,
+        ChatDelivery.user_id != exclude_user_id,
+    )
+    return max(delivered, _others_room_read_watermark(db, room_id, exclude_user_id))
+
+
+def _mark_room_delivered(db: Session, *, user_id: int, room_id: int, last_id: int) -> int:
+    return upsert_watermark(
+        db,
+        model=ChatDelivery,
+        match={"user_id": user_id, "room_id": room_id},
+        field="last_delivered_message_id",
+        value=last_id,
+        factory=lambda: ChatDelivery(),
+    )
 
 
 class UnreadRoomsIn(BaseModel):
@@ -496,6 +532,7 @@ def list_room_messages(
         else:
             existing.last_read_message_id = max(int(existing.last_read_message_id or 0), last_id)
             db.add(existing)
+        _mark_room_delivered(db, user_id=current_user.id, room_id=room_id, last_id=last_id)
         db.commit()
         _spawn_publish_chat_read(
             _room_recipient_user_ids(db, room_id),
@@ -504,14 +541,54 @@ def list_room_messages(
                 "room_id": int(room_id),
                 "user_id": int(current_user.id),
                 "last_read_message_id": last_id,
+                "last_delivered_message_id": last_id,
             },
         )
-    watermark = _others_room_read_watermark(db, room_id, current_user.id)
+    read_wm = _others_room_read_watermark(db, room_id, current_user.id)
+    delivered_wm = _others_room_delivered_watermark(db, room_id, current_user.id)
     return {
         "items": [
-            _message_out(db, r, read=int(r.user_id) == int(current_user.id) and int(r.id) <= watermark) for r in rows
+            _message_out(
+                db,
+                r,
+                delivered=int(r.user_id) == int(current_user.id) and int(r.id) <= delivered_wm,
+                read=int(r.user_id) == int(current_user.id) and int(r.id) <= read_wm,
+            )
+            for r in rows
         ]
     }
+
+
+class ChatDeliveredIn(BaseModel):
+    last_message_id: int = Field(ge=1)
+
+
+@router.post("/v1/chats/rooms/{room_id}/delivered")
+def mark_room_chat_delivered(
+    room_id: int,
+    payload: ChatDeliveredIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    room = db.get(ChatRoom, room_id)
+    if room is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    _assert_room_access(db, current_user, room)
+    last_id = _mark_room_delivered(
+        db, user_id=current_user.id, room_id=int(room_id), last_id=int(payload.last_message_id)
+    )
+    recipients = _room_recipient_user_ids(db, room_id)
+    db.commit()
+    _spawn_publish_chat_delivered(
+        recipients,
+        {
+            "scope": "room",
+            "room_id": int(room_id),
+            "user_id": int(current_user.id),
+            "last_delivered_message_id": last_id,
+        },
+    )
+    return {"ok": True, "last_delivered_message_id": last_id}
 
 
 class SendTextIn(BaseModel):

@@ -1,6 +1,7 @@
 const DATE_ISO = /(\d{4})-(\d{2})-(\d{2})/;
 const DATE_DMY = /(\d{1,2})[./](\d{1,2})[./](\d{2,4})/;
 const TIME = /(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp][Mm]))?/;
+const TIME_FLEX = /(\d{1,2})[.\-](\d{2})(?:[.\-](\d{2}))?/;
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -51,7 +52,7 @@ export function splitPlannedDateTime(raw?: string | null): { date: string; time:
     }
     rest = `${text.slice(0, dmy.index)} ${text.slice(dmy.index + dmy[0].length)}`.trim();
   }
-  const search = rest || text;
+  const search = date ? rest : text;
   const tm = TIME.exec(search);
   let time = "";
   if (tm) {
@@ -59,6 +60,15 @@ export function splitPlannedDateTime(raw?: string | null): { date: string; time:
     const minute = Number(tm[2]);
     if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
       time = `${pad2(hour)}:${pad2(minute)}`;
+    }
+  } else {
+    const flex = TIME_FLEX.exec(search);
+    if (flex) {
+      const hour = Number(flex[1]);
+      const minute = Number(flex[2]);
+      if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
+        time = `${pad2(hour)}:${pad2(minute)}`;
+      }
     }
   }
   return { date, time };

@@ -25,7 +25,10 @@ from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.onec_routes import parse_onec_message
 from mobile_api.roles import RoleCode, role_label_ru
 from mobile_api.time_formatting import format_dt_for_app
+from mobile_api.logistics_contacts_router import logistics_contacts_payload
+from mobile_api.fleet_router import ensure_fleet_trailer, ensure_fleet_vehicle
 from utils.onec_datetime import planned_wall_fields, split_onec_wall_datetime, normalize_planned_time
+from utils.vehicle_plate import normalize_plate, require_plate
 from utils.route_point_changes import changed_text as _changed_text, diff_route_points
 
 
@@ -607,6 +610,47 @@ def _point_meta_from_payload(point_in: AdminRoutePointCreate) -> tuple[str, str,
     )
 
 
+def _default_logist_contacts(db: Session) -> str:
+    items = logistics_contacts_payload(db)
+    parts = [f"{(row.get('name') or '').strip()} {(row.get('phone') or '').strip()}".strip() for row in items]
+    return "; ".join(part for part in parts if part)
+
+
+def _optional_plate(raw: str | None, *, required: bool = False) -> str:
+    text = (raw or "").strip()
+    if not text:
+        if required:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Укажите госномер")
+        return ""
+    try:
+        return require_plate(text)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+
+def _store_route_plates(
+    db: Session, *, number_auto: str, trailer_number: str, strict: bool = True
+) -> tuple[str, str]:
+    def _one(raw: str) -> str:
+        text = (raw or "").strip()
+        if not text:
+            return ""
+        if strict:
+            return _optional_plate(text)
+        try:
+            return require_plate(text)
+        except ValueError:
+            return normalize_plate(text) or text.upper()
+
+    auto = _one(number_auto)
+    trailer = _one(trailer_number)
+    if auto:
+        ensure_fleet_vehicle(db, auto)
+    if trailer:
+        ensure_fleet_trailer(db, trailer)
+    return auto, trailer
+
+
 LOGISTIC_SELECT_ROLES = {
     RoleCode.LOGISTIC.value,
     RoleCode.ADMIN.value,
@@ -776,17 +820,23 @@ def create_route(
     if payload.created_by_user_id:
         creator = _ensure_logistic(db, payload.created_by_user_id)
 
+    number_auto, trailer_number = _store_route_plates(
+        db,
+        number_auto=(payload.number_auto or "").strip(),
+        trailer_number=(payload.trailer_number or "").strip(),
+    )
+    contacts = (payload.dispatcher_contacts or "").strip() or _default_logist_contacts(db)
     route = Route(
         id=route_id,
         legacy_driver_tg_id=legacy_driver_tg_id,
         assigned_user_id=driver.id,
         created_by_user_id=creator.id,
         status="new",
-        number_auto=(payload.number_auto or "").strip(),
+        number_auto=number_auto,
         temperature=(payload.temperature or "").strip(),
-        dispatcher_contacts=(payload.dispatcher_contacts or "").strip(),
+        dispatcher_contacts=contacts,
         registration_number=(payload.registration_number or "").strip(),
-        trailer_number=(payload.trailer_number or "").strip(),
+        trailer_number=trailer_number,
     )
     db.add(route)
     db.flush()
@@ -836,17 +886,24 @@ def create_route_from_onec(
         creator = _ensure_logistic(db, payload.created_by_user_id)
     else:
         creator = _try_find_logistic_by_name(db, parsed.logistic_name)
+    number_auto, trailer_number = _store_route_plates(
+        db,
+        number_auto=((payload.number_auto or parsed.number_auto) or "").strip(),
+        trailer_number=((payload.trailer_number or parsed.trailer_number) or "").strip(),
+        strict=False,
+    )
+    contacts = (parsed.dispatcher_contacts or "").strip() or _default_logist_contacts(db)
     route = Route(
         id=parsed.route_id,
         legacy_driver_tg_id=legacy_driver_tg_id,
         assigned_user_id=driver.id,
         created_by_user_id=creator.id if creator else None,
         status="new",
-        number_auto=((payload.number_auto or parsed.number_auto) or "").strip(),
+        number_auto=number_auto,
         temperature=(parsed.temperature or "").strip(),
-        dispatcher_contacts=(parsed.dispatcher_contacts or "").strip(),
+        dispatcher_contacts=contacts,
         registration_number=(parsed.registration_number or "").strip(),
-        trailer_number=((payload.trailer_number or parsed.trailer_number) or "").strip(),
+        trailer_number=trailer_number,
     )
     db.add(route)
     db.flush()
@@ -1105,12 +1162,14 @@ def assign_route_driver(
     vehicle_changes: list[str] = []
     if payload.number_auto is not None:
         item = _changed_text("ТС", route.number_auto, payload.number_auto)
-        route.number_auto = payload.number_auto.strip().upper()
+        auto, _ = _store_route_plates(db, number_auto=payload.number_auto, trailer_number="")
+        route.number_auto = auto
         if item:
             vehicle_changes.append(item)
     if payload.trailer_number is not None:
         item = _changed_text("Прицеп", route.trailer_number, payload.trailer_number)
-        route.trailer_number = payload.trailer_number.strip().upper()
+        _, trailer = _store_route_plates(db, number_auto="", trailer_number=payload.trailer_number)
+        route.trailer_number = trailer
         if item:
             vehicle_changes.append(item)
     if driver_changed:
@@ -1250,7 +1309,8 @@ def update_route(
     changes: list[str] = []
     if payload.number_auto is not None:
         item = _changed_text("ТС", route.number_auto, payload.number_auto)
-        route.number_auto = payload.number_auto.strip()
+        auto, _ = _store_route_plates(db, number_auto=payload.number_auto, trailer_number="")
+        route.number_auto = auto
         if item:
             changes.append(item)
     if payload.temperature is not None:
@@ -1259,7 +1319,7 @@ def update_route(
         if item:
             changes.append(item)
     if payload.dispatcher_contacts is not None:
-        item = _changed_text("Контакты диспетчера", route.dispatcher_contacts, payload.dispatcher_contacts)
+        item = _changed_text("Контакты логиста", route.dispatcher_contacts, payload.dispatcher_contacts)
         route.dispatcher_contacts = payload.dispatcher_contacts.strip()
         if item:
             changes.append(item)
@@ -1270,7 +1330,8 @@ def update_route(
             changes.append(item)
     if payload.trailer_number is not None:
         item = _changed_text("Прицеп", route.trailer_number, payload.trailer_number)
-        route.trailer_number = payload.trailer_number.strip()
+        _, trailer = _store_route_plates(db, number_auto="", trailer_number=payload.trailer_number)
+        route.trailer_number = trailer
         if item:
             changes.append(item)
     if payload.created_by_user_id:

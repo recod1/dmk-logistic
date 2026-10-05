@@ -27,7 +27,8 @@ from sqlalchemy.orm import Session
 from mobile_api.auth import get_current_user
 from mobile_api.chat_realtime import chat_realtime_hub
 from mobile_api.db import SessionLocal, get_db
-from mobile_api.models import Route, RouteChatAttachment, RouteChatMessage, RouteChatRead, User
+from mobile_api.chat_receipts import others_watermark, upsert_watermark
+from mobile_api.models import Route, RouteChatAttachment, RouteChatDelivery, RouteChatMessage, RouteChatRead, User
 from mobile_api.point_documents_router import _upload_root as _mobile_upload_root
 from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.roles import RoleCode, normalize_role_code
@@ -73,7 +74,9 @@ def _assert_can_access_route(db: Session, user: User, route_id: str) -> Route:
     return route
 
 
-def _message_out(db: Session, msg: RouteChatMessage, *, read: bool | None = None) -> dict:
+def _message_out(
+    db: Session, msg: RouteChatMessage, *, read: bool | None = None, delivered: bool | None = None
+) -> dict:
     author = db.get(User, msg.user_id)
     author_name = (author.full_name or author.login) if author else f"user#{msg.user_id}"
     attachments = db.scalars(
@@ -98,18 +101,43 @@ def _message_out(db: Session, msg: RouteChatMessage, *, read: bool | None = None
             for a in attachments
         ],
         "read": bool(read) if read is not None else False,
+        "delivered": bool(delivered) if delivered is not None else bool(read),
     }
     return out
 
 
 def _others_read_watermark(db: Session, route_id: str, exclude_user_id: int) -> int:
-    value = db.scalar(
-        select(func.max(RouteChatRead.last_read_message_id)).where(
-            RouteChatRead.route_id == route_id,
-            RouteChatRead.user_id != exclude_user_id,
-        )
+    return others_watermark(
+        db,
+        RouteChatRead.last_read_message_id,
+        RouteChatRead.route_id == route_id,
+        RouteChatRead.user_id != exclude_user_id,
     )
-    return int(value or 0)
+
+
+def _others_delivered_watermark(db: Session, route_id: str, exclude_user_id: int) -> int:
+    delivered = others_watermark(
+        db,
+        RouteChatDelivery.last_delivered_message_id,
+        RouteChatDelivery.route_id == route_id,
+        RouteChatDelivery.user_id != exclude_user_id,
+    )
+    return max(delivered, _others_read_watermark(db, route_id, exclude_user_id))
+
+
+def _mark_route_delivered(db: Session, *, user_id: int, route_id: str, last_id: int) -> int:
+    return upsert_watermark(
+        db,
+        model=RouteChatDelivery,
+        match={"user_id": user_id, "route_id": route_id},
+        field="last_delivered_message_id",
+        value=last_id,
+        factory=lambda: RouteChatDelivery(),
+    )
+
+
+class ChatDeliveredIn(BaseModel):
+    last_message_id: int = Field(ge=1)
 
 
 def _route_chat_recipient_ids(db: Session, route: Route) -> list[int]:
@@ -150,6 +178,7 @@ def list_messages(
         else:
             existing.last_read_message_id = max(int(existing.last_read_message_id or 0), last_id)
             db.add(existing)
+        _mark_route_delivered(db, user_id=current_user.id, route_id=route_id, last_id=last_id)
         db.commit()
         _publish_chat(
             _route_chat_recipient_ids(db, route),
@@ -160,16 +189,50 @@ def list_messages(
                     "route_id": route_id,
                     "user_id": int(current_user.id),
                     "last_read_message_id": last_id,
+                    "last_delivered_message_id": last_id,
                 },
             },
         )
-    watermark = _others_read_watermark(db, route_id, current_user.id)
+    read_wm = _others_read_watermark(db, route_id, current_user.id)
+    delivered_wm = _others_delivered_watermark(db, route_id, current_user.id)
     return {
         "items": [
-            _message_out(db, row, read=int(row.user_id) == int(current_user.id) and int(row.id) <= watermark)
+            _message_out(
+                db,
+                row,
+                delivered=int(row.user_id) == int(current_user.id) and int(row.id) <= delivered_wm,
+                read=int(row.user_id) == int(current_user.id) and int(row.id) <= read_wm,
+            )
             for row in rows
         ]
     }
+
+
+@router.post("/v1/chat/routes/{route_id:path}/delivered")
+def mark_route_chat_delivered(
+    route_id: str,
+    payload: ChatDeliveredIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    route = _assert_can_access_route(db, current_user, route_id)
+    last_id = _mark_route_delivered(
+        db, user_id=current_user.id, route_id=route.id, last_id=int(payload.last_message_id)
+    )
+    db.commit()
+    _publish_chat(
+        _route_chat_recipient_ids(db, route),
+        {
+            "type": "chat_messages_delivered",
+            "item": {
+                "scope": "route",
+                "route_id": route.id,
+                "user_id": int(current_user.id),
+                "last_delivered_message_id": last_id,
+            },
+        },
+    )
+    return {"ok": True, "last_delivered_message_id": last_id}
 
 
 class UnreadSummaryIn(BaseModel):
@@ -266,7 +329,7 @@ def send_message(
     db.commit()
     db.refresh(msg)
 
-    out = _message_out(db, msg, read=False)
+    out = _message_out(db, msg, read=False, delivered=False)
     recipients = _route_chat_recipient_ids(db, route)
 
     # realtime chat push
@@ -353,7 +416,7 @@ async def send_message_with_attachments(
         created_ids.append(int(row.id))
 
     db.commit()
-    out = _message_out(db, msg, read=False)
+    out = _message_out(db, msg, read=False, delivered=False)
     recipients = _route_chat_recipient_ids(db, route)
 
     _publish_chat(recipients, {"type": "chat_message_created", "item": out})

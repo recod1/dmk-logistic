@@ -394,6 +394,32 @@ class RouteChatRead(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
 
 
+class ChatDelivery(Base):
+    __tablename__ = "chat_deliveries"
+    __table_args__ = (UniqueConstraint("room_id", "user_id", name="uq_chat_deliveries_room_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    room_id: Mapped[int] = mapped_column(ForeignKey("chat_rooms.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    last_delivered_message_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RouteChatDelivery(Base):
+    __tablename__ = "route_chat_deliveries"
+    __table_args__ = (UniqueConstraint("user_id", "route_id", name="uq_route_chat_deliveries_user_route"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    route_id: Mapped[str] = mapped_column(ForeignKey("routes.id", ondelete="CASCADE"), nullable=False, index=True)
+    last_delivered_message_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 
 class Salary(Base):
     __tablename__ = "salary"
@@ -478,6 +504,19 @@ class SalaryChatAttachment(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 
+class SalaryChatDelivery(Base):
+    __tablename__ = "salary_chat_deliveries"
+    __table_args__ = (UniqueConstraint("salary_id", "user_id", name="uq_salary_chat_deliveries_salary_user"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    salary_id: Mapped[int] = mapped_column(ForeignKey("salary.id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    last_delivered_message_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
 class SalaryChatRead(Base):
     __tablename__ = "salary_chat_reads"
     __table_args__ = (UniqueConstraint("salary_id", "user_id", name="uq_salary_chat_reads_salary_user"),)
@@ -488,6 +527,28 @@ class SalaryChatRead(Base):
     last_read_message_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now(), index=True
+    )
+
+
+class FleetVehicle(Base):
+    __tablename__ = "fleet_vehicles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plate: Mapped[str] = mapped_column(String(16), nullable=False, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class FleetTrailer(Base):
+    __tablename__ = "fleet_trailers"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    plate: Mapped[str] = mapped_column(String(16), nullable=False, unique=True, index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 

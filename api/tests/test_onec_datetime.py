@@ -39,7 +39,11 @@ class OnecDatetimeTests(TestCase):
         self.assertEqual(split_onec_wall_datetime("21.09.2026 16:30"), ("21.09.2026", "16:30"))
         self.assertNotEqual(split_onec_wall_datetime("21.09.2026 16:30")[1], "04:30")
 
-    def test_keeps_1700_dmy_and_iso(self) -> None:
+    def test_keeps_1300_afternoon(self) -> None:
+        self.assertEqual(split_onec_wall_datetime("21.09.2026 13:00"), ("21.09.2026", "13:00"))
+        self.assertEqual(split_onec_wall_datetime("21.09.2026 13.00"), ("21.09.2026", "13:00"))
+        self.assertEqual(split_onec_wall_datetime("2026-09-21T13:00:00"), ("21.09.2026", "13:00"))
+        self.assertEqual(split_onec_wall_datetime("21.09.2026"), ("21.09.2026", ""))
         self.assertEqual(split_onec_wall_datetime("21.09.2026 17:00"), ("21.09.2026", "17:00"))
         self.assertEqual(split_onec_wall_datetime("2026-09-21T17:00:00"), ("21.09.2026", "17:00"))
         self.assertNotEqual(split_onec_wall_datetime("21.09.2026 17:00")[1], "05:00")
@@ -91,6 +95,15 @@ class OnecParseTests(TestCase):
         parsed = parse_onec_message("00ЭК-1\nЗагр: 21.09.2026 17:00 Организация: Склад\n")
         self.assertEqual(parsed.dispatcher_contacts, "")
         self.assertEqual(parsed.logistic_name, "")
+
+    def test_logist_contacts_fill_when_no_dispatcher(self) -> None:
+        from mobile_api.onec_routes import parse_onec_message
+
+        parsed = parse_onec_message(
+            "00ЭК-1\nКонтакты логистов: +7 999 111-22-33\nЗагр: 21.09.2026 13:00 Организация: Склад\n"
+        )
+        self.assertEqual(parsed.dispatcher_contacts, "+7 999 111-22-33")
+        self.assertEqual(parsed.points[0].point_time, "13:00")
 
     def test_splits_org_address_contacts_inkerman_novabev(self) -> None:
         from mobile_api.onec_routes import parse_onec_message
