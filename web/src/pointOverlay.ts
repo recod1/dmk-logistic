@@ -69,6 +69,26 @@ export function formatOverlayTime(raw: string | null | undefined): string {
   return `${pad(dt.getDate())}.${pad(dt.getMonth() + 1)}.${dt.getFullYear()} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
 }
 
+export function rollbackStageOnPoint(
+  point: PointDto,
+  rejectedStatus: string,
+  previousStatus: PointStatus
+): PointDto {
+  const spec = STATUS_STAGE[rejectedStatus];
+  const next: PointDto = { ...point, status: previousStatus };
+  if (spec) {
+    (next as Record<string, unknown>)[spec.time as string] = null;
+    (next as Record<string, unknown>)[spec.legacyTime as string] = null;
+    (next as Record<string, unknown>)[spec.odometer as string] = null;
+    (next as Record<string, unknown>)[spec.timeSource as string] = null;
+    (next as Record<string, unknown>)[spec.odometerSource as string] = null;
+  }
+  if (rejectedStatus === "process") {
+    next.estimated_arrival = "";
+  }
+  return next;
+}
+
 export function applyStageOverlayToPoint(point: PointDto, status: PointStatus, fields: OverlayStageFields): PointDto {
   const spec = STATUS_STAGE[status];
   if (!spec) {

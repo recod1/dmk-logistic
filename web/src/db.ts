@@ -35,7 +35,42 @@ export interface PointStatusOverlay {
   time_source?: string | null;
   odometer_source?: string | null;
   estimated_arrival?: string | null;
+  previous_status?: PointStatus | null;
   updated_at: string;
+}
+
+export type ActionKind =
+  | "revert"
+  | "chat_route"
+  | "chat_room"
+  | "chat_salary"
+  | "location"
+  | "salary_confirm"
+  | "salary_comment";
+
+export interface ActionQueueItem {
+  id?: number;
+  client_id: string;
+  kind: ActionKind;
+  created_at: string;
+  device_id: string;
+  user_id?: number;
+  payload: {
+    route_id?: string;
+    point_id?: number;
+    room_id?: number;
+    salary_id?: number;
+    text?: string;
+    lat?: number;
+    lng?: number;
+  };
+  last_error?: string | null;
+}
+
+export interface MessageSnapshotRow {
+  key: string;
+  items: unknown[];
+  updatedAt: string;
 }
 
 export interface DriverRoutesCacheRow {
@@ -74,6 +109,8 @@ const db = new Dexie("dmk-mobile-db") as Dexie & {
   routeSnapshots: EntityTable<RouteSnapshotRow, "id">;
   pendingAccepts: EntityTable<PendingAcceptRow, "route_id">;
   authSession: EntityTable<AuthSessionRow, "key">;
+  actionQueue: EntityTable<ActionQueueItem, "id">;
+  messageSnapshots: EntityTable<MessageSnapshotRow, "key">;
 };
 
 db.version(1).stores({
@@ -130,6 +167,19 @@ db.version(7).stores({
   routeSnapshots: "id",
   pendingAccepts: "route_id,created_at",
   authSession: "key"
+});
+
+db.version(8).stores({
+  activeRoute: "key",
+  outbox: "++id,client_event_id,point_id,created_at,user_id",
+  pointOverlay: "++id,route_id,point_id,[route_id+point_id],updated_at",
+  pendingDocBlobs: "local_key,point_id,route_id,created_at",
+  driverRoutesCache: "key",
+  routeSnapshots: "id",
+  pendingAccepts: "route_id,created_at",
+  authSession: "key",
+  actionQueue: "++id,client_id,kind,created_at,device_id,user_id",
+  messageSnapshots: "key"
 });
 
 function toPlainObject<T>(value: T): T {
@@ -192,7 +242,9 @@ export async function clearLocalUserData(): Promise<void> {
     db.driverRoutesCache.clear(),
     db.routeSnapshots.clear(),
     db.pendingAccepts.clear(),
-    db.authSession.clear()
+    db.authSession.clear(),
+    db.actionQueue.clear(),
+    db.messageSnapshots.clear()
   ]);
 }
 
@@ -218,6 +270,7 @@ export async function savePointOverlay(
     time_source?: string | null;
     odometer_source?: string | null;
     estimated_arrival?: string | null;
+    previous_status?: PointStatus | null;
   }
 ): Promise<void> {
   const existing = await db.pointOverlay.where("[route_id+point_id]").equals([routeId, pointId]).first();
@@ -231,6 +284,7 @@ export async function savePointOverlay(
     time_source: extras?.time_source ?? null,
     odometer_source: extras?.odometer_source ?? null,
     estimated_arrival: extras?.estimated_arrival ?? null,
+    previous_status: extras?.previous_status ?? null,
     updated_at: new Date().toISOString()
   };
   if (existing?.id) {
@@ -348,16 +402,63 @@ export async function clearAuthSession(): Promise<void> {
   await db.authSession.delete("current");
 }
 
-export async function getDriverQueueCounts(deviceId: string): Promise<{ outbox: number; docs: number; accepts: number }> {
-  const [outboxRows, docs, accepts] = await Promise.all([
+export async function addAction(item: ActionQueueItem): Promise<void> {
+  await db.actionQueue.add(item);
+}
+
+export async function listActions(deviceId: string, userId?: number | null): Promise<ActionQueueItem[]> {
+  return db.actionQueue
+    .orderBy("created_at")
+    .filter((item) => {
+      if (item.device_id !== deviceId) {
+        return false;
+      }
+      if (userId && item.user_id && item.user_id !== userId) {
+        return false;
+      }
+      return true;
+    })
+    .toArray();
+}
+
+export async function removeActionsByClientIds(ids: string[]): Promise<void> {
+  if (!ids.length) {
+    return;
+  }
+  const rows = await db.actionQueue.where("client_id").anyOf(ids).toArray();
+  if (!rows.length) {
+    return;
+  }
+  await db.actionQueue.bulkDelete(rows.map((row) => row.id!).filter(Boolean));
+}
+
+export async function saveMessageSnapshot(key: string, items: unknown[]): Promise<void> {
+  await db.messageSnapshots.put({
+    key,
+    items: toPlainObject(items),
+    updatedAt: new Date().toISOString()
+  });
+}
+
+export async function loadMessageSnapshot<T>(key: string): Promise<T[] | null> {
+  const row = await db.messageSnapshots.get(key);
+  return (row?.items as T[] | undefined) ?? null;
+}
+
+export async function getDriverQueueCounts(
+  deviceId: string
+): Promise<{ outbox: number; docs: number; accepts: number; actions: number }> {
+  const [outboxRows, docs, accepts, actions] = await Promise.all([
     db.outbox.toArray(),
     db.pendingDocBlobs.count(),
-    db.pendingAccepts.count()
+    db.pendingAccepts.count(),
+    db.actionQueue.toArray()
   ]);
   return {
     outbox: outboxRows.filter((item) => item.device_id === deviceId).length,
     docs,
-    accepts
+    accepts,
+    actions: actions.filter((item) => item.device_id === deviceId).length
   };
 }
 

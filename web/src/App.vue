@@ -125,15 +125,19 @@ import {
   uploadPointDocuments
 } from "./api";
 import {
+  addAction,
   addOutboxEvent,
   addPendingAccept,
   getOutboxEvents,
   getPendingAccepts,
   getDriverQueueCounts,
   getPointOverlays,
+  listActions,
   loadActiveRoute,
   loadDriverRoutesCache,
+  loadMessageSnapshot,
   loadRouteSnapshot,
+  removeActionsByClientIds,
   removeOutboxByClientEventIds,
   removePendingAccept,
   removePendingDocBlobs,
@@ -142,12 +146,14 @@ import {
   saveAuthSession,
   clearAuthSession,
   saveDriverRoutesCache,
+  saveMessageSnapshot,
   savePendingDocBlob,
   savePointOverlay,
   saveRouteSnapshot,
   updateOutboxEventByClientId,
   listPendingDocBlobs,
-  clearLocalUserData
+  clearLocalUserData,
+  type ActionQueueItem
 } from "./db";
 import { DRIVER_PREFETCH_SYNC_TAG, persistPrefetchPayload, prefetchAssignedRoutesFromSession, routeToListItem } from "./offlinePrefetch";
 import { applyLatestAppVersion } from "./appUpdate";
@@ -157,8 +163,8 @@ import { plannedTimeInputValue } from "./plannedTime";
 import { prepareDocumentImageBlobs } from "./imageUploadPrep";
 import { parseChatDeliveryHint } from "./chatDeliveryBg";
 import { isAccountantRole, isAdminRole, isFleetEditorRole, isLogisticRole, isRouteManagerRole } from "./roles";
-import { applyOverlaysToPoints, applyStageOverlayToPoint } from "./pointOverlay";
-import { isPointDone, nextStatus, nextStatusLabel } from "./status";
+import { applyOverlaysToPoints, applyStageOverlayToPoint, rollbackStageOnPoint } from "./pointOverlay";
+import { isPointDone, nextStatus, nextStatusLabel, previousStatus } from "./status";
 import {
   connectionHint,
   connectionServerOk,
@@ -253,7 +259,20 @@ const notificationsLoading = ref(false);
 const notificationsError = ref("");
 
 const chatRouteId = ref<string | null>(null);
-const chatMessages = ref<Array<{ id: number; route_id: string; user_id: number; author_name: string; text: string; created_at: string; read?: boolean; delivered?: boolean }>>([]);
+const chatMessages = ref<
+  Array<{
+    id: number;
+    route_id: string;
+    user_id: number;
+    author_name: string;
+    text: string;
+    created_at: string;
+    read?: boolean;
+    delivered?: boolean;
+    pending?: boolean;
+    client_id?: string;
+  }>
+>([]);
 const chatLoading = ref(false);
 const chatError = ref("");
 const chatUnreadByRoute = ref<Record<string, number>>({});
@@ -443,7 +462,19 @@ const hasUnreadSalary = computed(() =>
 const salaryChatItemsForChatView = computed(() => {
   const sid = salaryChatSalaryId.value;
   if (!sid) return [];
-  return salaryChatMessages.value.map((m: Record<string, unknown>) => ({ ...m, route_id: String(sid) }));
+  return salaryChatMessages.value.map((m: Record<string, unknown>) => ({
+    id: Number(m.id),
+    route_id: String(sid),
+    user_id: Number(m.user_id || 0),
+    author_name: String(m.author_name || ""),
+    text: String(m.text || ""),
+    created_at: String(m.created_at || ""),
+    read: m.read === true,
+    delivered: m.delivered === true,
+    pending: m.pending === true,
+    client_id: typeof m.client_id === "string" ? m.client_id : undefined,
+    attachments: Array.isArray(m.attachments) ? m.attachments : undefined
+  }));
 });
 
 const activeRouteSummary = computed(() => {
@@ -1837,7 +1868,17 @@ async function applyOverlaysToRoute(baseRoute: RouteDto | null): Promise<RouteDt
     const overlays = await getPointOverlays(baseRoute.id);
     const pendingAccepts = await getPendingAccepts();
     const locallyAccepted = pendingAccepts.some((item) => item.route_id === baseRoute.id);
-    const points = applyOverlaysToPoints(baseRoute, overlays);
+    const reverts = (await listActions(getDeviceId(), authUser.value?.id)).filter(
+      (item) => item.kind === "revert" && item.payload.point_id
+    );
+    const points = applyOverlaysToPoints(baseRoute, overlays).map((point) => {
+      const queued = reverts.find((item) => item.payload.point_id === point.id);
+      if (!queued) {
+        return point;
+      }
+      const prev = previousStatus(point.status);
+      return prev ? rollbackStageOnPoint(point, point.status, prev) : point;
+    });
     return {
       ...baseRoute,
       status: locallyAccepted && baseRoute.status === "new" ? "process" : baseRoute.status,
@@ -1875,6 +1916,32 @@ async function persistDriverRoute(next: RouteDto | null): Promise<void> {
 
 function hasNetwork(): boolean {
   return typeof navigator === "undefined" ? true : navigator.onLine;
+}
+
+function newClientId(): string {
+  return `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function currentAuthorName(): string {
+  return (authUser.value?.full_name || authUser.value?.login || "Я").trim();
+}
+
+function mergePendingMessages<T extends { id: number; client_id?: string; pending?: boolean; text?: string }>(
+  serverItems: T[],
+  pending: T[]
+): T[] {
+  if (!pending.length) {
+    return serverItems;
+  }
+  const texts = new Set(serverItems.map((item) => `${item.text || ""}`.trim()));
+  const extra = pending.filter((item) => {
+    if (item.client_id && serverItems.some((row) => row.client_id === item.client_id)) {
+      return false;
+    }
+    const text = (item.text || "").trim();
+    return text ? !texts.has(text) : true;
+  });
+  return extra.length ? [...serverItems, ...extra] : serverItems;
 }
 
 function urlBase64ToUint8Array(base64String: string): Uint8Array {
@@ -2086,7 +2153,10 @@ async function refreshDriverRoutes(): Promise<void> {
       // ignore chat unread errors
     }
 
-    const localWork = pendingIds.size > 0 || (await getOutboxEvents(getDeviceId(), authUser.value?.id)).length > 0;
+    const localWork =
+      pendingIds.size > 0 ||
+      (await getOutboxEvents(getDeviceId(), authUser.value?.id)).length > 0 ||
+      (await listActions(getDeviceId(), authUser.value?.id)).length > 0;
     if (driverActiveRouteId.value) {
       if (!route.value || route.value.id !== driverActiveRouteId.value) {
         const cachedSnap = await loadRouteSnapshot(driverActiveRouteId.value);
@@ -2133,7 +2203,10 @@ async function refreshRoute(): Promise<void> {
   try {
     const serverRoute = await getActiveRoute(authToken.value);
     const pending = await getPendingAccepts();
-    const localWork = pending.length > 0 || (await getOutboxEvents(getDeviceId(), authUser.value?.id)).length > 0;
+    const localWork =
+      pending.length > 0 ||
+      (await getOutboxEvents(getDeviceId(), authUser.value?.id)).length > 0 ||
+      (await listActions(getDeviceId(), authUser.value?.id)).length > 0;
     if (!serverRoute && localWork && route.value) {
       route.value = await applyOverlaysToRoute(route.value);
       return;
@@ -2307,12 +2380,7 @@ function ensureDriverGeoPermission(opts?: { forcePrompt?: boolean }): void {
       if (!targetId || !authToken.value) {
         return;
       }
-      void reportDriverLocation(authToken.value, targetId, {
-        lat: pos.coords.latitude,
-        lng: pos.coords.longitude
-      }).catch(() => {
-        // permission is saved; send can retry on admin request
-      });
+        void queueOrSendDriverLocation(targetId, pos.coords.latitude, pos.coords.longitude);
     },
     (error) => {
       if (error.code === error.PERMISSION_DENIED) {
@@ -2325,6 +2393,32 @@ function ensureDriverGeoPermission(opts?: { forcePrompt?: boolean }): void {
     },
     { enableHighAccuracy: true, timeout: 20000, maximumAge: 60_000 }
   );
+}
+
+async function queueOrSendDriverLocation(routeId: string, lat: number, lng: number): Promise<void> {
+  if (route.value?.id === routeId) {
+    route.value = {
+      ...route.value,
+      driver_lat: lat,
+      driver_lng: lng,
+      driver_location_at: new Date().toISOString()
+    };
+    await persistDriverRoute(route.value);
+  }
+  try {
+    if (hasNetwork() && authToken.value) {
+      await reportDriverLocation(authToken.value, routeId, { lat, lng });
+      syncMessage.value = "Геопозиция отправлена";
+      return;
+    }
+  } catch (error) {
+    if (!isOfflineLikeError(error)) {
+      syncMessage.value = (error as Error).message;
+      return;
+    }
+  }
+  await enqueueAction("location", { route_id: routeId, lat, lng });
+  syncMessage.value = "Геопозиция сохранена на телефоне и уйдёт при сети";
 }
 
 async function sendDriverLocationIfPossible(routeId?: string | null): Promise<void> {
@@ -2346,16 +2440,7 @@ async function sendDriverLocationIfPossible(routeId?: string | null): Promise<vo
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         rememberGeoPermission("granted");
-        void reportDriverLocation(authToken.value, targetId, {
-          lat: pos.coords.latitude,
-          lng: pos.coords.longitude
-        })
-          .then(() => {
-            syncMessage.value = "Геопозиция отправлена";
-          })
-          .catch((error) => {
-            syncMessage.value = (error as Error).message;
-          })
+        void queueOrSendDriverLocation(targetId, pos.coords.latitude, pos.coords.longitude)
           .finally(() => resolve());
       },
       (error) => {
@@ -2500,6 +2585,86 @@ async function flushPendingAccepts(): Promise<void> {
   }
 }
 
+async function flushActionQueue(): Promise<boolean> {
+  if (!authToken.value) {
+    return false;
+  }
+  const items = await listActions(getDeviceId(), authUser.value?.id);
+  if (!items.length) {
+    return false;
+  }
+  let changed = false;
+  for (const item of items) {
+    try {
+      if (item.kind === "revert" && item.payload.point_id) {
+        const updated = await revertPointStatus(authToken.value, item.payload.point_id);
+        if (route.value?.id === updated.id) {
+          route.value = await applyOverlaysToRoute(updated);
+          await persistDriverRoute(route.value);
+        }
+        if (selectedDriverRoute.value?.id === updated.id) {
+          selectedDriverRoute.value = await applyOverlaysToRoute(updated);
+        }
+      } else if (item.kind === "chat_route" && item.payload.route_id && item.payload.text) {
+        const created = await sendRouteChatMessage(authToken.value, item.payload.route_id, { text: item.payload.text });
+        if (chatRouteId.value === item.payload.route_id) {
+          chatMessages.value = chatMessages.value
+            .filter((row) => row.client_id !== item.client_id)
+            .concat([{ ...created, delivered: false }]);
+        }
+      } else if (item.kind === "chat_room" && item.payload.room_id && item.payload.text) {
+        const created = await sendChatRoomMessage(authToken.value, item.payload.room_id, { text: item.payload.text });
+        if (chatRoomId.value === item.payload.room_id) {
+          chatRoomMessages.value = chatRoomMessages.value
+            .filter((row: { client_id?: string }) => row.client_id !== item.client_id)
+            .concat([{ ...created, delivered: false }]);
+        }
+      } else if (item.kind === "chat_salary" && item.payload.salary_id && item.payload.text) {
+        const created = await sendSalaryChatMessage(authToken.value, item.payload.salary_id, { text: item.payload.text });
+        if (salaryChatSalaryId.value === item.payload.salary_id) {
+          salaryChatMessages.value = salaryChatMessages.value
+            .filter((row: { client_id?: string }) => row.client_id !== item.client_id)
+            .concat([{ ...created, delivered: false }]);
+        }
+      } else if (item.kind === "salary_confirm" && item.payload.salary_id) {
+        const updated = await confirmSalary(authToken.value, item.payload.salary_id);
+        applySalaryRecordUpdate(updated);
+      } else if (item.kind === "salary_comment" && item.payload.salary_id && item.payload.text) {
+        const updated = await commentSalary(authToken.value, item.payload.salary_id, item.payload.text);
+        applySalaryRecordUpdate(updated);
+      } else if (
+        item.kind === "location" &&
+        item.payload.route_id &&
+        item.payload.lat != null &&
+        item.payload.lng != null
+      ) {
+        await reportDriverLocation(authToken.value, item.payload.route_id, {
+          lat: item.payload.lat,
+          lng: item.payload.lng
+        });
+      }
+      await removeActionsByClientIds([item.client_id]);
+      changed = true;
+    } catch (error) {
+      if (handleAuthError(error)) {
+        return changed;
+      }
+      if (isOfflineLikeError(error)) {
+        break;
+      }
+      const message = ((error as Error)?.message || "").toLowerCase();
+      if (message.includes("invalid") || message.includes("already") || message.includes("not found")) {
+        await removeActionsByClientIds([item.client_id]);
+        changed = true;
+        continue;
+      }
+      reportDebugError({ source: "sync.actions", error, extra: { kind: item.kind, client_id: item.client_id } });
+      break;
+    }
+  }
+  return changed;
+}
+
 async function syncOutboxInBackground(): Promise<void> {
   if (!authToken.value || !isDriver.value) {
     return;
@@ -2565,6 +2730,9 @@ async function syncOutboxInBackground(): Promise<void> {
       if (fatal.length) {
         removable.push(...fatal.map((item) => item.client_event_id));
         syncMessage.value = `Этап не принят сервером: ${fatal[0]?.error || "ошибка"}`;
+        for (const item of fatal) {
+          await applyLocalPointRollback(item.point_id, item.to_status);
+        }
       }
       await removeOutboxByClientEventIds(removable);
       const appliedPointIds = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.point_id);
@@ -2607,7 +2775,8 @@ async function syncOutboxInBackground(): Promise<void> {
     }
 
     const sentDocs = await flushReadyEvents();
-    if (sentStatuses || sentDocs) {
+    const sentActions = await flushActionQueue();
+    if (sentStatuses || sentDocs || sentActions) {
       await refreshRoute();
       await refreshDriverRoutes();
     }
@@ -3065,6 +3234,12 @@ async function refreshNotifications(): Promise<void> {
     return;
   }
   if (!hasNetwork() || isPageHidden()) {
+    if (!notifications.value.length) {
+      const cached = await loadMessageSnapshot<NotificationDto>("notifications");
+      if (cached?.length) {
+        notifications.value = cached;
+      }
+    }
     return;
   }
   notificationsLoading.value = true;
@@ -3073,6 +3248,7 @@ async function refreshNotifications(): Promise<void> {
     const latestNotifications = await listNotifications(authToken.value, 50);
     latestNotifications.forEach((item) => handleIncomingNotification(item, { playEffects: false, syncDriverState: true }));
     notifications.value = latestNotifications;
+    await saveMessageSnapshot("notifications", latestNotifications);
     catchUpChatDeliveriesFromNotifications(latestNotifications);
     try {
       unreadNotificationsCount.value = await getUnreadNotificationsCount(authToken.value);
@@ -3086,6 +3262,12 @@ async function refreshNotifications(): Promise<void> {
       return;
     }
     if (isOfflineLikeError(error) || isPageHidden()) {
+      if (!notifications.value.length) {
+        const cached = await loadMessageSnapshot<NotificationDto>("notifications");
+        if (cached?.length) {
+          notifications.value = cached;
+        }
+      }
       return;
     }
     notificationsError.value = `Ошибка загрузки уведомлений: ${(error as Error).message}`;
@@ -3706,7 +3888,8 @@ async function markPointNext(
   if (!current) {
     return;
   }
-  const toStatus = nextStatus(current.status);
+  const fromStatus = current.status;
+  const toStatus = nextStatus(fromStatus);
   if (!toStatus) {
     return;
   }
@@ -3761,7 +3944,10 @@ async function markPointNext(
       Object.assign(selectedPoint, applyStageOverlayToPoint(selectedPoint, toStatus, overlayFields));
     }
   }
-  await savePointOverlay(route.value.id, pointId, toStatus, occurredAt, overlayFields);
+  await savePointOverlay(route.value.id, pointId, toStatus, occurredAt, {
+    ...overlayFields,
+    previous_status: fromStatus
+  });
   await persistDriverRoute(route.value);
   await addOutboxEvent({
     ...event,
@@ -3780,29 +3966,82 @@ async function markPointNext(
   }
 }
 
+async function applyLocalPointRollback(pointId: number, rejectedStatus?: string): Promise<boolean> {
+  const target =
+    (route.value?.points.some((point) => point.id === pointId) ? route.value : null) ||
+    (selectedDriverRoute.value?.points.some((point) => point.id === pointId) ? selectedDriverRoute.value : null);
+  if (!target) {
+    return false;
+  }
+  const point = target.points.find((item) => item.id === pointId);
+  if (!point) {
+    return false;
+  }
+  const overlays = await getPointOverlays(target.id);
+  const overlay = overlays.find((item) => item.point_id === pointId);
+  const rejected = (rejectedStatus || overlay?.status || point.status) as string;
+  const prev = overlay?.previous_status || previousStatus(point.status);
+  if (!prev) {
+    return false;
+  }
+  const rolled = rollbackStageOnPoint(point, rejected, prev);
+  Object.assign(point, rolled);
+  if (route.value && route.value.id === target.id) {
+    const live = route.value.points.find((item) => item.id === pointId);
+    if (live) Object.assign(live, rolled);
+  }
+  if (selectedDriverRoute.value && selectedDriverRoute.value.id === target.id) {
+    const live = selectedDriverRoute.value.points.find((item) => item.id === pointId);
+    if (live) Object.assign(live, rolled);
+  }
+  await removePointOverlays(target.id, [pointId]);
+  await persistDriverRoute(route.value?.id === target.id ? route.value : target);
+  return true;
+}
+
+async function enqueueAction(kind: ActionQueueItem["kind"], payload: ActionQueueItem["payload"], clientId?: string): Promise<string> {
+  const client_id = clientId || newClientId();
+  await addAction({
+    client_id,
+    kind,
+    created_at: new Date().toISOString(),
+    device_id: getDeviceId(),
+    user_id: authUser.value?.id,
+    payload
+  });
+  void refreshConnectionQueue();
+  void syncOutboxInBackground();
+  return client_id;
+}
+
 async function doRevertPoint(pointId: number): Promise<void> {
   if (!authToken.value || !isDriver.value) {
     return;
   }
-  if (!hasNetwork()) {
-    syncMessage.value = "Откат статуса недоступен без сети.";
+  const unsynced = (await getOutboxEvents(getDeviceId(), authUser.value?.id))
+    .filter((event) => event.point_id === pointId)
+    .sort((a, b) => a.created_at.localeCompare(b.created_at));
+  if (unsynced.length) {
+    const last = unsynced[unsynced.length - 1];
+    if (last) {
+      await removeOutboxByClientEventIds([last.client_event_id]);
+    }
+    const ok = await applyLocalPointRollback(pointId, last?.to_status);
+    syncMessage.value = ok
+      ? "Статус возвращён на телефоне. На сервер ещё не уходило."
+      : "Не удалось откатить локальный статус.";
+    void refreshConnectionQueue();
     return;
   }
-  try {
-    const updated = await revertPointStatus(authToken.value, pointId);
-    if (route.value?.id === updated.id) {
-      route.value = await applyOverlaysToRoute(updated);
-      await saveActiveRoute(route.value);
-    }
-    if (selectedDriverRoute.value?.id === updated.id) {
-      selectedDriverRoute.value = updated;
-    }
-    await refreshDriverRoutes();
-    await refreshNotifications();
-    syncMessage.value = "Статус точки возвращён";
-  } catch (error) {
-    syncMessage.value = `Не удалось откатить статус: ${(error as Error).message}`;
+  const ok = await applyLocalPointRollback(pointId);
+  if (!ok) {
+    syncMessage.value = "Откатывать нечего.";
+    return;
   }
+  await enqueueAction("revert", { point_id: pointId });
+  syncMessage.value = hasNetwork()
+    ? "Откат сохранён, синхронизация в фоне"
+    : "Откат сохранён локально и уйдёт при появлении сети";
 }
 
 async function openDriverRouteDetails(routeId: string): Promise<void> {
@@ -3900,6 +4139,65 @@ async function openChatForRoute(routeId: string): Promise<void> {
   startChatPolling();
 }
 
+function pendingChatId(clientId: string, index: number): number {
+  let hash = 0;
+  for (let i = 0; i < clientId.length; i += 1) {
+    hash = (hash * 31 + clientId.charCodeAt(i)) | 0;
+  }
+  return -(Math.abs(hash) || index + 1);
+}
+
+async function pendingRouteChatItems(routeId: string): Promise<typeof chatMessages.value> {
+  const queued = (await listActions(getDeviceId(), authUser.value?.id)).filter(
+    (item) => item.kind === "chat_route" && item.payload.route_id === routeId
+  );
+  const uid = authUser.value?.id || 0;
+  return queued.map((item, index) => ({
+    id: pendingChatId(item.client_id, index),
+    route_id: routeId,
+    user_id: uid,
+    author_name: currentAuthorName(),
+    text: item.payload.text || "",
+    created_at: item.created_at,
+    pending: true,
+    client_id: item.client_id
+  }));
+}
+
+async function pendingRoomChatItems(roomId: number): Promise<typeof chatRoomMessages.value> {
+  const queued = (await listActions(getDeviceId(), authUser.value?.id)).filter(
+    (item) => item.kind === "chat_room" && item.payload.room_id === roomId
+  );
+  const uid = authUser.value?.id || 0;
+  return queued.map((item, index) => ({
+    id: pendingChatId(item.client_id, index),
+    room_id: roomId,
+    user_id: uid,
+    author_name: currentAuthorName(),
+    text: item.payload.text || "",
+    created_at: item.created_at,
+    pending: true,
+    client_id: item.client_id
+  }));
+}
+
+async function pendingSalaryChatItems(salaryId: number): Promise<typeof salaryChatMessages.value> {
+  const queued = (await listActions(getDeviceId(), authUser.value?.id)).filter(
+    (item) => item.kind === "chat_salary" && item.payload.salary_id === salaryId
+  );
+  const uid = authUser.value?.id || 0;
+  return queued.map((item, index) => ({
+    id: pendingChatId(item.client_id, index),
+    salary_id: salaryId,
+    user_id: uid,
+    author_name: currentAuthorName(),
+    text: item.payload.text || "",
+    created_at: item.created_at,
+    pending: true,
+    client_id: item.client_id
+  }));
+}
+
 async function refreshChat(options?: { silent?: boolean }): Promise<void> {
   if (!authToken.value || !chatRouteId.value) {
     return;
@@ -3908,13 +4206,23 @@ async function refreshChat(options?: { silent?: boolean }): Promise<void> {
     chatLoading.value = true;
   }
   chatError.value = "";
+  const routeId = chatRouteId.value;
+  const cacheKey = `route:${routeId}`;
   try {
-    chatMessages.value = await listRouteChatMessages(authToken.value, chatRouteId.value);
+    const items = await listRouteChatMessages(authToken.value, routeId);
+    await saveMessageSnapshot(cacheKey, items);
+    chatMessages.value = mergePendingMessages(items, await pendingRouteChatItems(routeId));
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы открыть чат." })) {
       return;
     }
-    chatError.value = (error as Error).message;
+    const cached = (await loadMessageSnapshot<typeof chatMessages.value[number]>(cacheKey)) || chatMessages.value;
+    chatMessages.value = mergePendingMessages(cached, await pendingRouteChatItems(routeId));
+    if (!chatMessages.value.length) {
+      chatError.value = hasNetwork() ? (error as Error).message : "Чат сохранён на телефоне. История появится после сети.";
+    } else if (!isOfflineLikeError(error)) {
+      chatError.value = (error as Error).message;
+    }
   } finally {
     if (!options?.silent) {
       chatLoading.value = false;
@@ -3926,21 +4234,44 @@ async function sendChat(text: string): Promise<void> {
   if (!authToken.value || !chatRouteId.value) {
     return;
   }
-  chatLoading.value = true;
+  const routeId = chatRouteId.value;
+  const trimmed = text.trim();
+  if (!trimmed) {
+    return;
+  }
+  chatError.value = "";
   try {
-    const created = await sendRouteChatMessage(authToken.value, chatRouteId.value, { text });
-    const exists = chatMessages.value.some((m) => m.id === created.id);
-    if (!exists) {
-      chatMessages.value = [...chatMessages.value, created];
+    if (hasNetwork()) {
+      const created = await sendRouteChatMessage(authToken.value, routeId, { text: trimmed });
+      const exists = chatMessages.value.some((m) => m.id === created.id);
+      if (!exists) {
+        chatMessages.value = [...chatMessages.value, created];
+      }
+      return;
     }
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы отправить сообщение." })) {
       return;
     }
-    chatError.value = (error as Error).message;
-  } finally {
-    chatLoading.value = false;
+    if (!isOfflineLikeError(error)) {
+      chatError.value = (error as Error).message;
+      return;
+    }
   }
+  const client_id = await enqueueAction("chat_route", { route_id: routeId, text: trimmed });
+  chatMessages.value = [
+    ...chatMessages.value,
+    {
+      id: -Date.now(),
+      route_id: routeId,
+      user_id: authUser.value?.id || 0,
+      author_name: currentAuthorName(),
+      text: trimmed,
+      created_at: new Date().toISOString(),
+      pending: true,
+      client_id
+    }
+  ];
 }
 
 async function refreshChatsHub(): Promise<void> {
@@ -3973,11 +4304,39 @@ async function refreshChatsHub(): Promise<void> {
     } else {
       adminChatRoomsList.value = [];
     }
+    await saveMessageSnapshot("chats:hub", [
+      {
+        rooms: chatsRooms.value,
+        users: chatsUsers.value,
+        logistic: logisticDriverChatRooms.value,
+        accountant: accountantDriverChatRooms.value,
+        admin: adminChatRoomsList.value
+      }
+    ]);
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы открыть чаты." })) {
       return;
     }
-    chatsError.value = (error as Error).message;
+    const cached = await loadMessageSnapshot<{
+      rooms?: typeof chatsRooms.value;
+      users?: typeof chatsUsers.value;
+      logistic?: typeof logisticDriverChatRooms.value;
+      accountant?: typeof accountantDriverChatRooms.value;
+      admin?: typeof adminChatRoomsList.value;
+    }>("chats:hub");
+    const snap = cached?.[0];
+    if (snap?.rooms?.length || snap?.users?.length) {
+      chatsRooms.value = snap.rooms || chatsRooms.value;
+      chatsUsers.value = snap.users || chatsUsers.value;
+      logisticDriverChatRooms.value = snap.logistic || logisticDriverChatRooms.value;
+      accountantDriverChatRooms.value = snap.accountant || accountantDriverChatRooms.value;
+      adminChatRoomsList.value = snap.admin || adminChatRoomsList.value;
+      chatsError.value = hasNetwork() ? (error as Error).message : "";
+    } else {
+      chatsError.value = hasNetwork()
+        ? (error as Error).message
+        : "Список чатов недоступен без сети. Откройте чаты онлайн хотя бы раз.";
+    }
   } finally {
     chatsLoading.value = false;
   }
@@ -4103,13 +4462,22 @@ async function refreshDriverSalaryList(dateFrom?: string, dateTo?: string): Prom
   if (!authToken.value) return;
   salaryListLoading.value = true;
   salaryError.value = "";
+  const cacheKey = `salary:mine:${dateFrom || ""}:${dateTo || ""}`;
   try {
     salaryListMine.value = await listMySalaries(authToken.value, dateFrom, dateTo);
+    await saveMessageSnapshot(cacheKey, salaryListMine.value);
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
       return;
     }
-    salaryError.value = (error as Error).message;
+    const cached = await loadMessageSnapshot<SalaryRecord>(cacheKey);
+    if (cached?.length) {
+      salaryListMine.value = cached;
+    } else {
+      salaryError.value = hasNetwork()
+        ? (error as Error).message
+        : "Список расчётов недоступен без сети. Откройте зарплату онлайн хотя бы раз.";
+    }
   } finally {
     salaryListLoading.value = false;
   }
@@ -4164,6 +4532,14 @@ function downloadBlob(blob: Blob, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 15_000);
 }
 
+function applySalaryRecordUpdate(updated: SalaryRecord): void {
+  if (salaryCurrentRecord.value?.id === updated.id) {
+    salaryCurrentRecord.value = updated;
+  }
+  salaryListMine.value = salaryListMine.value.map((row) => (row.id === updated.id ? updated : row));
+  salaryAccountantItems.value = salaryAccountantItems.value.map((row) => (row.id === updated.id ? updated : row));
+}
+
 function openSalaryDetail(row: SalaryRecord, backSection: AppSection): void {
   salaryCurrentRecord.value = row;
   salaryDetailBackSection.value = backSection;
@@ -4176,34 +4552,58 @@ function closeSalaryDetail(): void {
 
 async function doSalaryConfirm(): Promise<void> {
   if (!authToken.value || !salaryCurrentRecord.value) return;
+  const current = salaryCurrentRecord.value;
   salaryDetailBusy.value = true;
   try {
-    const updated = await confirmSalary(authToken.value, salaryCurrentRecord.value.id);
-    salaryCurrentRecord.value = updated;
-    salaryListMine.value = salaryListMine.value.map((row) => (row.id === updated.id ? updated : row));
-    salaryAccountantItems.value = salaryAccountantItems.value.map((row) => (row.id === updated.id ? updated : row));
-    syncMessage.value = "Расчёт подтверждён";
+    if (hasNetwork()) {
+      const updated = await confirmSalary(authToken.value, current.id);
+      applySalaryRecordUpdate(updated);
+      syncMessage.value = "Расчёт подтверждён";
+      return;
+    }
   } catch (error) {
-    syncMessage.value = (error as Error).message;
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
+    if (!isOfflineLikeError(error)) {
+      syncMessage.value = (error as Error).message;
+      return;
+    }
   } finally {
     salaryDetailBusy.value = false;
   }
+  applySalaryRecordUpdate({ ...current, status_driver: "confirmed" });
+  await enqueueAction("salary_confirm", { salary_id: current.id });
+  syncMessage.value = "Подтверждение сохранено и уйдёт при сети";
 }
 
 async function doSalaryComment(text: string): Promise<void> {
   if (!authToken.value || !salaryCurrentRecord.value) return;
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  const current = salaryCurrentRecord.value;
   salaryDetailBusy.value = true;
   try {
-    const updated = await commentSalary(authToken.value, salaryCurrentRecord.value.id, text);
-    salaryCurrentRecord.value = updated;
-    salaryListMine.value = salaryListMine.value.map((row) => (row.id === updated.id ? updated : row));
-    salaryAccountantItems.value = salaryAccountantItems.value.map((row) => (row.id === updated.id ? updated : row));
-    syncMessage.value = "Комментарий отправлен";
+    if (hasNetwork()) {
+      const updated = await commentSalary(authToken.value, current.id, trimmed);
+      applySalaryRecordUpdate(updated);
+      syncMessage.value = "Комментарий отправлен";
+      return;
+    }
   } catch (error) {
-    syncMessage.value = (error as Error).message;
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
+    if (!isOfflineLikeError(error)) {
+      syncMessage.value = (error as Error).message;
+      return;
+    }
   } finally {
     salaryDetailBusy.value = false;
   }
+  applySalaryRecordUpdate({ ...current, status_driver: "commented", comment_driver: trimmed });
+  await enqueueAction("salary_comment", { salary_id: current.id, text: trimmed });
+  syncMessage.value = "Комментарий сохранён и уйдёт при сети";
 }
 
 async function doSalaryDelete(): Promise<void> {
@@ -4302,13 +4702,21 @@ async function refreshSalaryChat(options?: { silent?: boolean }): Promise<void> 
     salaryChatLoading.value = true;
   }
   salaryChatError.value = "";
+  const salaryId = salaryChatSalaryId.value;
+  const cacheKey = `salary:${salaryId}`;
   try {
-    salaryChatMessages.value = await listSalaryChatMessages(authToken.value, salaryChatSalaryId.value);
+    const items = await listSalaryChatMessages(authToken.value, salaryId);
+    await saveMessageSnapshot(cacheKey, items);
+    salaryChatMessages.value = mergePendingMessages(items, await pendingSalaryChatItems(salaryId));
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
       return;
     }
-    salaryChatError.value = (error as Error).message;
+    const cached = (await loadMessageSnapshot<Record<string, unknown>>(cacheKey)) || salaryChatMessages.value;
+    salaryChatMessages.value = mergePendingMessages(cached, await pendingSalaryChatItems(salaryId));
+    if (!salaryChatMessages.value.length) {
+      salaryChatError.value = hasNetwork() ? (error as Error).message : "История чата недоступна без сети.";
+    }
   } finally {
     if (!options?.silent) {
       salaryChatLoading.value = false;
@@ -4318,25 +4726,53 @@ async function refreshSalaryChat(options?: { silent?: boolean }): Promise<void> 
 
 async function sendSalaryChat(text: string): Promise<void> {
   if (!authToken.value || !salaryChatSalaryId.value) return;
-  salaryChatLoading.value = true;
+  const salaryId = salaryChatSalaryId.value;
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  salaryChatError.value = "";
   try {
-    const created = await sendSalaryChatMessage(authToken.value, salaryChatSalaryId.value, { text });
-    const exists = salaryChatMessages.value.some((m) => m.id === created.id);
-    if (!exists) {
-      salaryChatMessages.value = [...salaryChatMessages.value, created];
+    if (hasNetwork()) {
+      const created = await sendSalaryChatMessage(authToken.value, salaryId, { text: trimmed });
+      const exists = salaryChatMessages.value.some((m: { id: number }) => m.id === created.id);
+      if (!exists) {
+        salaryChatMessages.value = [...salaryChatMessages.value, created];
+      }
+      return;
     }
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла." })) {
       return;
     }
-    salaryChatError.value = (error as Error).message;
-  } finally {
-    salaryChatLoading.value = false;
+    if (!isOfflineLikeError(error)) {
+      salaryChatError.value = (error as Error).message;
+      return;
+    }
   }
+  const client_id = await enqueueAction("chat_salary", { salary_id: salaryId, text: trimmed });
+  salaryChatMessages.value = [
+    ...salaryChatMessages.value,
+    {
+      id: -Date.now(),
+      salary_id: salaryId,
+      user_id: authUser.value?.id || 0,
+      author_name: currentAuthorName(),
+      text: trimmed,
+      created_at: new Date().toISOString(),
+      pending: true,
+      client_id
+    }
+  ];
 }
 
 async function uploadSalaryChatFiles(payload: { text: string; files: File[] }): Promise<void> {
   if (!authToken.value || !salaryChatSalaryId.value || !payload.files.length) return;
+  if (!hasNetwork()) {
+    salaryChatError.value = "Файлы можно отправить только при сети. Текст без вложения поставьте в очередь отдельно.";
+    if (payload.text.trim()) {
+      await sendSalaryChat(payload.text);
+    }
+    return;
+  }
   salaryChatLoading.value = true;
   try {
     const created = await uploadSalaryChatAttachments(authToken.value, salaryChatSalaryId.value, payload.files, {
@@ -4449,11 +4885,20 @@ async function refreshLogisticsContacts(): Promise<void> {
       route.value = { ...route.value, logistics_contacts: latest };
       await saveRouteSnapshot(route.value);
     }
+    await saveMessageSnapshot("logistics:contacts", latest);
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
       return;
     }
-    logisticsContactsError.value = (error as Error).message;
+    if (!logisticsContacts.value.length) {
+      const cached = await loadMessageSnapshot<{ name: string; phone: string }>("logistics:contacts");
+      if (cached?.length) {
+        logisticsContacts.value = cached as LogisticsContact[];
+      }
+    }
+    if (!logisticsContacts.value.length) {
+      logisticsContactsError.value = hasNetwork() ? (error as Error).message : "";
+    }
   } finally {
     logisticsContactsLoading.value = false;
   }
@@ -4589,13 +5034,21 @@ async function refreshChatRoom(options?: { silent?: boolean }): Promise<void> {
     chatRoomLoading.value = true;
   }
   chatRoomError.value = "";
+  const roomId = chatRoomId.value;
+  const cacheKey = `room:${roomId}`;
   try {
-    chatRoomMessages.value = await listChatRoomMessages(authToken.value, chatRoomId.value);
+    const items = await listChatRoomMessages(authToken.value, roomId);
+    await saveMessageSnapshot(cacheKey, items);
+    chatRoomMessages.value = mergePendingMessages(items, await pendingRoomChatItems(roomId));
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы открыть чат." })) {
       return;
     }
-    chatRoomError.value = (error as Error).message;
+    const cached = (await loadMessageSnapshot<Record<string, unknown>>(cacheKey)) || chatRoomMessages.value;
+    chatRoomMessages.value = mergePendingMessages(cached, await pendingRoomChatItems(roomId));
+    if (!chatRoomMessages.value.length) {
+      chatRoomError.value = hasNetwork() ? (error as Error).message : "История чата недоступна без сети.";
+    }
   } finally {
     if (!options?.silent) {
       chatRoomLoading.value = false;
@@ -4605,26 +5058,54 @@ async function refreshChatRoom(options?: { silent?: boolean }): Promise<void> {
 
 async function sendChatRoom(text: string): Promise<void> {
   if (!authToken.value || !chatRoomId.value) return;
-  chatRoomLoading.value = true;
+  const roomId = chatRoomId.value;
+  const trimmed = text.trim();
+  if (!trimmed) return;
+  chatRoomError.value = "";
   try {
-    const created = await sendChatRoomMessage(authToken.value, chatRoomId.value, { text });
-    const exists = chatRoomMessages.value.some((m) => m.id === created.id);
-    if (!exists) {
-      chatRoomMessages.value = [...chatRoomMessages.value, created];
+    if (hasNetwork()) {
+      const created = await sendChatRoomMessage(authToken.value, roomId, { text: trimmed });
+      const exists = chatRoomMessages.value.some((m: { id: number }) => m.id === created.id);
+      if (!exists) {
+        chatRoomMessages.value = [...chatRoomMessages.value, created];
+      }
+      return;
     }
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы отправить сообщение." })) {
       return;
     }
-    chatRoomError.value = (error as Error).message;
-  } finally {
-    chatRoomLoading.value = false;
+    if (!isOfflineLikeError(error)) {
+      chatRoomError.value = (error as Error).message;
+      return;
+    }
   }
+  const client_id = await enqueueAction("chat_room", { room_id: roomId, text: trimmed });
+  chatRoomMessages.value = [
+    ...chatRoomMessages.value,
+    {
+      id: -Date.now(),
+      room_id: roomId,
+      user_id: authUser.value?.id || 0,
+      author_name: currentAuthorName(),
+      text: trimmed,
+      created_at: new Date().toISOString(),
+      pending: true,
+      client_id
+    }
+  ];
 }
 
 async function uploadChatRoomFiles(payload: { text: string; files: File[] }): Promise<void> {
   if (!authToken.value || !chatRoomId.value) return;
   if (!payload.files.length) return;
+  if (!hasNetwork()) {
+    chatRoomError.value = "Файлы можно отправить только при сети. Текст без вложения поставьте в очередь отдельно.";
+    if (payload.text.trim()) {
+      await sendChatRoom(payload.text);
+    }
+    return;
+  }
   chatRoomLoading.value = true;
   try {
     const created = await uploadChatRoomAttachments(authToken.value, chatRoomId.value, payload.files, { text: payload.text });
@@ -4675,6 +5156,13 @@ async function uploadChatFiles(payload: { text: string; files: File[] }): Promis
     return;
   }
   if (!payload.files.length) {
+    return;
+  }
+  if (!hasNetwork()) {
+    chatError.value = "Файлы можно отправить только при сети. Текст без вложения поставьте в очередь отдельно.";
+    if (payload.text.trim()) {
+      await sendChat(payload.text);
+    }
     return;
   }
   chatLoading.value = true;

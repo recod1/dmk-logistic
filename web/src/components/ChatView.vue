@@ -10,6 +10,8 @@ export type ChatMessage = {
   created_at: string;
   read?: boolean;
   delivered?: boolean;
+  pending?: boolean;
+  client_id?: string;
   attachments?: Array<{ id: number; original_name: string; content_type: string; file_size: number }>;
 };
 
@@ -70,6 +72,7 @@ function isMine(message: ChatMessage): boolean {
 }
 
 function tickTitle(message: ChatMessage): string {
+  if (message.pending) return "Ожидает сеть";
   if (message.read) return "Прочитано";
   if (message.delivered) return "Получено";
   return "Отправлено";
@@ -331,14 +334,14 @@ onUnmounted(() => {
     <div ref="listRef" class="list" role="log" aria-live="polite" @scroll.passive="updateStickiness">
       <button v-if="showJump" class="jump" type="button" @click="scrollToBottom">Новые сообщения ↓</button>
       <div ref="listInnerRef" class="list-inner">
-        <template v-for="(m, idx) in items" :key="m.id">
+        <template v-for="(m, idx) in items" :key="m.client_id || m.id">
           <div
             v-if="idx === 0 || messageDayKey(m.created_at) !== messageDayKey(items[idx - 1]?.created_at || '')"
             class="day-sep"
           >
             <span>{{ messageDayLabel(m.created_at) }}</span>
           </div>
-          <article class="msg" :class="{ mine: isMine(m) }">
+          <article class="msg" :class="{ mine: isMine(m), pending: Boolean(m.pending) }">
           <div class="bubble">
             <strong v-if="!currentUserId || m.user_id !== currentUserId" class="author">{{ m.author_name }}</strong>
             <p class="text">{{ m.text }}</p>
@@ -355,8 +358,9 @@ onUnmounted(() => {
             </div>
             <div class="bubble-foot">
               <span class="time">{{ new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }}</span>
+              <span v-if="isMine(m) && m.pending" class="pending-mark" :title="tickTitle(m)">ожидает</span>
               <span
-                v-if="isMine(m)"
+                v-else-if="isMine(m)"
                 class="ticks"
                 :class="{ delivered: Boolean(m.delivered) && !m.read, read: Boolean(m.read) }"
                 :title="tickTitle(m)"
@@ -611,6 +615,15 @@ onUnmounted(() => {
 }
 .ticks.read {
   color: #7ec8f5;
+}
+.msg.pending .bubble {
+  opacity: 0.82;
+}
+.pending-mark {
+  font-size: 0.62rem;
+  line-height: 1;
+  color: #f0c36d;
+  user-select: none;
 }
 
 .composer {

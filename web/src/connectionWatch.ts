@@ -18,6 +18,7 @@ const syncing = ref(false);
 const pendingOutbox = ref(0);
 const pendingDocs = ref(0);
 const pendingAccepts = ref(0);
+const pendingActions = ref(0);
 
 let healthTimer: number | null = null;
 let healthInFlight = false;
@@ -56,7 +57,13 @@ export const connectionLabel = computed(() => {
   if (serverOk.value === false) {
     return "Нет сервера";
   }
-  if (syncing.value || pendingDocs.value > 0 || pendingOutbox.value > 0 || pendingAccepts.value > 0) {
+  if (
+    syncing.value ||
+    pendingDocs.value > 0 ||
+    pendingOutbox.value > 0 ||
+    pendingAccepts.value > 0 ||
+    pendingActions.value > 0
+  ) {
     return "Синхр.";
   }
   const net = connectionNetInfo();
@@ -73,7 +80,13 @@ export const connectionTone = computed<ConnectionTone>(() => {
   if (!online.value || serverOk.value === false) {
     return "bad";
   }
-  if (syncing.value || pendingDocs.value > 0 || pendingOutbox.value > 0 || pendingAccepts.value > 0) {
+  if (
+    syncing.value ||
+    pendingDocs.value > 0 ||
+    pendingOutbox.value > 0 ||
+    pendingAccepts.value > 0 ||
+    pendingActions.value > 0
+  ) {
     return "warn";
   }
   const net = connectionNetInfo();
@@ -114,8 +127,10 @@ export const connectionHint = computed(() => {
   if (net.effectiveType) {
     parts.push(`Сеть: ${net.effectiveType}`);
   }
-  if (pendingOutbox.value || pendingDocs.value || pendingAccepts.value) {
-    parts.push(`Очередь: событий ${pendingOutbox.value}, фото ${pendingDocs.value}, принятий ${pendingAccepts.value}`);
+  if (pendingOutbox.value || pendingDocs.value || pendingAccepts.value || pendingActions.value) {
+    parts.push(
+      `Очередь: событий ${pendingOutbox.value}, фото ${pendingDocs.value}, принятий ${pendingAccepts.value}, прочее ${pendingActions.value}`
+    );
   }
   return parts.join(" · ");
 });
@@ -145,6 +160,7 @@ export function connectionSnapshot(): Record<string, unknown> {
     pending_outbox: pendingOutbox.value,
     pending_docs: pendingDocs.value,
     pending_accepts: pendingAccepts.value,
+    pending_actions: pendingActions.value,
     api_base: apiBaseRef.value,
     href: typeof location === "undefined" ? null : location.href
   };
@@ -154,10 +170,16 @@ export function setConnectionSyncing(value: boolean): void {
   syncing.value = value;
 }
 
-export function setConnectionQueue(counts: { outbox?: number; docs?: number; accepts?: number }): void {
+export function setConnectionQueue(counts: {
+  outbox?: number;
+  docs?: number;
+  accepts?: number;
+  actions?: number;
+}): void {
   if (typeof counts.outbox === "number") pendingOutbox.value = counts.outbox;
   if (typeof counts.docs === "number") pendingDocs.value = counts.docs;
   if (typeof counts.accepts === "number") pendingAccepts.value = counts.accepts;
+  if (typeof counts.actions === "number") pendingActions.value = counts.actions;
 }
 
 export function setNotificationsWsState(state: WsState): void {
