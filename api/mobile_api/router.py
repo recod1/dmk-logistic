@@ -26,7 +26,7 @@ from mobile_api.route_notification_logic import (
 )
 from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.roles import role_label_ru
-from utils.onec_datetime import planned_wall_fields
+from utils.onec_datetime import normalize_planned_time, planned_wall_fields
 from services.wialon_service import (
     WIALON_ENABLED,
     get_vehicle_location_data,
@@ -90,6 +90,7 @@ class BatchEventPayload(BaseModel):
     odometer: str | None = Field(default=None, max_length=128)
     odometer_source: Literal["manual", "wialon"] | None = None
     coordinates: dict | None = None
+    estimated_arrival: str | None = Field(default=None, max_length=32)
     document_file_ids: list[int] | None = Field(default=None, max_length=32)
 
 
@@ -129,6 +130,7 @@ def _point_to_dict(
         "point_contacts": point.point_contacts,
         "point_time": point_time,
         "point_note": point.point_note,
+        "estimated_arrival": (getattr(point, "estimated_arrival", None) or "").strip(),
         "status": point.status,
         "time_accepted": _format_datetime_ru(point.time_accepted),
         "time_registration": _format_datetime_ru(point.time_registration),
@@ -826,6 +828,9 @@ def batch_events(
             continue
 
         applied, error = _try_apply_point_status(point, target_status, event.occurred_at_client)
+        if applied and target_status == "process":
+            eta = normalize_planned_time(event.estimated_arrival or "")
+            point.estimated_arrival = eta
         stored_event = RouteEvent(
             route_id=route.id,
             point_id=event.point_id,

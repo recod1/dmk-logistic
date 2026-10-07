@@ -34,6 +34,7 @@ export interface PointStatusOverlay {
   odometer?: string | null;
   time_source?: string | null;
   odometer_source?: string | null;
+  estimated_arrival?: string | null;
   updated_at: string;
 }
 
@@ -216,6 +217,7 @@ export async function savePointOverlay(
     odometer?: string | null;
     time_source?: string | null;
     odometer_source?: string | null;
+    estimated_arrival?: string | null;
   }
 ): Promise<void> {
   const existing = await db.pointOverlay.where("[route_id+point_id]").equals([routeId, pointId]).first();
@@ -228,6 +230,7 @@ export async function savePointOverlay(
     odometer: extras?.odometer ?? null,
     time_source: extras?.time_source ?? null,
     odometer_source: extras?.odometer_source ?? null,
+    estimated_arrival: extras?.estimated_arrival ?? null,
     updated_at: new Date().toISOString()
   };
   if (existing?.id) {

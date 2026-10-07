@@ -10,13 +10,23 @@ const props = defineProps<{
   odometerPrefillSource?: "wialon" | null;
   initialOdometer?: string;
   telemetryLoading?: boolean;
+  showEta?: boolean;
+  etaTime?: string;
 }>();
 
 const emit = defineEmits<{
   cancel: [];
-  confirm: [payload: { datetimeLocal: string; odometer: string; odometer_source: "manual" | "wialon" | null }];
+  confirm: [
+    payload: {
+      datetimeLocal: string;
+      odometer: string;
+      odometer_source: "manual" | "wialon" | null;
+      etaTime: string;
+    }
+  ];
   "update:datetimeLocal": [value: string];
   "update:odometer": [value: string];
+  "update:etaTime": [value: string];
 }>();
 
 const odometerMode = ref<"ask" | "edit" | "manual">("manual");
@@ -29,6 +39,11 @@ const localValue = computed({
 const odometerValue = computed({
   get: () => props.odometer ?? "",
   set: (v: string) => emit("update:odometer", v)
+});
+
+const etaValue = computed({
+  get: () => props.etaTime ?? "",
+  set: (v: string) => emit("update:etaTime", v)
 });
 
 watch(
@@ -59,6 +74,15 @@ const odometerReady = computed(() => {
   return Boolean((odometerValue.value || "").trim());
 });
 
+const etaReady = computed(() => {
+  if (!props.showEta) {
+    return true;
+  }
+  return Boolean((etaValue.value || "").trim());
+});
+
+const formReady = computed(() => odometerReady.value && etaReady.value);
+
 function acceptWialon(): void {
   odometerMode.value = "ask";
   confirm();
@@ -69,7 +93,7 @@ function editWialon(): void {
 }
 
 function confirm(): void {
-  if (!odometerReady.value) {
+  if (!formReady.value) {
     return;
   }
   const odo = (props.showOdometer ? (odometerValue.value || "").trim() : "").trim();
@@ -82,7 +106,12 @@ function confirm(): void {
       source = "manual";
     }
   }
-  emit("confirm", { datetimeLocal: localValue.value, odometer: odo, odometer_source: source });
+  emit("confirm", {
+    datetimeLocal: localValue.value,
+    odometer: odo,
+    odometer_source: source,
+    etaTime: (etaValue.value || "").trim()
+  });
 }
 </script>
 
@@ -97,6 +126,10 @@ function confirm(): void {
         Дата и время
         <input v-model="localValue" type="datetime-local" step="60" />
       </label>
+      <label v-if="showEta" class="field">
+        Ориентировочное время прибытия
+        <input v-model="etaValue" type="time" step="60" lang="ru" />
+      </label>
       <div v-if="showOdometer" class="odo-block">
         <p class="field-label">Одометр</p>
         <p v-if="telemetryLoading" class="hint">Запрашиваем показания из Wialon…</p>
@@ -104,7 +137,7 @@ function confirm(): void {
           <p class="wialon-value">{{ odometerValue || "—" }}</p>
           <p class="hint">Данные подтянуты из Wialon. Они верны или их нужно исправить?</p>
           <div class="ask-actions">
-            <button type="button" class="primary" @click="acceptWialon">Верны</button>
+            <button type="button" class="primary" :disabled="!etaReady" @click="acceptWialon">Верны</button>
             <button type="button" class="secondary" @click="editWialon">Исправить</button>
           </div>
         </template>
@@ -116,7 +149,7 @@ function confirm(): void {
       </div>
       <div class="actions">
         <button type="button" class="secondary" @click="emit('cancel')">Отмена</button>
-        <button v-if="odometerMode !== 'ask'" type="button" class="primary" :disabled="!odometerReady" @click="confirm">
+        <button v-if="odometerMode !== 'ask'" type="button" class="primary" :disabled="!formReady" @click="confirm">
           Сохранить
         </button>
       </div>
@@ -197,6 +230,7 @@ function confirm(): void {
   margin-top: 0.55rem;
 }
 input[type="datetime-local"],
+input[type="time"],
 input {
   border-radius: 12px;
   border: 1px solid var(--border-strong);

@@ -350,6 +350,7 @@ def _point_out(db: Session, point: Point, order_index: int) -> dict:
         "point_contacts": point.point_contacts,
         "point_time": point_time,
         "point_note": point.point_note,
+        "estimated_arrival": (getattr(point, "estimated_arrival", None) or "").strip(),
         "status": point.status,
         "time_accepted": _format_datetime_ru(point.time_accepted),
         "time_registration": _format_datetime_ru(point.time_registration),

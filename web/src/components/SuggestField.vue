@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 
 export type SuggestItem = { id: number; label: string };
 
@@ -17,6 +17,7 @@ const emit = defineEmits<{
   clear: [];
 }>();
 
+const wrap = ref<HTMLElement | null>(null);
 const open = ref(false);
 
 const matches = computed(() => {
@@ -33,10 +34,42 @@ function onPick(item: SuggestItem): void {
   emit("pick", item);
   open.value = false;
 }
+
+function onClear(): void {
+  emit("clear");
+  open.value = false;
+}
+
+function onDocPointerDown(event: PointerEvent): void {
+  if (!open.value) {
+    return;
+  }
+  const target = event.target as Node | null;
+  if (wrap.value && target && wrap.value.contains(target)) {
+    return;
+  }
+  open.value = false;
+}
+
+function onKeydown(event: KeyboardEvent): void {
+  if (event.key === "Escape") {
+    open.value = false;
+  }
+}
+
+onMounted(() => {
+  document.addEventListener("pointerdown", onDocPointerDown, true);
+  document.addEventListener("keydown", onKeydown);
+});
+
+onUnmounted(() => {
+  document.removeEventListener("pointerdown", onDocPointerDown, true);
+  document.removeEventListener("keydown", onKeydown);
+});
 </script>
 
 <template>
-  <div class="suggest-wrap">
+  <div ref="wrap" class="suggest-wrap">
     <span v-if="$slots.label" class="suggest-label"><slot name="label" /></span>
     <input
       :value="modelValue"
@@ -44,11 +77,10 @@ function onPick(item: SuggestItem): void {
       autocomplete="off"
       @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
       @focus="open = true"
-      @blur="window.setTimeout(() => (open = false), 180)"
     />
     <p v-if="picked && modelValue" class="picked">Выбран: {{ modelValue }}</p>
     <div v-if="open && (matches.length || emptyLabel)" class="suggest">
-      <button v-if="emptyLabel" type="button" class="suggest-item" @mousedown.prevent="emit('clear')">
+      <button v-if="emptyLabel" type="button" class="suggest-item" @mousedown.prevent="onClear">
         {{ emptyLabel }}
       </button>
       <button

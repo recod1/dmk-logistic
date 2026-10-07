@@ -5,6 +5,7 @@ export type OverlayStageFields = {
   odometer?: string | null;
   time_source?: string | null;
   odometer_source?: string | null;
+  estimated_arrival?: string | null;
 };
 
 const STATUS_STAGE: Record<
@@ -75,9 +76,11 @@ export function applyStageOverlayToPoint(point: PointDto, status: PointStatus, f
   }
   const time = formatOverlayTime(fields.time);
   const odometer = (fields.odometer || "").trim();
+  const eta = (fields.estimated_arrival || "").trim();
   return {
     ...point,
     status,
+    estimated_arrival: eta || point.estimated_arrival || "",
     [spec.time]: time || point[spec.time],
     [spec.legacyTime]: time || point[spec.legacyTime],
     [spec.odometer]: odometer || point[spec.odometer],
@@ -96,6 +99,7 @@ export function applyOverlaysToPoints(
     odometer?: string | null;
     time_source?: string | null;
     odometer_source?: string | null;
+    estimated_arrival?: string | null;
   }>
 ): PointDto[] {
   const points = Array.isArray(route.points) ? route.points : [];
@@ -112,7 +116,8 @@ export function applyOverlaysToPoints(
       time: overlay.time || overlay.occurred_at_client,
       odometer: overlay.odometer,
       time_source: overlay.time_source,
-      odometer_source: overlay.odometer_source
+      odometer_source: overlay.odometer_source,
+      estimated_arrival: overlay.estimated_arrival
     });
   });
 }

@@ -287,6 +287,7 @@ function showRevert(pointId: number): boolean {
               <MapsAddressLink :address="point.place_point" />
             </p>
             <small>{{ plannedScheduleDisplay(point.date_point, point.point_time) }}</small>
+            <p v-if="point.estimated_arrival" class="eta">Ориентировочное прибытие: {{ point.estimated_arrival }}</p>
             <div class="stage-scroll">
               <table class="stage-table">
                 <thead>
@@ -499,6 +500,11 @@ function showRevert(pointId: number): boolean {
 .org {
   margin: 0.2rem 0 0;
   font-weight: 600;
+}
+.eta {
+  margin: 0.25rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.86rem;
 }
 .delta {
   color: #93c5fd;

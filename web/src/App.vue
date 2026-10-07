@@ -150,7 +150,10 @@ import {
   clearLocalUserData
 } from "./db";
 import { DRIVER_PREFETCH_SYNC_TAG, persistPrefetchPayload, prefetchAssignedRoutesFromSession, routeToListItem } from "./offlinePrefetch";
+import { applyLatestAppVersion } from "./appUpdate";
 import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
+import { readDeviceCoordinates } from "./deviceLocation";
+import { plannedTimeInputValue } from "./plannedTime";
 import { prepareDocumentImageBlobs } from "./imageUploadPrep";
 import { parseChatDeliveryHint } from "./chatDeliveryBg";
 import { isAccountantRole, isAdminRole, isFleetEditorRole, isLogisticRole, isRouteManagerRole } from "./roles";
@@ -267,6 +270,8 @@ const statusConfirm = ref<{
   initialOdometer: string;
   odometerPrefillSource: "wialon" | null;
   telemetryLoading: boolean;
+  showEta: boolean;
+  etaTime: string;
 } | null>(null);
 const docsUpload = ref<{
   pointId: number;
@@ -2537,7 +2542,8 @@ async function syncOutboxInBackground(): Promise<void> {
             time_source: event.time_source ?? null,
             odometer: event.odometer ?? null,
             odometer_source: event.odometer_source ?? null,
-            coordinates: null
+            coordinates: event.coordinates ?? null,
+            estimated_arrival: event.estimated_arrival ?? null
           };
           if (event.document_file_ids?.length) {
             payload.document_file_ids = event.document_file_ids;
@@ -2549,6 +2555,17 @@ async function syncOutboxInBackground(): Promise<void> {
       }
       const result = await sendEventsBatch(authToken.value, deviceId, events);
       const removable = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.client_event_id);
+      const fatal = result.items.filter((item) => {
+        if (item.applied || item.duplicate || !item.error) {
+          return false;
+        }
+        const err = item.error.toLowerCase();
+        return err.includes("invalid transition") || err.includes("unauthorized") || err.includes("forbidden");
+      });
+      if (fatal.length) {
+        removable.push(...fatal.map((item) => item.client_event_id));
+        syncMessage.value = `Этап не принят сервером: ${fatal[0]?.error || "ошибка"}`;
+      }
       await removeOutboxByClientEventIds(removable);
       const appliedPointIds = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.point_id);
       if (route.value && appliedPointIds.length) {
@@ -3522,6 +3539,7 @@ function openStatusConfirm(pointId: number): void {
     return;
   }
   const initial = toDatetimeLocalValue(new Date());
+  const to = nextStatus(current.status);
   statusConfirm.value = {
     pointId,
     nextLabel: nextStatusLabel(current.status) || "",
@@ -3531,7 +3549,9 @@ function openStatusConfirm(pointId: number): void {
     odometer: "",
     initialOdometer: "",
     odometerPrefillSource: null,
-    telemetryLoading: true
+    telemetryLoading: true,
+    showEta: to === "process",
+    etaTime: (current.estimated_arrival || "").trim() || plannedTimeInputValue(current.date_point, current.point_time)
   };
   if (hasNetwork() && authToken.value) {
     void (async () => {
@@ -3564,6 +3584,7 @@ async function applyStatusConfirm(payload: {
   datetimeLocal: string;
   odometer: string;
   odometer_source: "manual" | "wialon" | null;
+  etaTime: string;
 }): Promise<void> {
   const pending = statusConfirm.value;
   statusConfirm.value = null;
@@ -3595,7 +3616,8 @@ async function applyStatusConfirm(payload: {
     await markPointNext(pending.pointId, iso, undefined, {
       timeSource,
       odometer: payload.odometer,
-      odometer_source: payload.odometer_source
+      odometer_source: payload.odometer_source,
+      estimatedArrival: to === "process" ? payload.etaTime : undefined
     });
   } catch (error) {
     syncMessage.value = (error as Error).message;
@@ -3670,7 +3692,12 @@ async function markPointNext(
   pointId: number,
   occurredAtOverride?: string,
   docsAttach?: DocsAttach,
-  options?: { timeSource?: "device" | "manual"; odometer?: string; odometer_source?: "manual" | "wialon" | null }
+  options?: {
+    timeSource?: "device" | "manual";
+    odometer?: string;
+    odometer_source?: "manual" | "wialon" | null;
+    estimatedArrival?: string;
+  }
 ): Promise<void> {
   if (!route.value || !isDriver.value) {
     return;
@@ -3698,6 +3725,8 @@ async function markPointNext(
   }
 
   const occurredAt = occurredAtOverride ?? new Date().toISOString();
+  const coords = await readDeviceCoordinates();
+  const eta = (options?.estimatedArrival || "").trim();
   const event: EventPayload = {
     client_event_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     occurred_at_client: occurredAt,
@@ -3706,7 +3735,8 @@ async function markPointNext(
     time_source: options?.timeSource ?? "device",
     odometer: (options?.odometer || "").trim() || null,
     odometer_source: options?.odometer_source ?? null,
-    coordinates: null
+    coordinates: coords,
+    estimated_arrival: toStatus === "process" ? eta || null : null
   };
   if (toStatus === "docs" && docsAttach) {
     if ("fileIds" in docsAttach) {
@@ -3720,7 +3750,8 @@ async function markPointNext(
     time: occurredAt,
     odometer: (options?.odometer || "").trim() || null,
     time_source: options?.timeSource ?? "device",
-    odometer_source: options?.odometer_source ?? null
+    odometer_source: options?.odometer_source ?? null,
+    estimated_arrival: toStatus === "process" ? eta : null
   };
   const nextPoint = applyStageOverlayToPoint(current, toStatus, overlayFields);
   Object.assign(current, nextPoint);
@@ -4717,8 +4748,13 @@ async function resetConnections(): Promise<void> {
   }
   profileMenuOpen.value = false;
   resettingConnections.value = true;
-  syncMessage.value = "Переподключение…";
+  syncMessage.value = "Проверяем обновление…";
   try {
+    const update = await applyLatestAppVersion();
+    if (update === "reloading") {
+      return;
+    }
+    syncMessage.value = "Переподключение…";
     denyRealtimeSockets();
     stopNotificationsPolling();
     stopChatPolling();
@@ -5359,6 +5395,8 @@ onUnmounted(() => {
       :initial-odometer="statusConfirm.initialOdometer"
       :odometer-prefill-source="statusConfirm.odometerPrefillSource"
       :telemetry-loading="statusConfirm.telemetryLoading"
+      :show-eta="statusConfirm.showEta"
+      :eta-time="statusConfirm.etaTime"
       @update:datetime-local="
         (v) => {
           if (statusConfirm) statusConfirm.datetimeLocal = v;
@@ -5367,6 +5405,11 @@ onUnmounted(() => {
       @update:odometer="
         (v) => {
           if (statusConfirm) statusConfirm.odometer = v;
+        }
+      "
+      @update:eta-time="
+        (v) => {
+          if (statusConfirm) statusConfirm.etaTime = v;
         }
       "
       @cancel="cancelStatusConfirm"

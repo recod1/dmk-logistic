@@ -1,10 +1,10 @@
 import { createApp } from "vue";
-import { registerSW } from "virtual:pwa-register";
 
 import App from "./App.vue";
+import { initAppUpdate } from "./appUpdate";
 import "./style.css";
 
-registerSW({ immediate: true });
+initAppUpdate();
 
 createApp(App).mount("#app");
 

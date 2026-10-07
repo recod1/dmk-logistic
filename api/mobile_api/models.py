@@ -113,6 +113,7 @@ class Point(Base):
     point_contacts: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
     point_time: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
     point_note: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    estimated_arrival: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
 
     time_accepted: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     time_departure: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

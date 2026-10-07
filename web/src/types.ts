@@ -33,6 +33,7 @@ export interface PointDto {
   point_contacts: string;
   point_time: string;
   point_note: string;
+  estimated_arrival?: string;
   status: PointStatus;
   time_accepted: string | null;
   time_registration: string | null;
@@ -115,6 +116,7 @@ export interface EventPayload {
     lat?: number | null;
     lng?: number | null;
   } | null;
+  estimated_arrival?: string | null;
   document_file_ids?: number[];
   document_local_keys?: string[];
 }
@@ -253,6 +255,7 @@ export interface AdminRoute {
       point_contacts: string;
       point_time: string;
       point_note: string;
+      estimated_arrival?: string;
       status: string;
       time_accepted: string | null;
       time_registration: string | null;

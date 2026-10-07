@@ -781,7 +781,7 @@ function removeRoute(): void {
             </label>
             <label>
               Время
-              <input v-model="point.point_time" type="text" inputmode="numeric" placeholder="13:00" lang="ru" />
+              <input v-model="point.point_time" type="time" step="60" lang="ru" />
             </label>
             <label>
               Организация
@@ -826,6 +826,7 @@ function removeRoute(): void {
             <span v-else>Без адреса</span>
           </p>
           <p class="meta-line">{{ formatPlannedLine(point.date_point, point.point_time) }}</p>
+          <p v-if="point.estimated_arrival" class="meta-line">Ориентировочное прибытие: {{ point.estimated_arrival }}</p>
           <p v-if="point.point_contacts" class="meta-line">{{ point.point_contacts }}</p>
           <div v-if="editingPointId !== point.id" class="actions">
             <button class="secondary" type="button" :disabled="loading" @click="openPointEdit(point)">
@@ -861,7 +862,7 @@ function removeRoute(): void {
               </label>
               <label>
                 Время плана
-                <input v-model="pointEdit.point_time" type="text" inputmode="numeric" placeholder="13:00" lang="ru" />
+                <input v-model="pointEdit.point_time" type="time" step="60" lang="ru" />
                 <small v-if="editHint(point.manual_edits, 'point_time')" class="edit-hint">{{ editHint(point.manual_edits, 'point_time') }}</small>
               </label>
               <label class="full">

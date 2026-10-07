@@ -78,6 +78,7 @@ const canAdvance = computed(() => {
         </span>
         <span v-else class="plan">Адрес не указан</span>
         <span class="plan">План: {{ plannedScheduleDisplay(activePoint.date_point, activePoint.point_time) || "—" }}</span>
+        <span v-if="activePoint.estimated_arrival" class="plan">Ориентировочно: {{ activePoint.estimated_arrival }}</span>
       </div>
 
       <button v-if="activeRoute.status === 'new'" class="primary" @click.stop="emit('acceptActiveRoute')">Принять рейс</button>

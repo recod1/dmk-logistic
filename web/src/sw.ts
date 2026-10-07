@@ -141,6 +141,10 @@ self.addEventListener("periodicsync", (event) => {
 
 self.addEventListener("message", (event: ExtendableMessageEvent) => {
   const type = (event.data as { type?: string } | null)?.type;
+  if (type === "SKIP_WAITING") {
+    void self.skipWaiting();
+    return;
+  }
   if (type === "DMK_PREFETCH") {
     event.waitUntil(prefetchDriverRoutesInBackground());
   }

@@ -761,7 +761,7 @@ onMounted(() => {
           </label>
           <label>
             Время
-            <input v-model="point.point_time" type="text" inputmode="numeric" placeholder="13:00" lang="ru" />
+            <input v-model="point.point_time" type="time" step="60" lang="ru" />
           </label>
         </div>
       </article>
