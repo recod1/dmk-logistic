@@ -144,3 +144,39 @@ export function routeAnalyticsView(
     workKm: prefer(server.workKm, local.workKm)
   };
 }
+
+export function liveRouteElapsedLabel(args: {
+  points: RouteAnalyticsPoint[] | null | undefined;
+  status?: string | null;
+  acceptedAt?: string | null;
+  nowMs: number;
+}): string {
+  const list = Array.isArray(args.points) ? args.points : [];
+  let start = firstFilled(list[0]).time;
+  if (!start && args.acceptedAt) {
+    start = parseStageTime(args.acceptedAt);
+  }
+  if (!start) {
+    return EMPTY;
+  }
+  const finished = args.status === "success" || args.status === "cancelled";
+  let end: Date | null = null;
+  if (finished) {
+    end = lastFilled(list[list.length - 1]).time;
+    if (!end) {
+      for (let i = list.length - 1; i >= 0; i -= 1) {
+        const candidate = lastFilled(list[i]).time;
+        if (candidate) {
+          end = candidate;
+          break;
+        }
+      }
+    }
+  }
+  const stop = end ?? new Date(args.nowMs);
+  const minutes = (stop.getTime() - start.getTime()) / 60000;
+  if (!Number.isFinite(minutes) || minutes < 0) {
+    return EMPTY;
+  }
+  return formatDuration(minutes) || EMPTY;
+}

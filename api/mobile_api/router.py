@@ -567,13 +567,29 @@ def _telemetry_odometer_ok(value: str | None) -> bool:
     return bool(str(value).strip())
 
 
+def _coord_num(value: object) -> float | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip().replace(",", ".")
+        if not text:
+            return None
+        try:
+            return float(text)
+        except ValueError:
+            return None
+    return None
+
+
 def _telemetry_coords_ok(value: dict | None) -> bool:
     if not value or not isinstance(value, dict):
         return False
-    lat_raw, lng_raw = value.get("lat"), value.get("lng")
-    if not isinstance(lat_raw, (int, float)) or not isinstance(lng_raw, (int, float)):
+    lat_value, lng_value = _coord_num(value.get("lat")), _coord_num(value.get("lng"))
+    if lat_value is None or lng_value is None:
         return False
-    return not (float(lat_raw) == 0.0 and float(lng_raw) == 0.0)
+    return not (lat_value == 0.0 and lng_value == 0.0)
 
 
 def _apply_point_telemetry(
@@ -591,13 +607,11 @@ def _apply_point_telemetry(
         odometer_value = odometer.strip() if isinstance(odometer, str) else str(odometer)
         point.odometer = odometer_value
     if coordinates and isinstance(coordinates, dict):
-        lat_raw = coordinates.get("lat")
-        lng_raw = coordinates.get("lng")
-        if isinstance(lat_raw, (int, float)):
-            lat_value = float(lat_raw)
+        lat_value = _coord_num(coordinates.get("lat"))
+        lng_value = _coord_num(coordinates.get("lng"))
+        if lat_value is not None:
             point.lat = lat_value
-        if isinstance(lng_raw, (int, float)):
-            lng_value = float(lng_raw)
+        if lng_value is not None:
             point.lng = lng_value
 
     if status_value == "process":
@@ -850,8 +864,10 @@ def batch_events(
             odometer_source = event.odometer_source
             coordinates = event.coordinates
             vehicle_no = vehicle_number_for_wialon(route.number_auto, route.registration_number)
-            need_odom = not _telemetry_odometer_ok(odometer)
-            need_coords = not _telemetry_coords_ok(coordinates)
+            event_age_sec = (server_received_at - _as_utc(event.occurred_at_client)).total_seconds()
+            live_telemetry = event_age_sec <= 45
+            need_odom = not _telemetry_odometer_ok(odometer) and live_telemetry
+            need_coords = not _telemetry_coords_ok(coordinates) and live_telemetry
             try:
                 if not WIALON_ENABLED:
                     logger.info(

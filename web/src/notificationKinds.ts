@@ -1,4 +1,6 @@
-export type NotificationKind = "point" | "chat" | "routes";
+export type NotificationKind = "point" | "chat" | "routes" | "salary";
+
+export const NOTIFICATION_KIND_TABS: NotificationKind[] = ["point", "chat", "routes", "salary"];
 
 export function notificationKind(eventType: string): NotificationKind {
   if (eventType === "point_status_stale") {
@@ -7,11 +9,15 @@ export function notificationKind(eventType: string): NotificationKind {
   if (eventType === "chat_message") {
     return "chat";
   }
+  if (eventType === "salary_new" || eventType === "salary_confirmed" || eventType === "salary_commented") {
+    return "salary";
+  }
   return "routes";
 }
 
 export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   point: "Ожидание на точке",
   chat: "Чаты",
-  routes: "Рейсы"
+  routes: "Рейсы",
+  salary: "Расчеты"
 };

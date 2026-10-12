@@ -1,6 +1,6 @@
 from unittest import TestCase
 
-from mobile_api.notification_kinds import KIND_CHAT, KIND_POINT, KIND_ROUTES, notification_kind, pref_allows
+from mobile_api.notification_kinds import KIND_CHAT, KIND_POINT, KIND_ROUTES, KIND_SALARY, notification_kind, pref_allows
 
 
 class _Pref:
@@ -16,6 +16,9 @@ class NotificationKindTests(TestCase):
         self.assertEqual(notification_kind("chat_message"), KIND_CHAT)
         self.assertEqual(notification_kind("route_created"), KIND_ROUTES)
         self.assertEqual(notification_kind("point_status_changed"), KIND_ROUTES)
+        self.assertEqual(notification_kind("salary_new"), KIND_SALARY)
+        self.assertEqual(notification_kind("salary_confirmed"), KIND_SALARY)
+        self.assertEqual(notification_kind("salary_commented"), KIND_SALARY)
 
     def test_mute_flags(self) -> None:
         pref = _Pref(mute_chat=True)

@@ -2,7 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 
 import type { NotificationPrefs } from "../api";
-import { NOTIFICATION_KIND_LABELS, notificationKind, type NotificationKind } from "../notificationKinds";
+import { NOTIFICATION_KIND_LABELS, NOTIFICATION_KIND_TABS, notificationKind, type NotificationKind } from "../notificationKinds";
 import type { NotificationDto } from "../types";
 
 const props = defineProps<{
@@ -22,7 +22,7 @@ const emit = defineEmits<{
   enablePush: [];
   disablePush: [];
   markRead: [notificationId: number];
-  markAllRead: [];
+  markAllRead: [kind: NotificationKind | undefined];
   openFromNotification: [item: NotificationDto];
   updatePrefs: [prefs: NotificationPrefs];
 }>();
@@ -37,13 +37,20 @@ const visibleItems = computed(() => {
 });
 
 const unreadByKind = computed(() => {
-  const counts: Record<NotificationKind, number> = { point: 0, chat: 0, routes: 0 };
+  const counts: Record<NotificationKind, number> = { point: 0, chat: 0, routes: 0, salary: 0 };
   for (const item of props.items) {
     if (!item.is_read) {
       counts[notificationKind(item.event_type)] += 1;
     }
   }
   return counts;
+});
+
+const currentTabUnread = computed(() => {
+  if (!props.showKindTabs) {
+    return props.items.filter((item) => !item.is_read).length;
+  }
+  return unreadByKind.value[kindTab.value] || 0;
 });
 
 const currentMuted = computed(() => {
@@ -53,12 +60,16 @@ const currentMuted = computed(() => {
   }
   if (kindTab.value === "point") return prefs.mute_point;
   if (kindTab.value === "chat") return prefs.mute_chat;
+  if (kindTab.value === "salary") return false;
   return prefs.mute_routes;
 });
 
 function toggleKindMute(): void {
   const prefs = props.prefs ?? { mute_point: false, mute_chat: false, mute_routes: false };
   const next = { ...prefs };
+  if (kindTab.value === "salary") {
+    return;
+  }
   if (kindTab.value === "point") next.mute_point = !prefs.mute_point;
   else if (kindTab.value === "chat") next.mute_chat = !prefs.mute_chat;
   else next.mute_routes = !prefs.mute_routes;
@@ -165,12 +176,12 @@ function formatExtra(item: NotificationDto): string {
           <button :disabled="loading" @click="emit('refresh')">Обновить</button>
           <button v-if="canPush && !pushEnabled" :disabled="loading" @click="emit('enablePush')">Включить push</button>
           <button v-if="canPush && pushEnabled" :disabled="loading" @click="emit('disablePush')">Выключить push</button>
-          <button :disabled="loading || !items.some((item) => !item.is_read)" @click="emit('markAllRead')">Прочитать всё</button>
+          <button :disabled="loading || currentTabUnread === 0" @click="emit('markAllRead', showKindTabs ? kindTab : undefined)">Прочитать всё</button>
         </div>
       </div>
       <div v-if="showKindTabs" class="kind-tabs">
         <button
-          v-for="kind in (['point', 'chat', 'routes'] as NotificationKind[])"
+          v-for="kind in NOTIFICATION_KIND_TABS"
           :key="kind"
           type="button"
           class="kind-btn"
@@ -181,7 +192,7 @@ function formatExtra(item: NotificationDto): string {
           <span v-if="unreadByKind[kind]" class="kind-count">{{ unreadByKind[kind] }}</span>
         </button>
       </div>
-      <label v-if="showKindTabs" class="mute-row">
+      <label v-if="showKindTabs && kindTab !== 'salary'" class="mute-row">
         <input type="checkbox" :checked="!currentMuted" @change="toggleKindMute" />
         Оповещения этого типа включены
       </label>

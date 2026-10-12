@@ -4,7 +4,8 @@ import { computed, reactive, ref, watch } from "vue";
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
 import PointDocLinks from "./PointDocLinks.vue";
-import { routeAnalyticsView } from "../routeAnalytics";
+import { liveRouteElapsedLabel, routeAnalyticsView } from "../routeAnalytics";
+import { useLiveNow } from "../liveNow";
 import { stageDeltasForPoint } from "../stageDeltas";
 import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
 import { plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
@@ -186,7 +187,16 @@ function canCancel(status: RouteWorkflowStatus): boolean {
   return status === "new" || status === "process";
 }
 
+const nowMs = useLiveNow();
 const routeAnalytics = computed(() => routeAnalyticsView(props.route.points || [], props.route.analytics));
+const liveRouteTime = computed(() =>
+  liveRouteElapsedLabel({
+    points: props.route.points,
+    status: props.route.status,
+    acceptedAt: props.route.accepted_at,
+    nowMs: nowMs.value
+  })
+);
 
 function canCompleteRoute(): boolean {
   if (props.route.status !== "new" && props.route.status !== "process") {
@@ -632,6 +642,10 @@ function removeRoute(): void {
       </div>
       <section class="analytics-card">
         <h3>Аналитика рейса</h3>
+        <div class="kv">
+          <span class="k">Время рейса</span>
+          <span class="v live-time">{{ liveRouteTime }}</span>
+        </div>
         <div class="kv">
           <span class="k">Общее время</span>
           <span class="v">{{ routeAnalytics.totalTime }}</span>
@@ -1166,6 +1180,10 @@ function removeRoute(): void {
   background: rgba(15, 23, 42, 0.55);
   display: grid;
   gap: 0.4rem;
+}
+.live-time {
+  font-variant-numeric: tabular-nums;
+  color: #86efac;
 }
 .analytics-card h3 {
   margin: 0 0 0.15rem;

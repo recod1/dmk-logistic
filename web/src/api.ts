@@ -811,8 +811,9 @@ export async function markNotificationRead(token: string, notificationId: number
   return data.item;
 }
 
-export async function markAllNotificationsRead(token: string): Promise<number> {
-  const data = await requestJson<{ updated: number }>(`${API_BASE}/v1/notifications/read-all`, {
+export async function markAllNotificationsRead(token: string, kind?: string): Promise<number> {
+  const qs = kind ? `?kind=${encodeURIComponent(kind)}` : "";
+  const data = await requestJson<{ updated: number }>(`${API_BASE}/v1/notifications/read-all${qs}`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`
@@ -1241,6 +1242,9 @@ export type ChatRoomListItem = {
   last_message_text?: string;
   last_message_at?: string | null;
   last_author_name?: string;
+  last_message_user_id?: number | null;
+  last_message_read?: boolean;
+  last_message_delivered?: boolean;
 };
 
 export type SalaryRecord = {

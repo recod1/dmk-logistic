@@ -3,7 +3,8 @@ import { computed } from "vue";
 
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
-import { routeAnalyticsView } from "../routeAnalytics";
+import { liveRouteElapsedLabel, routeAnalyticsView } from "../routeAnalytics";
+import { useLiveNow } from "../liveNow";
 import { stageDeltasForPoint } from "../stageDeltas";
 import {
   canRevertPointStatus,
@@ -36,7 +37,16 @@ const firstIncompletePoint = computed(
   () => (props.route.points || []).find((point) => !isPointDone(point.status)) ?? null
 );
 
+const nowMs = useLiveNow();
 const routeAnalytics = computed(() => routeAnalyticsView(props.route.points));
+const liveRouteTime = computed(() =>
+  liveRouteElapsedLabel({
+    points: props.route.points,
+    status: props.route.status,
+    acceptedAt: props.route.accepted_at,
+    nowMs: nowMs.value
+  })
+);
 
 const isAcceptedCurrentRoute = computed(
   () => props.route.status === "process" && props.route.id === props.activeRouteId
@@ -175,6 +185,10 @@ function showRevert(pointId: number): boolean {
         <div class="kv">
           <span class="k">Статус рейса</span>
           <span class="v">{{ routeStatusLabel(route.status) }}</span>
+        </div>
+        <div class="kv">
+          <span class="k">Время рейса</span>
+          <span class="v live-time">{{ liveRouteTime }}</span>
         </div>
         <div class="kv">
           <span class="k">Общее время</span>
@@ -420,6 +434,10 @@ function showRevert(pointId: number): boolean {
   background: rgba(15, 23, 42, 0.92);
   padding: 0.8rem 0.95rem;
   box-shadow: var(--shadow-sm);
+}
+.live-time {
+  font-variant-numeric: tabular-nums;
+  color: #86efac;
 }
 .facts {
   display: grid;

@@ -13,6 +13,9 @@ export type ChatRoomListItem = {
   last_message_text?: string;
   last_message_at?: string | null;
   last_author_name?: string;
+  last_message_user_id?: number | null;
+  last_message_read?: boolean;
+  last_message_delivered?: boolean;
 };
 
 export type UserListItem = {
@@ -96,6 +99,16 @@ function roomInitials(title: string): string {
   if (!parts.length) return "?";
   if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
   return `${parts[0][0] || ""}${parts[1][0] || ""}`.toUpperCase();
+}
+
+function lastMessageIsMine(room: ChatRoomListItem): boolean {
+  return Boolean(props.currentUserId) && room.last_message_user_id === props.currentUserId;
+}
+
+function lastTickTitle(room: ChatRoomListItem): string {
+  if (room.last_message_read) return "Прочитано";
+  if (room.last_message_delivered) return "Получено";
+  return "Отправлено";
 }
 
 function formatRoomTime(value?: string | null): string {
@@ -288,6 +301,22 @@ watch(
               <span class="when">{{ formatRoomTime(r.last_message_at) }}</span>
             </span>
             <span class="preview">
+              <span
+                v-if="lastMessageIsMine(r)"
+                class="hub-ticks"
+                :class="{ delivered: Boolean(r.last_message_delivered) && !r.last_message_read, read: Boolean(r.last_message_read) }"
+                :title="lastTickTitle(r)"
+              >
+                <svg viewBox="0 0 12 10" aria-hidden="true">
+                  <path d="M1.2 5.2 4.1 8.1 10.6 1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <svg v-if="r.last_message_delivered || r.last_message_read" class="tick-2" viewBox="0 0 12 10" aria-hidden="true">
+                  <path d="M1.2 5.2 4.1 8.1 10.6 1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+                <svg v-if="r.last_message_read" class="tick-3" viewBox="0 0 12 10" aria-hidden="true">
+                  <path d="M1.2 5.2 4.1 8.1 10.6 1.5" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" />
+                </svg>
+              </span>
               <span v-if="r.last_author_name" class="author">{{ r.last_author_name }}: </span>
               {{ r.last_message_text || "Нет сообщений" }}
             </span>
@@ -584,6 +613,35 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 0.28rem;
+  min-width: 0;
+}
+.preview .author {
+  flex: 0 0 auto;
+}
+.hub-ticks {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: #64748b;
+  line-height: 0;
+}
+.hub-ticks svg {
+  width: 13px;
+  height: 9px;
+  display: block;
+}
+.hub-ticks .tick-2,
+.hub-ticks .tick-3 {
+  margin-left: -6px;
+}
+.hub-ticks.delivered {
+  color: #94a3b8;
+}
+.hub-ticks.read {
+  color: #7ec8f5;
 }
 .badge {
   margin-left: auto;

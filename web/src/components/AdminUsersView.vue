@@ -114,7 +114,11 @@ function toggleActive(user: AdminUser): void {
 }
 
 function removeUser(user: AdminUser): void {
-  if (!window.confirm(`Удалить пользователя ${user.login}?`)) {
+  if (
+    !window.confirm(
+      `Отключить пользователя ${user.login}? Рейсы, расчёты, чаты и история действий сохранятся.`
+    )
+  ) {
     return;
   }
   emit("delete", user.id);

@@ -63,8 +63,7 @@ export function formatDuration(deltaMin: number): string | null {
 export function formatStageDelta(
   prev: StageDeltaInput,
   next: StageDeltaInput,
-  fromLabel: string,
-  toLabel: string
+  periodLabel: string
 ): string | null {
   const prevTime = parseStageTime(prev.time);
   const nextTime = parseStageTime(next.time);
@@ -83,10 +82,29 @@ export function formatStageDelta(
     bits.push(km < 0 ? "—" : `${km} км`);
   }
   if (!bits.length) return null;
-  return `Период ${fromLabel} - ${toLabel} : ${bits.join(" , ")}`;
+  return `${periodLabel} : ${bits.join(" , ")}`;
+}
+
+export function stagePeriodLabel(
+  fromKey: (typeof STAGE_ORDER)[number],
+  toKey: (typeof STAGE_ORDER)[number],
+  typePoint?: string | null
+): string {
+  const unloading = (typePoint || "").trim().toLowerCase() === "unloading";
+  if (fromKey === "departure" && toKey === "registration") {
+    return unloading ? "в пути" : "подача на загрузку";
+  }
+  if (fromKey === "registration" && toKey === "gate") {
+    return "регистрация";
+  }
+  if (fromKey === "gate" && toKey === "docs") {
+    return unloading ? "выгрузка" : "загрузка";
+  }
+  return `Период ${STAGE_PERIOD_LABELS[fromKey]} - ${STAGE_PERIOD_LABELS[toKey]}`;
 }
 
 export function stageDeltasForPoint(point: {
+  type_point?: string | null;
   departure_time?: string | null;
   time_accepted?: string | null;
   departure_odometer?: string | null;
@@ -111,7 +129,7 @@ export function stageDeltasForPoint(point: {
   for (const row of rows) {
     const filled = Boolean((row.time || "").trim() || (row.odometer || "").trim());
     if (filled && prev) {
-      const label = formatStageDelta(prev, row, STAGE_PERIOD_LABELS[prev.key], STAGE_PERIOD_LABELS[row.key]);
+      const label = formatStageDelta(prev, row, stagePeriodLabel(prev.key, row.key, point.type_point));
       if (label) out[row.key] = label;
     }
     if (filled) prev = row;

@@ -162,6 +162,7 @@ import { readDeviceCoordinates } from "./deviceLocation";
 import { plannedTimeInputValue } from "./plannedTime";
 import { prepareDocumentImageBlobs } from "./imageUploadPrep";
 import { parseChatDeliveryHint } from "./chatDeliveryBg";
+import { notificationKind } from "./notificationKinds";
 import { isAccountantRole, isAdminRole, isFleetEditorRole, isLogisticRole, isRouteManagerRole } from "./roles";
 import { applyOverlaysToPoints, applyStageOverlayToPoint, rollbackStageOnPoint } from "./pointOverlay";
 import { isPointDone, nextStatus, nextStatusLabel, previousStatus } from "./status";
@@ -401,7 +402,7 @@ const isDriver = computed(() => authUser.value?.role_code === "driver");
 const isLogistic = computed(() => isLogisticRole(authUser.value?.role_code || ""));
 const isFleetEditor = computed(() => isFleetEditorRole(authUser.value?.role_code || ""));
 const isAccountant = computed(() => isAccountantRole(authUser.value?.role_code || ""));
-const showNotificationKindTabs = computed(() => isAdmin.value || isLogistic.value);
+const showNotificationKindTabs = computed(() => Boolean(isAuthed.value));
 const salaryDriverOptions = computed(() => {
   const fromRoutes = routeDrivers.value.map((d) => ({
     id: d.id,
@@ -535,9 +536,7 @@ async function refreshWebPushSubscriptionState(): Promise<void> {
 }
 
 function appIconBadgeCount(): number {
-  const notifications = Math.max(0, unreadNotificationsCount.value);
-  const chats = hasUnreadChatsNav.value ? 1 : 0;
-  return notifications + chats;
+  return Math.max(0, unreadNotificationsCount.value);
 }
 
 function updateUiNotificationIndicators(): void {
@@ -573,7 +572,6 @@ watchEffect(() => {
   // Keep tab title + badge in sync while app runs in browser / installed PWA.
   void currentPageTitle.value;
   void unreadNotificationsCount.value;
-  void hasUnreadChatsNav.value;
   updateUiNotificationIndicators();
 });
 
@@ -3315,14 +3313,23 @@ function markUnreadSalaryNotifications(): void {
     });
 }
 
-async function doMarkAllNotificationsRead(): Promise<void> {
+async function doMarkAllNotificationsRead(kind?: string): Promise<void> {
   if (!authToken.value) {
     return;
   }
   try {
-    await markAllNotificationsRead(authToken.value);
-    notifications.value = notifications.value.map((item) => ({ ...item, is_read: true }));
-    unreadNotificationsCount.value = 0;
+    await markAllNotificationsRead(authToken.value, kind);
+    notifications.value = notifications.value.map((item) => {
+      if (item.is_read) {
+        return item;
+      }
+      if (kind && notificationKind(item.event_type) !== kind) {
+        return item;
+      }
+      return { ...item, is_read: true };
+    });
+    unreadNotificationsCount.value = notifications.value.filter((item) => !item.is_read).length;
+    updateUiNotificationIndicators();
   } catch (error) {
     notificationsError.value = `Ошибка отметки прочитанного: ${(error as Error).message}`;
   }
@@ -3918,7 +3925,7 @@ async function markPointNext(
     time_source: options?.timeSource ?? "device",
     odometer: (options?.odometer || "").trim() || null,
     odometer_source: options?.odometer_source ?? null,
-    coordinates: coords,
+    coordinates: coords ? { lat: coords.lat, lng: coords.lng } : null,
     estimated_arrival: toStatus === "process" ? eta || null : null
   };
   if (toStatus === "docs" && docsAttach) {

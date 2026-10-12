@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_user
+from mobile_api.notification_kinds import KIND_CHAT, KIND_POINT, KIND_ROUTES, KIND_SALARY, notification_kind
 from mobile_api.db import SessionLocal, get_db
 from mobile_api.models import Notification, Point, Route, User, UserNotificationPref, WebPushSubscription
 from mobile_api.notifications_realtime import notifications_realtime_hub
@@ -503,12 +504,23 @@ def mark_notification_read(
 
 @router.post("/v1/notifications/read-all")
 def mark_all_notifications_read(
+    kind: str | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> dict:
+    allowed = {KIND_POINT, KIND_CHAT, KIND_ROUTES, KIND_SALARY}
+    kind_filter = (kind or "").strip().lower() or None
+    if kind_filter and kind_filter not in allowed:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown notification kind")
+    rows = db.scalars(
+        select(Notification).where(Notification.user_id == current_user.id, Notification.is_read.is_(False))
+    ).all()
+    ids = [int(row.id) for row in rows if kind_filter is None or notification_kind(row.event_type) == kind_filter]
+    if not ids:
+        return {"updated": 0}
     updated = (
         db.query(Notification)
-        .filter(Notification.user_id == current_user.id, Notification.is_read.is_(False))
+        .filter(Notification.id.in_(ids), Notification.user_id == current_user.id)
         .update({Notification.is_read: True}, synchronize_session=False)
     )
     db.commit()

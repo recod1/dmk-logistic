@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_admin, hash_password
 from mobile_api.db import get_db
-from mobile_api.models import Notification, User, WebPushSubscription
+from mobile_api.models import User, WebPushSubscription
 from mobile_api.roles import ROLE_LABELS_RU, RoleCode, normalize_role_code, role_label_ru
 
 
@@ -166,9 +166,16 @@ def delete_user(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     if current_admin.id == user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Admin cannot delete self")
-    db.execute(delete(Notification).where(Notification.user_id == user.id))
+    # Soft-delete: keep routes, salary, chats and events attached to this user.
+    user.is_active = False
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    archived_login = f"del_{user.id}_{stamp}"[:64]
+    exists = db.scalar(select(User.id).where(User.login == archived_login, User.id != user.id))
+    if exists is not None:
+        archived_login = f"del_{user.id}_{stamp}_{user.id}"[:64]
+    user.login = archived_login
     db.execute(delete(WebPushSubscription).where(WebPushSubscription.user_id == user.id))
-    db.expire(user, ["notifications", "web_push_subscriptions"])
-    db.delete(user)
+    db.expire(user, ["web_push_subscriptions"])
+    db.add(user)
     db.commit()
 

@@ -1,11 +1,11 @@
 export type DeviceCoords = { lat: number; lng: number };
 
-export async function readDeviceCoordinates(timeoutMs = 2500): Promise<DeviceCoords | null> {
+export async function readDeviceCoordinates(timeoutMs = 8000): Promise<DeviceCoords | null> {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     return null;
   }
   return new Promise((resolve) => {
-    const timer = window.setTimeout(() => resolve(null), timeoutMs);
+    const timer = window.setTimeout(() => resolve(null), timeoutMs + 400);
     navigator.geolocation.getCurrentPosition(
       (pos) => {
         window.clearTimeout(timer);
@@ -21,7 +21,7 @@ export async function readDeviceCoordinates(timeoutMs = 2500): Promise<DeviceCoo
         window.clearTimeout(timer);
         resolve(null);
       },
-      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 30_000 }
+      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 }
     );
   });
 }

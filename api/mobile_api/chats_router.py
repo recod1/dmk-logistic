@@ -228,6 +228,14 @@ def _room_out(db: Session, room: ChatRoom, current_user: User, unread_by_room: d
         if not last_text:
             last_text = "Вложение"
         last_at = last.created_at.isoformat() if isinstance(last.created_at, datetime) else str(last.created_at)
+    last_user_id = int(last.user_id) if last is not None else None
+    last_read = False
+    last_delivered = False
+    if last is not None and last_user_id == int(current_user.id):
+        read_wm = _others_room_read_watermark(db, int(room.id), int(current_user.id))
+        delivered_wm = _others_room_delivered_watermark(db, int(room.id), int(current_user.id))
+        last_read = int(last.id) <= read_wm
+        last_delivered = int(last.id) <= delivered_wm
     return {
         "id": int(room.id),
         "kind": room.kind,
@@ -237,6 +245,9 @@ def _room_out(db: Session, room: ChatRoom, current_user: User, unread_by_room: d
         "last_message_text": last_text,
         "last_message_at": last_at,
         "last_author_name": last_author,
+        "last_message_user_id": last_user_id,
+        "last_message_read": last_read,
+        "last_message_delivered": last_delivered,
         "created_at": room.created_at.isoformat() if isinstance(room.created_at, datetime) else str(room.created_at),
     }
 
