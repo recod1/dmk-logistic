@@ -213,6 +213,63 @@ def notify_route_cancelled(db: Session, *, route: Route, actor_user: User | None
     )
 
 
+def _admin_recipients(db: Session) -> list[int]:
+    return sorted(
+        int(user_id)
+        for user_id in db.scalars(select(User.id).where(User.role_code.in_(["admin", "superadmin"]))).all()
+    )
+
+
+def _fmt_odo(value: float | None) -> str:
+    if value is None:
+        return "—"
+    if abs(float(value) - round(float(value))) < 1e-6:
+        return str(int(round(float(value))))
+    return f"{float(value):.1f}"
+
+
+def notify_daily_mileage_corrected(
+    db: Session,
+    *,
+    route: Route,
+    actor_user: User | None,
+    day_msk: str,
+    suggested_start: float | None,
+    suggested_end: float | None,
+    suggested_km: int | None,
+    odometer_start: float,
+    odometer_end: float,
+    km: int,
+) -> None:
+    actor_name = (actor_user.full_name or actor_user.login) if actor_user else "Водитель"
+    day_parts = (day_msk or "").split("-")
+    day_label = f"{day_parts[2]}.{day_parts[1]}.{day_parts[0]}" if len(day_parts) == 3 else day_msk
+    suggested_km_label = "—" if suggested_km is None else str(int(suggested_km))
+    create_notification_for_users(
+        db,
+        user_ids=_admin_recipients(db),
+        event_type="daily_mileage_corrected",
+        title=f"Пробег за сутки скорректирован: рейс {route.id}",
+        message=(
+            f"{actor_name} изменил(а) пробег за {day_label} (МСК) по рейсу {route.id}. "
+            f"По данным рейса: {_fmt_odo(suggested_start)} → {_fmt_odo(suggested_end)} ({suggested_km_label} км). "
+            f"Подтверждено: {_fmt_odo(odometer_start)} → {_fmt_odo(odometer_end)} ({int(km)} км)."
+        ),
+        route_id=route.id,
+        payload={
+            "route_id": route.id,
+            "day_msk": day_msk,
+            "suggested_odometer_start": suggested_start,
+            "suggested_odometer_end": suggested_end,
+            "suggested_km": suggested_km,
+            "odometer_start": odometer_start,
+            "odometer_end": odometer_end,
+            "km": km,
+        },
+        skip_user_ids=[actor_user.id] if actor_user else [],
+    )
+
+
 def notify_route_completed(db: Session, *, route: Route, actor_user: User | None) -> None:
     actor_name = (actor_user.full_name or actor_user.login) if actor_user else "Система"
     create_notification_for_users(

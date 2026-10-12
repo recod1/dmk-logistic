@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 
+import DailyMileageCard from "./DailyMileageCard.vue";
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
 import PointDocLinks from "./PointDocLinks.vue";
+import { dailyMileageDays } from "../dailyMileage";
 import { liveRouteElapsedLabel, routeAnalyticsView } from "../routeAnalytics";
 import { useLiveNow } from "../liveNow";
 import { stageDeltasForPoint } from "../stageDeltas";
@@ -189,6 +191,7 @@ function canCancel(status: RouteWorkflowStatus): boolean {
 
 const nowMs = useLiveNow();
 const routeAnalytics = computed(() => routeAnalyticsView(props.route.points || [], props.route.analytics));
+const mileageDays = computed(() => dailyMileageDays(props.route));
 const liveRouteTime = computed(() =>
   liveRouteElapsedLabel({
     points: props.route.points,
@@ -663,6 +666,7 @@ function removeRoute(): void {
           <span class="k">Пробег периода</span>
           <span class="v">{{ routeAnalytics.workKm }}</span>
         </div>
+        <DailyMileageCard :days="mileageDays" :editable="false" />
       </section>
       <section class="actions top-actions">
         <section class="location-card">

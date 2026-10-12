@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_route_manager
 from mobile_api.db import get_db
+from mobile_api.daily_mileage import daily_mileage_payload
 from mobile_api.models import Notification, Point, PointDocumentImage, Route, RouteEvent, RoutePoint, User
 from mobile_api.route_notification_logic import (
     notify_driver_route_updated,
@@ -537,6 +538,7 @@ def _route_out(
         "last_loading_date": last_loading_date,
         "last_loading_time": last_loading_time,
         "analytics": _route_analytics(points) if include_points else None,
+        "daily_mileage": daily_mileage_payload(db, route.id, points) if include_points else None,
         "points": [_point_out(db, point, idx) for idx, point in enumerate(points)] if include_points else None,
     }
 

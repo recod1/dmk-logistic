@@ -357,6 +357,24 @@ export async function acceptRoute(token: string, routeId: string): Promise<Route
   return data.route;
 }
 
+export async function confirmDailyMileage(
+  token: string,
+  routeId: string,
+  payload: { day_msk: string; odometer_start: number; odometer_end: number; km: number }
+): Promise<RouteDto> {
+  const data = await requestJson<{ route: RouteDto }>(
+    `${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}/daily-mileage`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify(payload)
+    }
+  );
+  return data.route;
+}
+
 export async function sendEventsBatch(
   token: string,
   deviceId: string,

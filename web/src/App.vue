@@ -85,6 +85,7 @@ import {
   listSalariesForDriver,
   getSalary,
   confirmSalary,
+  confirmDailyMileage,
   commentSalary,
   deleteSalary,
   replaceSalary,
@@ -231,6 +232,7 @@ const sectionStack = ref<AppSection[]>([]);
 const profileMenuOpen = ref(false);
 const geoSharingOn = ref(true);
 const selectedDriverRoute = ref<RouteDto | null>(null);
+const dailyMileageSaving = ref(false);
 const driverAssignedRoutes = ref<DriverRouteListItem[]>([]);
 const driverHistoryRoutes = ref<DriverRouteListItem[]>([]);
 const driverRoutesLoading = ref(false);
@@ -3653,6 +3655,39 @@ async function doLogin(loginValue: string, password: string): Promise<void> {
   }
 }
 
+async function doConfirmDailyMileage(payload: {
+  day_msk: string;
+  odometer_start: number;
+  odometer_end: number;
+  km: number;
+}): Promise<void> {
+  if (!authToken.value || !isDriver.value || !selectedDriverRoute.value) {
+    return;
+  }
+  if (!hasNetwork()) {
+    syncMessage.value = "Нужен интернет, чтобы подтвердить пробег за сутки";
+    return;
+  }
+  dailyMileageSaving.value = true;
+  try {
+    const updated = await confirmDailyMileage(authToken.value, selectedDriverRoute.value.id, payload);
+    const merged = (await applyOverlaysToRoute(updated)) ?? updated;
+    selectedDriverRoute.value = merged;
+    if (route.value?.id === merged.id) {
+      route.value = merged;
+    }
+    await persistDriverRoute(merged);
+    syncMessage.value =
+      merged.daily_mileage?.find((item) => item.day_msk === payload.day_msk)?.status === "corrected"
+        ? "Пробег за сутки сохранён с правкой. Администратор получит уведомление."
+        : "Пробег за сутки подтверждён";
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    dailyMileageSaving.value = false;
+  }
+}
+
 async function doAcceptRoute(routeId?: string): Promise<void> {
   if (!authToken.value || !isDriver.value) {
     return;
@@ -5704,6 +5739,7 @@ onUnmounted(() => {
         :route="selectedDriverRoute"
         :active-route-id="route?.id || null"
         :syncing="syncing"
+        :mileage-busy="dailyMileageSaving"
         :can-accept-route="canAcceptSelectedDriverRoute"
         :unread-chat-count="chatUnreadByRoute[selectedDriverRoute.id] ?? 0"
         :logistics-contacts="logisticsContacts"
@@ -5712,6 +5748,7 @@ onUnmounted(() => {
         @revert-point="doRevertPoint"
         @accept-route="() => doAcceptRoute(selectedDriverRoute.id)"
         @open-chat="openChatForRoute"
+        @confirm-daily-mileage="doConfirmDailyMileage"
       />
     </section>
 
