@@ -402,7 +402,10 @@ const isDriver = computed(() => authUser.value?.role_code === "driver");
 const isLogistic = computed(() => isLogisticRole(authUser.value?.role_code || ""));
 const isFleetEditor = computed(() => isFleetEditorRole(authUser.value?.role_code || ""));
 const isAccountant = computed(() => isAccountantRole(authUser.value?.role_code || ""));
-const showNotificationKindTabs = computed(() => Boolean(isAuthed.value));
+const showNotificationKindTabs = computed(
+  () => isAdmin.value || isLogistic.value || isDriver.value || isAccountant.value
+);
+const showSalaryNotificationTab = computed(() => isAdmin.value || isDriver.value || isAccountant.value);
 const salaryDriverOptions = computed(() => {
   const fromRoutes = routeDrivers.value.map((d) => ({
     id: d.id,
@@ -3317,13 +3320,17 @@ async function doMarkAllNotificationsRead(kind?: string): Promise<void> {
   if (!authToken.value) {
     return;
   }
+  const tabKind = (kind || "").trim();
+  if (showNotificationKindTabs.value && !tabKind) {
+    return;
+  }
   try {
-    await markAllNotificationsRead(authToken.value, kind);
+    await markAllNotificationsRead(authToken.value, tabKind || undefined);
     notifications.value = notifications.value.map((item) => {
       if (item.is_read) {
         return item;
       }
-      if (kind && notificationKind(item.event_type) !== kind) {
+      if (tabKind && notificationKind(item.event_type) !== tabKind) {
         return item;
       }
       return { ...item, is_read: true };
@@ -5842,6 +5849,7 @@ onUnmounted(() => {
         :push-enabled="webPushSubscribed"
         :push-hint="pushHint"
         :show-kind-tabs="showNotificationKindTabs"
+        :show-salary-tab="showSalaryNotificationTab"
         :prefs="notificationPrefs"
         @refresh="refreshNotifications"
         @enable-push="trySubscribeWebPush"

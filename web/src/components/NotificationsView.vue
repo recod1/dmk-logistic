@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, ref } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import type { NotificationPrefs } from "../api";
-import { NOTIFICATION_KIND_LABELS, NOTIFICATION_KIND_TABS, notificationKind, type NotificationKind } from "../notificationKinds";
+import { NOTIFICATION_KIND_LABELS, notificationKind, visibleNotificationKindTabs, type NotificationKind } from "../notificationKinds";
 import type { NotificationDto } from "../types";
 
 const props = defineProps<{
@@ -14,6 +14,7 @@ const props = defineProps<{
   pushEnabled?: boolean;
   pushHint?: string;
   showKindTabs?: boolean;
+  showSalaryTab?: boolean;
   prefs?: NotificationPrefs;
 }>();
 
@@ -27,7 +28,18 @@ const emit = defineEmits<{
   updatePrefs: [prefs: NotificationPrefs];
 }>();
 
+const kindTabs = computed(() => visibleNotificationKindTabs(Boolean(props.showSalaryTab)));
 const kindTab = ref<NotificationKind>("point");
+
+watch(
+  kindTabs,
+  (tabs) => {
+    if (tabs.length && !tabs.includes(kindTab.value)) {
+      kindTab.value = tabs[0] ?? "point";
+    }
+  },
+  { immediate: true }
+);
 
 const visibleItems = computed(() => {
   if (!props.showKindTabs) {
@@ -176,12 +188,12 @@ function formatExtra(item: NotificationDto): string {
           <button :disabled="loading" @click="emit('refresh')">Обновить</button>
           <button v-if="canPush && !pushEnabled" :disabled="loading" @click="emit('enablePush')">Включить push</button>
           <button v-if="canPush && pushEnabled" :disabled="loading" @click="emit('disablePush')">Выключить push</button>
-          <button :disabled="loading || currentTabUnread === 0" @click="emit('markAllRead', showKindTabs ? kindTab : undefined)">Прочитать всё</button>
+          <button :disabled="loading || currentTabUnread === 0" @click="emit('markAllRead', kindTab)">Прочитать всё</button>
         </div>
       </div>
       <div v-if="showKindTabs" class="kind-tabs">
         <button
-          v-for="kind in NOTIFICATION_KIND_TABS"
+          v-for="kind in kindTabs"
           :key="kind"
           type="button"
           class="kind-btn"

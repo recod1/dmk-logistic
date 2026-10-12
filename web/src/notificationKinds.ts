@@ -2,6 +2,13 @@ export type NotificationKind = "point" | "chat" | "routes" | "salary";
 
 export const NOTIFICATION_KIND_TABS: NotificationKind[] = ["point", "chat", "routes", "salary"];
 
+export function visibleNotificationKindTabs(showSalary: boolean): NotificationKind[] {
+  if (showSalary) {
+    return NOTIFICATION_KIND_TABS;
+  }
+  return NOTIFICATION_KIND_TABS.filter((kind) => kind !== "salary");
+}
+
 export function notificationKind(eventType: string): NotificationKind {
   if (eventType === "point_status_stale") {
     return "point";
