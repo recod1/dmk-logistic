@@ -107,6 +107,7 @@ export interface DailyMileageDay {
   status: DailyMileageStatus;
   confirmed_at: string | null;
   confirmed_by_user_id?: number | null;
+  pending_sync?: boolean;
   edits?: DailyMileageEdit[] | null;
 }
 

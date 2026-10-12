@@ -32,7 +32,10 @@ function parseNumber(raw: string): number | null {
 
 const daysStamp = computed(() =>
   props.days
-    .map((day) => `${day.day_msk}|${day.status}|${day.odometer_start}|${day.odometer_end}|${day.km}|${day.confirmed_at}`)
+    .map(
+      (day) =>
+        `${day.day_msk}|${day.status}|${day.odometer_start}|${day.odometer_end}|${day.km}|${day.confirmed_at}|${day.pending_sync ? "1" : "0"}`
+    )
     .join(";")
 );
 
@@ -150,6 +153,7 @@ function onSave(day: DailyMileageDay): void {
         <strong>{{ day.day_label }}</strong>
         <span :class="statusClass(day.status)">{{ DAILY_MILEAGE_STATUS_LABEL[day.status] }}</span>
       </div>
+      <p v-if="day.pending_sync" class="hint">Сохранено на телефоне, отправится при появлении сети.</p>
       <p class="suggested">По данным рейса: {{ suggestedLine(day) }}</p>
       <template v-if="editable && drafts[day.day_msk]">
         <label>

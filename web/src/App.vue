@@ -157,6 +157,7 @@ import {
   type ActionQueueItem
 } from "./db";
 import { DRIVER_PREFETCH_SYNC_TAG, persistPrefetchPayload, prefetchAssignedRoutesFromSession, routeToListItem } from "./offlinePrefetch";
+import { applyDailyMileageLocal, dailyMileageDays, overlayQueuedDailyMileage } from "./dailyMileage";
 import { applyLatestAppVersion } from "./appUpdate";
 import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
 import { readDeviceCoordinates } from "./deviceLocation";
@@ -1871,9 +1872,8 @@ async function applyOverlaysToRoute(baseRoute: RouteDto | null): Promise<RouteDt
     const overlays = await getPointOverlays(baseRoute.id);
     const pendingAccepts = await getPendingAccepts();
     const locallyAccepted = pendingAccepts.some((item) => item.route_id === baseRoute.id);
-    const reverts = (await listActions(getDeviceId(), authUser.value?.id)).filter(
-      (item) => item.kind === "revert" && item.payload.point_id
-    );
+    const queuedActions = await listActions(getDeviceId(), authUser.value?.id);
+    const reverts = queuedActions.filter((item) => item.kind === "revert" && item.payload.point_id);
     const points = applyOverlaysToPoints(baseRoute, overlays).map((point) => {
       const queued = reverts.find((item) => item.payload.point_id === point.id);
       if (!queued) {
@@ -1885,13 +1885,16 @@ async function applyOverlaysToRoute(baseRoute: RouteDto | null): Promise<RouteDt
     return {
       ...baseRoute,
       status: locallyAccepted && baseRoute.status === "new" ? "process" : baseRoute.status,
-      points
+      points,
+      daily_mileage: overlayQueuedDailyMileage(baseRoute, queuedActions)
     } as RouteDto;
   } catch (error) {
     reportDebugError({ source: "overlay.apply", error });
+    const queuedActions = await listActions(getDeviceId(), authUser.value?.id).catch(() => []);
     return {
       ...baseRoute,
-      points: Array.isArray(baseRoute.points) ? baseRoute.points : []
+      points: Array.isArray(baseRoute.points) ? baseRoute.points : [],
+      daily_mileage: overlayQueuedDailyMileage(baseRoute, queuedActions)
     };
   }
 }
@@ -2632,6 +2635,33 @@ async function flushActionQueue(): Promise<boolean> {
       } else if (item.kind === "salary_confirm" && item.payload.salary_id) {
         const updated = await confirmSalary(authToken.value, item.payload.salary_id);
         applySalaryRecordUpdate(updated);
+      } else if (
+        item.kind === "daily_mileage" &&
+        item.payload.route_id &&
+        item.payload.day_msk &&
+        item.payload.odometer_start != null &&
+        item.payload.odometer_end != null &&
+        item.payload.km != null
+      ) {
+        const updated = await confirmDailyMileage(authToken.value, item.payload.route_id, {
+          day_msk: item.payload.day_msk,
+          odometer_start: item.payload.odometer_start,
+          odometer_end: item.payload.odometer_end,
+          km: item.payload.km
+        });
+        await removeActionsByClientIds([item.client_id]);
+        const merged = (await applyOverlaysToRoute(updated)) ?? updated;
+        if (route.value?.id === merged.id) {
+          route.value = merged;
+          await persistDriverRoute(merged);
+        } else {
+          await saveRouteSnapshot(merged);
+        }
+        if (selectedDriverRoute.value?.id === merged.id) {
+          selectedDriverRoute.value = merged;
+        }
+        changed = true;
+        continue;
       } else if (item.kind === "salary_comment" && item.payload.salary_id && item.payload.text) {
         const updated = await commentSalary(authToken.value, item.payload.salary_id, item.payload.text);
         applySalaryRecordUpdate(updated);
@@ -3655,6 +3685,55 @@ async function doLogin(loginValue: string, password: string): Promise<void> {
   }
 }
 
+async function persistLocalDailyMileage(
+  routeId: string,
+  payload: { day_msk: string; odometer_start: number; odometer_end: number; km: number }
+): Promise<RouteDto | null> {
+  const current =
+    (selectedDriverRoute.value?.id === routeId ? selectedDriverRoute.value : null) ||
+    (route.value?.id === routeId ? route.value : null) ||
+    (await loadRouteSnapshot(routeId));
+  if (!current) {
+    return null;
+  }
+  const next: RouteDto = {
+    ...current,
+    daily_mileage: applyDailyMileageLocal(dailyMileageDays(current), payload, true)
+  };
+  if (selectedDriverRoute.value?.id === routeId) {
+    selectedDriverRoute.value = next;
+  }
+  if (route.value?.id === routeId) {
+    route.value = next;
+    await persistDriverRoute(next);
+  } else {
+    await saveRouteSnapshot(next);
+  }
+  return next;
+}
+
+async function enqueueDailyMileageConfirm(
+  routeId: string,
+  payload: { day_msk: string; odometer_start: number; odometer_end: number; km: number }
+): Promise<void> {
+  const queued = (await listActions(getDeviceId(), authUser.value?.id)).filter(
+    (item) =>
+      item.kind === "daily_mileage" &&
+      item.payload.route_id === routeId &&
+      item.payload.day_msk === payload.day_msk
+  );
+  if (queued.length) {
+    await removeActionsByClientIds(queued.map((item) => item.client_id));
+  }
+  await enqueueAction("daily_mileage", {
+    route_id: routeId,
+    day_msk: payload.day_msk,
+    odometer_start: payload.odometer_start,
+    odometer_end: payload.odometer_end,
+    km: payload.km
+  });
+}
+
 async function doConfirmDailyMileage(payload: {
   day_msk: string;
   odometer_start: number;
@@ -3664,28 +3743,39 @@ async function doConfirmDailyMileage(payload: {
   if (!authToken.value || !isDriver.value || !selectedDriverRoute.value) {
     return;
   }
-  if (!hasNetwork()) {
-    syncMessage.value = "Нужен интернет, чтобы подтвердить пробег за сутки";
-    return;
-  }
+  const routeId = selectedDriverRoute.value.id;
   dailyMileageSaving.value = true;
   try {
-    const updated = await confirmDailyMileage(authToken.value, selectedDriverRoute.value.id, payload);
-    const merged = (await applyOverlaysToRoute(updated)) ?? updated;
-    selectedDriverRoute.value = merged;
-    if (route.value?.id === merged.id) {
-      route.value = merged;
+    if (hasNetwork()) {
+      const updated = await confirmDailyMileage(authToken.value, routeId, payload);
+      const merged = (await applyOverlaysToRoute(updated)) ?? updated;
+      selectedDriverRoute.value = merged;
+      if (route.value?.id === merged.id) {
+        route.value = merged;
+        await persistDriverRoute(merged);
+      } else {
+        await saveRouteSnapshot(merged);
+      }
+      syncMessage.value =
+        merged.daily_mileage?.find((item) => item.day_msk === payload.day_msk)?.status === "corrected"
+          ? "Пробег за сутки сохранён с правкой. Администратор получит уведомление."
+          : "Пробег за сутки подтверждён";
+      return;
     }
-    await persistDriverRoute(merged);
-    syncMessage.value =
-      merged.daily_mileage?.find((item) => item.day_msk === payload.day_msk)?.status === "corrected"
-        ? "Пробег за сутки сохранён с правкой. Администратор получит уведомление."
-        : "Пробег за сутки подтверждён";
   } catch (error) {
-    syncMessage.value = (error as Error).message;
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
+    if (!isOfflineLikeError(error)) {
+      syncMessage.value = (error as Error).message;
+      return;
+    }
   } finally {
     dailyMileageSaving.value = false;
   }
+  await persistLocalDailyMileage(routeId, payload);
+  await enqueueDailyMileageConfirm(routeId, payload);
+  syncMessage.value = "Пробег за сутки сохранён и уйдёт при сети";
 }
 
 async function doAcceptRoute(routeId?: string): Promise<void> {
