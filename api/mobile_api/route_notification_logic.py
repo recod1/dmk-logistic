@@ -162,16 +162,24 @@ def build_point_status_changed_notifications(
     action = status_label
     recipients = [route.created_by_user_id, route.assigned_user_id]
     skip = [actor_user.id]
+    message = _format_notification_message(action, route.id, _point_event_time(point, new_status))
+    payload: dict = {"point_status": new_status}
+    if new_status == "process":
+        eta = (getattr(point, "estimated_arrival", None) or "").strip()
+        if eta:
+            message = f"{message} · ОВП {eta}"
+            payload["estimated_arrival"] = eta
+            payload["ovp"] = eta
     return [
         {
             "user_ids": recipients,
             "skip_user_ids": skip,
             "event_type": "point_status_changed",
             "title": action,
-            "message": _format_notification_message(action, route.id, _point_event_time(point, new_status)),
+            "message": message,
             "route_id": route.id,
             "point_id": point.id,
-            "payload": {"point_status": new_status},
+            "payload": payload,
         }
     ]
 

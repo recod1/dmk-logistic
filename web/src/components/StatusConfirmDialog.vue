@@ -57,7 +57,9 @@ watch(
       return;
     }
     if (props.odometerPrefillSource === "wialon" && (props.initialOdometer || "").trim()) {
-      odometerMode.value = "ask";
+      const typed = (odometerValue.value || "").trim();
+      const prefill = (props.initialOdometer || "").trim();
+      odometerMode.value = typed && typed !== prefill ? "edit" : "ask";
       return;
     }
     odometerMode.value = "manual";
@@ -67,9 +69,6 @@ watch(
 const odometerReady = computed(() => {
   if (!props.showOdometer) {
     return true;
-  }
-  if (props.telemetryLoading) {
-    return false;
   }
   return Boolean((odometerValue.value || "").trim());
 });
@@ -132,8 +131,8 @@ function confirm(): void {
       </label>
       <div v-if="showOdometer" class="odo-block">
         <p class="field-label">Одометр</p>
-        <p v-if="telemetryLoading" class="hint">Запрашиваем показания из Wialon…</p>
-        <template v-else-if="odometerMode === 'ask'">
+        <p v-if="telemetryLoading" class="hint">Запрашиваем Wialon… Можно ввести вручную, не дожидаясь ответа.</p>
+        <template v-if="!telemetryLoading && odometerMode === 'ask'">
           <p class="wialon-value">{{ odometerValue || "—" }}</p>
           <p class="hint">Данные подтянуты из Wialon. Они верны или их нужно исправить?</p>
           <div class="ask-actions">

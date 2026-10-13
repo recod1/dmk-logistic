@@ -81,36 +81,6 @@ export interface PointDto {
   manual_edits?: Record<string, ManualEditMeta> | null;
 }
 
-export type DailyMileageStatus = "pending" | "confirmed" | "corrected";
-
-export interface DailyMileageEdit {
-  at?: string;
-  user_id?: number;
-  odometer_start?: number;
-  odometer_end?: number;
-  km?: number;
-  status?: DailyMileageStatus;
-  suggested_odometer_start?: number | null;
-  suggested_odometer_end?: number | null;
-  suggested_km?: number | null;
-}
-
-export interface DailyMileageDay {
-  day_msk: string;
-  day_label: string;
-  suggested_odometer_start: number | null;
-  suggested_odometer_end: number | null;
-  suggested_km: number | null;
-  odometer_start: number | null;
-  odometer_end: number | null;
-  km: number | null;
-  status: DailyMileageStatus;
-  confirmed_at: string | null;
-  confirmed_by_user_id?: number | null;
-  pending_sync?: boolean;
-  edits?: DailyMileageEdit[] | null;
-}
-
 export interface RouteDto {
   id: string;
   status: string;
@@ -128,7 +98,6 @@ export interface RouteDto {
   driver_location_requested_at?: string | null;
   points: PointDto[];
   logistics_contacts?: Array<{ name: string; phone: string }>;
-  daily_mileage?: DailyMileageDay[] | null;
 }
 
 export interface ActiveRouteResponse {
@@ -275,7 +244,6 @@ export interface AdminRoute {
     work_minutes?: number | null;
     work_km?: number | null;
   } | null;
-  daily_mileage?: DailyMileageDay[] | null;
   points: Array<
     {
       id: number;

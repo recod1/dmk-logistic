@@ -12,7 +12,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_route_manager
 from mobile_api.db import get_db
-from mobile_api.daily_mileage import daily_mileage_payload
+from mobile_api.chat_router import unread_route_ids_for_user
 from mobile_api.models import Notification, Point, PointDocumentImage, Route, RouteEvent, RoutePoint, User
 from mobile_api.route_notification_logic import (
     notify_driver_route_updated,
@@ -538,7 +538,6 @@ def _route_out(
         "last_loading_date": last_loading_date,
         "last_loading_time": last_loading_time,
         "analytics": _route_analytics(points) if include_points else None,
-        "daily_mileage": daily_mileage_payload(db, route.id, points) if include_points else None,
         "points": [_point_out(db, point, idx) for idx, point in enumerate(points)] if include_points else None,
     }
 
@@ -955,12 +954,18 @@ def list_routes(
     route_id: str | None = Query(default=None),
     number_auto: str | None = Query(default=None),
     driver_query: str | None = Query(default=None),
+    unread_chat: bool = Query(default=False),
     limit: int = Query(default=15, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_route_manager),
+    current_user: User = Depends(get_current_route_manager),
 ) -> dict:
     query = select(Route).order_by(Route.created_at.desc())
+    if unread_chat:
+        unread_ids = unread_route_ids_for_user(db, current_user)
+        if not unread_ids:
+            return {"items": [], "total": 0, "limit": limit, "offset": offset}
+        query = query.where(Route.id.in_(unread_ids))
     if status_filter:
         statuses = [item.strip() for item in status_filter.split(",") if item.strip()]
         if statuses:

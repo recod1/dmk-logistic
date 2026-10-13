@@ -16,9 +16,7 @@ from mobile_api.auth import create_access_token, get_current_driver, get_current
 from mobile_api.db import get_db
 from mobile_api.driver_trip_rules import DriverRouteState, can_accept_route, pick_active_route
 from mobile_api.logistics_contacts_router import logistics_contacts_payload
-from mobile_api.daily_mileage import daily_mileage_payload, save_daily_mileage_confirmation
 from mobile_api.models import Point, PointDocumentImage, Route, RouteEvent, RoutePoint, User
-from mobile_api.notifications_service import notify_daily_mileage_corrected
 from mobile_api.route_notification_logic import (
     notify_point_status_changed,
     notify_point_status_reverted,
@@ -264,7 +262,6 @@ def _route_snapshot(db: Session, route: Route) -> dict:
             route.driver_location_requested_at.isoformat() if route.driver_location_requested_at else None
         ),
         "logistics_contacts": logistics_contacts_payload(db),
-        "daily_mileage": daily_mileage_payload(db, route.id, points),
         "points": [
             _point_to_dict(
                 p,
@@ -492,53 +489,6 @@ def accept_route(
 class DriverLocationIn(BaseModel):
     lat: float = Field(ge=-90, le=90)
     lng: float = Field(ge=-180, le=180)
-
-
-class DailyMileageConfirmIn(BaseModel):
-    day_msk: str = Field(min_length=10, max_length=10)
-    odometer_start: float = Field(ge=0, le=20_000_000)
-    odometer_end: float = Field(ge=0, le=20_000_000)
-    km: int | None = Field(default=None, ge=0, le=200_000)
-
-
-@router.post("/v1/mobile/routes/{route_id:path}/daily-mileage")
-def confirm_daily_mileage(
-    route_id: str,
-    payload: DailyMileageConfirmIn,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_driver),
-) -> dict:
-    route_id = unquote(route_id or "").strip()
-    route = next((item for item in _driver_routes_for_user(db, current_user.id) if item.id == route_id), None)
-    if route is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
-    points = _get_ordered_points(db, route.id)
-    row, suggested, should_notify = save_daily_mileage_confirmation(
-        db,
-        route_id=route.id,
-        points=points,
-        user=current_user,
-        day_msk=payload.day_msk,
-        odometer_start=payload.odometer_start,
-        odometer_end=payload.odometer_end,
-        km=payload.km,
-    )
-    if should_notify:
-        notify_daily_mileage_corrected(
-            db,
-            route=route,
-            actor_user=current_user,
-            day_msk=payload.day_msk,
-            suggested_start=suggested.get("odometer_start"),
-            suggested_end=suggested.get("odometer_end"),
-            suggested_km=suggested.get("km"),
-            odometer_start=float(row.odometer_start or 0),
-            odometer_end=float(row.odometer_end or 0),
-            km=int(row.km or 0),
-        )
-    db.commit()
-    db.refresh(route)
-    return {"route": _route_snapshot(db, route)}
 
 
 @router.post("/v1/mobile/routes/{route_id:path}/location")

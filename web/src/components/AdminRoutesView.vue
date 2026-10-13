@@ -12,6 +12,7 @@ type RouteSearchFilters = {
   route_id?: string;
   number_auto?: string;
   driver_query?: string;
+  unread_chat?: boolean;
 };
 
 type PointForm = {
@@ -99,7 +100,8 @@ const filters = reactive({
   route_id: props.initialFilters?.route_id || "",
   number_auto: props.initialFilters?.number_auto || "",
   driver_query: props.initialFilters?.driver_query || "",
-  status: props.initialFilters?.status || "process"
+  status: props.initialFilters?.status || "process",
+  unread_chat: Boolean(props.initialFilters?.unread_chat)
 });
 
 const selectedTabLabel = computed(() => {
@@ -341,7 +343,15 @@ function doSearch(): void {
   if (filters.driver_query.trim()) {
     payload.driver_query = filters.driver_query.trim();
   }
+  if (filters.unread_chat) {
+    payload.unread_chat = true;
+  }
   emit("refresh", payload);
+}
+
+function toggleUnreadFilter(): void {
+  filters.unread_chat = !filters.unread_chat;
+  doSearch();
 }
 
 function scrollCreateCardIntoView(): void {
@@ -513,6 +523,14 @@ onMounted(() => {
                 <option v-for="tab in statusTabs" :key="tab.value" :value="tab.value">{{ tab.label }}</option>
               </select>
             </label>
+            <button
+              class="tab-btn unread-filter"
+              :class="{ active: filters.unread_chat }"
+              type="button"
+              @click="toggleUnreadFilter"
+            >
+              Непрочитанные
+            </button>
           </div>
           <button class="ghost search-toggle" type="button" @click="searchOpen = !searchOpen">
             {{ searchOpen ? "Скрыть поиск" : "Поиск" }}
@@ -841,6 +859,9 @@ onMounted(() => {
   background: var(--primary-strong);
   border-color: #60a5fa;
   box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
+}
+.unread-filter {
+  margin-top: 0.45rem;
 }
 .filters-grid {
   display: grid;

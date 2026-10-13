@@ -1,10 +1,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
-import DailyMileageCard from "./DailyMileageCard.vue";
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
-import { dailyMileageDays } from "../dailyMileage";
 import { liveRouteElapsedLabel, routeAnalyticsView } from "../routeAnalytics";
 import { useLiveNow } from "../liveNow";
 import { stageDeltasForPoint } from "../stageDeltas";
@@ -22,7 +20,6 @@ const props = defineProps<{
   route: RouteDto;
   activeRouteId: string | null;
   syncing: boolean;
-  mileageBusy?: boolean;
   canAcceptRoute: boolean;
   unreadChatCount?: number;
   logisticsContacts?: Array<{ name: string; phone: string }>;
@@ -34,7 +31,6 @@ const emit = defineEmits<{
   revertPoint: [pointId: number];
   acceptRoute: [];
   openChat: [routeId: string];
-  confirmDailyMileage: [payload: { day_msk: string; odometer_start: number; odometer_end: number; km: number }];
 }>();
 
 const firstIncompletePoint = computed(
@@ -43,7 +39,6 @@ const firstIncompletePoint = computed(
 
 const nowMs = useLiveNow();
 const routeAnalytics = computed(() => routeAnalyticsView(props.route.points));
-const mileageDays = computed(() => dailyMileageDays(props.route));
 const liveRouteTime = computed(() =>
   liveRouteElapsedLabel({
     points: props.route.points,
@@ -207,12 +202,6 @@ function showRevert(pointId: number): boolean {
           <span class="k">От регистрации до документов</span>
           <span class="v">{{ routeAnalytics.workTime }} · {{ routeAnalytics.workKm }}</span>
         </div>
-        <DailyMileageCard
-          :days="mileageDays"
-          :editable="true"
-          :busy="syncing || mileageBusy"
-          @save="(payload) => emit('confirmDailyMileage', payload)"
-        />
         <div class="kv">
           <span class="k">ТС</span>
           <span class="v">

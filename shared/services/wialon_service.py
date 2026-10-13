@@ -3,6 +3,7 @@
 import json
 import logging
 import os
+import time
 from datetime import datetime, timezone
 from typing import Optional, Tuple
 from urllib.parse import urljoin, urlparse
@@ -20,6 +21,10 @@ _WIALON_HTTP_HEADERS = {
     "User-Agent": "dmk-logistic/1.0 (Wialon Remote API)",
     "Accept": "application/json, text/javascript, */*;q=0.1",
 }
+
+# Короткий бюджет: водитель не должен ждать минуту, если Wialon недоступен.
+_WIALON_HTTP_TIMEOUT = 3.0
+_WIALON_BUDGET_SEC = 6.0
 
 
 def vehicle_number_for_wialon(*candidates: str | None) -> str:
@@ -49,7 +54,7 @@ def _wialon_hostname(url: str) -> str:
         return ""
 
 
-def _wialon_get(ajax_entry: str, params: dict, step: str) -> requests.Response | None:
+def _wialon_get(ajax_entry: str, params: dict, step: str, deadline: float | None = None) -> requests.Response | None:
     """
     GET с ручной обработкой редиректов (allow_redirects=False).
 
@@ -61,11 +66,15 @@ def _wialon_get(ajax_entry: str, params: dict, step: str) -> requests.Response |
     current = ajax_entry
     cross_host_ajax_rebuilt = False
     for hop in range(10):
+        remaining = _WIALON_HTTP_TIMEOUT if deadline is None else deadline - time.monotonic()
+        if remaining <= 0.2:
+            logger.warning("Wialon %s: бюджет времени исчерпан", step)
+            return None
         cur_host = _wialon_hostname(current)
         r = requests.get(
             current,
             params=params,
-            timeout=15,
+            timeout=min(_WIALON_HTTP_TIMEOUT, remaining),
             headers=_WIALON_HTTP_HEADERS,
             allow_redirects=False,
         )
@@ -278,11 +287,12 @@ def get_vehicle_location_data(vehicle_number: str):
         return None
 
     try:
+        deadline = time.monotonic() + _WIALON_BUDGET_SEC
         login_params = {
             "svc": "token/login",
             "params": json.dumps({"token": settings.WIALON_TOKEN}),
         }
-        login_resp = _wialon_get(ajax_url, login_params, "token/login")
+        login_resp = _wialon_get(ajax_url, login_params, "token/login", deadline)
         if login_resp is None:
             return None
         login_data = _parse_wialon_ajax_json(login_resp, "token/login")
@@ -309,7 +319,7 @@ def get_vehicle_location_data(vehicle_number: str):
             }),
             "sid": sid,
         }
-        search_resp = _wialon_get(ajax_url, search_params, "core/search_items")
+        search_resp = _wialon_get(ajax_url, search_params, "core/search_items", deadline)
         if search_resp is None:
             return None
         search_data = _parse_wialon_ajax_json(search_resp, "core/search_items")
@@ -337,7 +347,7 @@ def get_vehicle_location_data(vehicle_number: str):
                     "to": 10,
                 }),
             }
-            search_resp_nm = _wialon_get(ajax_url, search_params_nm, "core/search_items(nm)")
+            search_resp_nm = _wialon_get(ajax_url, search_params_nm, "core/search_items(nm)", deadline)
             if search_resp_nm is None:
                 return None
             search_data = _parse_wialon_ajax_json(search_resp_nm, "core/search_items(nm)")

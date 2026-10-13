@@ -46,8 +46,7 @@ export type ActionKind =
   | "chat_salary"
   | "location"
   | "salary_confirm"
-  | "salary_comment"
-  | "daily_mileage";
+  | "salary_comment";
 
 export interface ActionQueueItem {
   id?: number;
@@ -64,10 +63,6 @@ export interface ActionQueueItem {
     text?: string;
     lat?: number;
     lng?: number;
-    day_msk?: string;
-    odometer_start?: number;
-    odometer_end?: number;
-    km?: number;
   };
   last_error?: string | null;
 }

@@ -69,6 +69,7 @@ watch(tab, (value) => {
   lastHubTab = value;
 });
 const userQuery = ref("");
+const unreadOnly = ref(false);
 
 const broadcastTitle = ref("");
 const broadcastMessage = ref("");
@@ -142,7 +143,8 @@ const feedRooms = computed(() => {
         return hay.includes(q);
       })
     : all;
-  return [...filtered].sort((a, b) => {
+  const scoped = unreadOnly.value ? filtered.filter((r) => (r.unread_count ?? 0) > 0) : filtered;
+  return [...scoped].sort((a, b) => {
     const at = a.last_message_at || "";
     const bt = b.last_message_at || "";
     return bt.localeCompare(at);
@@ -191,9 +193,20 @@ const groupRoomsFiltered = computed(() =>
     if (excludedGroupRoomIds.value.has(r.id)) return false;
     const pin = driverPinnedKeys.value;
     if (pin && r.system_key && pin.has(r.system_key)) return false;
+    if (unreadOnly.value && (r.unread_count ?? 0) <= 0) return false;
     return true;
   })
 );
+
+const logisticRoomsFiltered = computed(() => {
+  const rows = props.logisticDriverRooms ?? [];
+  return unreadOnly.value ? rows.filter((row) => (row.room.unread_count ?? 0) > 0) : rows;
+});
+
+const accountantRoomsFiltered = computed(() => {
+  const rows = props.accountantDriverRooms ?? [];
+  return unreadOnly.value ? rows.filter((row) => (row.room.unread_count ?? 0) > 0) : rows;
+});
 
 function submitBroadcast(): void {
   const role_codes = (Object.keys(broadcastRoles.value) as RoleCode[]).filter((k) => broadcastRoles.value[k]);
@@ -281,6 +294,9 @@ watch(
       <label class="field search-field">
         <input v-model="userQuery" placeholder="Поиск по чатам, ФИО и рейсу" />
       </label>
+      <button class="filter-btn" :class="{ active: unreadOnly }" type="button" @click="unreadOnly = !unreadOnly">
+        Непрочитанные
+      </button>
     </div>
 
     <div v-if="isAdmin" class="tabs">
@@ -323,7 +339,9 @@ watch(
           </span>
           <span v-if="(r.unread_count ?? 0) > 0" class="badge">{{ r.unread_count }}</span>
         </button>
-        <p v-if="!feedRooms.length" class="empty">Чатов пока нет.</p>
+        <p v-if="!feedRooms.length" class="empty">
+          {{ unreadOnly ? "Нет непрочитанных чатов" : "Чатов пока нет." }}
+        </p>
       </div>
 
       <h2 class="subhead">Написать пользователю</h2>
@@ -347,7 +365,7 @@ watch(
         <p class="hint">Один чат с логистами и один с бухгалтерией по всем рейсам и вопросам.</p>
         <div class="rooms">
           <button
-            v-if="driverLogisticsRoom"
+            v-if="driverLogisticsRoom && (!unreadOnly || (driverLogisticsRoom.unread_count ?? 0) > 0)"
             type="button"
             class="room"
             @click="emit('openRoom', driverLogisticsRoom.id, driverLogisticsRoom.title || 'Логисты')"
@@ -356,7 +374,7 @@ watch(
             <span v-if="(driverLogisticsRoom.unread_count ?? 0) > 0" class="dot" />
           </button>
           <button
-            v-if="driverAccountingRoom"
+            v-if="driverAccountingRoom && (!unreadOnly || (driverAccountingRoom.unread_count ?? 0) > 0)"
             type="button"
             class="room"
             @click="emit('openRoom', driverAccountingRoom.id, driverAccountingRoom.title || 'Бухгалтерия')"
@@ -370,12 +388,12 @@ watch(
         </div>
       </template>
 
-      <template v-if="isLogistic && (logisticDriverRooms?.length ?? 0) > 0">
+      <template v-if="isLogistic && logisticRoomsFiltered.length > 0">
         <h2>Водители (логисты)</h2>
         <p class="hint">Отдельный диалог с каждым водителем; сообщения видны всем логистам и этому водителю.</p>
         <div class="rooms">
           <button
-            v-for="row in logisticDriverRooms"
+            v-for="row in logisticRoomsFiltered"
             :key="row.room.id"
             type="button"
             class="room"
@@ -387,12 +405,12 @@ watch(
         </div>
       </template>
 
-      <template v-if="isAccountant && (accountantDriverRooms?.length ?? 0) > 0">
+      <template v-if="isAccountant && accountantRoomsFiltered.length > 0">
         <h2>Водители (бухгалтерия)</h2>
         <p class="hint">Отдельный диалог с каждым водителем; сообщения видны всем бухгалтерам и этому водителю.</p>
         <div class="rooms">
           <button
-            v-for="row in accountantDriverRooms"
+            v-for="row in accountantRoomsFiltered"
             :key="row.room.id"
             type="button"
             class="room"
@@ -572,6 +590,23 @@ h2 {
   padding: 0.2rem 0.2rem 0.45rem;
   background: rgba(3, 7, 18, 0.96);
   backdrop-filter: blur(12px);
+  display: grid;
+  gap: 0.45rem;
+}
+.filter-btn {
+  justify-self: start;
+  width: auto;
+  border: 1px solid #334155;
+  border-radius: 999px;
+  background: rgba(2, 6, 23, 0.55);
+  color: #dbeafe;
+  padding: 0.42rem 0.8rem;
+  font-weight: 650;
+}
+.filter-btn.active {
+  background: var(--primary-strong, #2563eb);
+  border-color: #60a5fa;
+  color: #fff;
 }
 .search-toggle {
   margin-left: auto;

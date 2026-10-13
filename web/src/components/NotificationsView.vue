@@ -169,6 +169,10 @@ function formatExtra(item: NotificationDto): string {
     const label = [pointType, pointAddr].filter(Boolean).join(" · ");
     parts.push(`Точка: ${label}`);
   }
+  const ovp = (item.payload?.ovp || item.payload?.estimated_arrival || "").toString().trim();
+  if (ovp && item.event_type === "point_status_changed") {
+    parts.push(`ОВП: ${ovp}`);
+  }
   if (item.event_type === "point_status_stale") {
     const duration = (item.payload?.duration || "").toString().trim();
     parts.unshift(duration ? `Стоит ${duration}` : "Стоит на этапе");

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, ref } from "vue";
 
 import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel } from "../status";
 import type { DriverRouteListItem } from "../types";
@@ -29,8 +29,16 @@ function newestFirst(items: DriverRouteListItem[]): DriverRouteListItem[] {
   });
 }
 
-const assignedSorted = computed(() => newestFirst(props.assigned));
-const historySorted = computed(() => newestFirst(props.history));
+const unreadOnly = ref(false);
+
+const assignedSorted = computed(() => {
+  const items = newestFirst(props.assigned);
+  return unreadOnly.value ? items.filter((item) => unreadCount(item.id) > 0) : items;
+});
+const historySorted = computed(() => {
+  const items = newestFirst(props.history);
+  return unreadOnly.value ? items.filter((item) => unreadCount(item.id) > 0) : items;
+});
 
 function routeStatusLabel(status: string): string {
   const labels: Record<string, string> = {
@@ -69,6 +77,9 @@ function unreadCount(routeId: string): number {
 <template>
   <section class="routes-wrap">
     <button class="ghost back" type="button" @click="emit('back')">← Назад</button>
+    <button class="filter-btn" :class="{ active: unreadOnly }" type="button" @click="unreadOnly = !unreadOnly">
+      Непрочитанные
+    </button>
     <article class="card">
       <h2>Назначенные</h2>
       <div class="list">
@@ -89,7 +100,9 @@ function unreadCount(routeId: string): number {
           <small v-if="isActiveRoute(item.id)" class="active-note">Текущий принятый рейс</small>
           <small v-else class="inactive-note">Только просмотр. Принятие/этапы недоступны</small>
         </button>
-        <p v-if="!assigned.length" class="empty">Нет назначенных рейсов</p>
+        <p v-if="!assignedSorted.length" class="empty">
+          {{ unreadOnly ? "Нет рейсов с непрочитанными сообщениями" : "Нет назначенных рейсов" }}
+        </p>
       </div>
     </article>
 
@@ -107,7 +120,9 @@ function unreadCount(routeId: string): number {
           <small>ТС: {{ item.number_auto || "—" }}</small>
           <small>Точек: {{ item.points_count }}</small>
         </button>
-        <p v-if="!history.length" class="empty">Нет завершённых рейсов</p>
+        <p v-if="!historySorted.length" class="empty">
+          {{ unreadOnly ? "Нет рейсов с непрочитанными сообщениями" : "Нет завершённых рейсов" }}
+        </p>
       </div>
     </article>
   </section>
@@ -120,6 +135,20 @@ function unreadCount(routeId: string): number {
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
+}
+.filter-btn {
+  justify-self: start;
+  width: auto;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--surface);
+  color: #dbeafe;
+  padding: 0.42rem 0.8rem;
+  font-weight: 650;
+}
+.filter-btn.active {
+  background: var(--primary-strong);
+  border-color: #60a5fa;
 }
 .card {
   border: 1px solid var(--border);

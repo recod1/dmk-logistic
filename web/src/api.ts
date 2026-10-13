@@ -334,12 +334,14 @@ export async function getDriverRoute(token: string, routeId: string): Promise<Ro
 export async function getPointTelemetry(
   token: string,
   pointId: number,
-  options?: { timeoutMs?: number }
+  options?: { timeoutMs?: number; skipSlot?: boolean; signal?: AbortSignal }
 ): Promise<{ odometer: string | null; odometer_source: "wialon" | null }> {
   return requestJson<{ odometer: string | null; odometer_source: "wialon" | null }>(
     `${API_BASE}/v1/mobile/points/${pointId}/telemetry`,
     {
-      timeoutMs: options?.timeoutMs,
+      timeoutMs: options?.timeoutMs ?? 4000,
+      skipSlot: options?.skipSlot ?? true,
+      signal: options?.signal,
       headers: {
         Authorization: `Bearer ${token}`
       }
@@ -354,24 +356,6 @@ export async function acceptRoute(token: string, routeId: string): Promise<Route
       Authorization: `Bearer ${token}`
     }
   });
-  return data.route;
-}
-
-export async function confirmDailyMileage(
-  token: string,
-  routeId: string,
-  payload: { day_msk: string; odometer_start: number; odometer_end: number; km: number }
-): Promise<RouteDto> {
-  const data = await requestJson<{ route: RouteDto }>(
-    `${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}/daily-mileage`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`
-      },
-      body: JSON.stringify(payload)
-    }
-  );
   return data.route;
 }
 
@@ -585,6 +569,7 @@ export async function listAdminRoutes(
     route_id?: string;
     number_auto?: string;
     driver_query?: string;
+    unread_chat?: boolean;
     limit?: number;
     offset?: number;
   }
@@ -604,6 +589,9 @@ export async function listAdminRoutes(
   }
   if (params?.driver_query) {
     qs.set("driver_query", params.driver_query);
+  }
+  if (params?.unread_chat) {
+    qs.set("unread_chat", "true");
   }
   qs.set("limit", String(params?.limit ?? 15));
   qs.set("offset", String(params?.offset ?? 0));

@@ -235,6 +235,36 @@ def mark_route_chat_delivered(
     return {"ok": True, "last_delivered_message_id": last_id}
 
 
+def unread_route_ids_for_user(db: Session, current_user: User) -> list[str]:
+    if current_user.role_code == RoleCode.DRIVER.value:
+        allowed = [str(x) for x in db.scalars(select(Route.id).where(Route.assigned_user_id == current_user.id)).all()]
+        if not allowed:
+            return []
+        route_filter = RouteChatMessage.route_id.in_(allowed)
+    elif not _is_manager(current_user):
+        return []
+    else:
+        route_filter = true()
+
+    last_subq = (
+        select(RouteChatRead.route_id, RouteChatRead.last_read_message_id)
+        .where(RouteChatRead.user_id == current_user.id)
+        .subquery()
+    )
+    rows = db.execute(
+        select(RouteChatMessage.route_id)
+        .select_from(RouteChatMessage)
+        .outerjoin(last_subq, last_subq.c.route_id == RouteChatMessage.route_id)
+        .where(
+            route_filter,
+            RouteChatMessage.user_id != current_user.id,
+            RouteChatMessage.id > func.coalesce(last_subq.c.last_read_message_id, 0),
+        )
+        .group_by(RouteChatMessage.route_id)
+    ).all()
+    return [str(route_id) for (route_id,) in rows]
+
+
 class UnreadSummaryIn(BaseModel):
     route_ids: list[str] = Field(default_factory=list, max_items=2000)
 

@@ -18,7 +18,6 @@ class NotificationKindTests(TestCase):
         self.assertEqual(notification_kind("point_status_changed"), KIND_ROUTES)
         self.assertEqual(notification_kind("salary_new"), KIND_SALARY)
         self.assertEqual(notification_kind("salary_confirmed"), KIND_SALARY)
-        self.assertEqual(notification_kind("daily_mileage_corrected"), KIND_ROUTES)
         self.assertEqual(notification_kind("salary_commented"), KIND_SALARY)
 
     def test_mute_flags(self) -> None:

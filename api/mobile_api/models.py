@@ -99,10 +99,6 @@ class Route(Base):
         cascade="all, delete-orphan",
     )
     notifications: Mapped[list[Notification]] = relationship(back_populates="route")
-    daily_mileage_rows: Mapped[list["RouteDailyMileage"]] = relationship(
-        back_populates="route",
-        cascade="all, delete-orphan",
-    )
 
 
 class Point(Base):
@@ -580,35 +576,6 @@ class LogisticsContact(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
-
-
-class RouteDailyMileage(Base):
-    __tablename__ = "route_daily_mileage"
-    __table_args__ = (
-        UniqueConstraint("route_id", "day_msk", name="uq_route_daily_mileage_route_day"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    route_id: Mapped[str] = mapped_column(ForeignKey("routes.id", ondelete="CASCADE"), nullable=False, index=True)
-    day_msk: Mapped[str] = mapped_column(String(10), nullable=False)
-    suggested_odometer_start: Mapped[float | None] = mapped_column(Float, nullable=True)
-    suggested_odometer_end: Mapped[float | None] = mapped_column(Float, nullable=True)
-    suggested_km: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    odometer_start: Mapped[float | None] = mapped_column(Float, nullable=True)
-    odometer_end: Mapped[float | None] = mapped_column(Float, nullable=True)
-    km: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="confirmed", server_default="confirmed")
-    confirmed_by_user_id: Mapped[int | None] = mapped_column(
-        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
-    )
-    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    edits_json: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
-    )
-
-    route: Mapped[Route] = relationship(back_populates="daily_mileage_rows")
 
 
 class Repair(Base):
