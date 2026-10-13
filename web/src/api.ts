@@ -1655,40 +1655,31 @@ export function chatWebSocketUrl(token: string): string {
   return wsUrl.toString();
 }
 
-export async function getChatUnreadSummary(
-  token: string,
-  routeIds: string[]
-): Promise<Array<{ route_id: string; unread_count: number }>> {
+export type ChatUnreadRow = { route_id: string; unread_count: number; status?: string };
+
+export async function getChatUnreadSummary(token: string, routeIds: string[]): Promise<ChatUnreadRow[]> {
   const ids = [...new Set(routeIds.map((id) => String(id || "").trim()).filter(Boolean))];
   const chunkSize = 250;
-  const items: Array<{ route_id: string; unread_count: number }> = [];
+  const items: ChatUnreadRow[] = [];
   for (let offset = 0; offset < ids.length; offset += chunkSize) {
     const chunk = ids.slice(offset, offset + chunkSize);
-    const data = await requestJson<{ items: Array<{ route_id: string; unread_count: number }> }>(
-      `${API_BASE}/v1/chat/unread-summary`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`
-        },
-        body: JSON.stringify({ route_ids: chunk })
-      }
-    );
+    const data = await requestJson<{ items: ChatUnreadRow[] }>(`${API_BASE}/v1/chat/unread-summary`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      body: JSON.stringify({ route_ids: chunk })
+    });
     items.push(...(data.items || []));
   }
   return items;
 }
 
-export async function getMyChatUnreadSummary(
-  token: string
-): Promise<Array<{ route_id: string; unread_count: number }>> {
-  const data = await requestJson<{ items: Array<{ route_id: string; unread_count: number }> }>(
-    `${API_BASE}/v1/chat/unread-summary`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
+export async function getMyChatUnreadSummary(token: string): Promise<ChatUnreadRow[]> {
+  const data = await requestJson<{ items: ChatUnreadRow[] }>(`${API_BASE}/v1/chat/unread-summary`, {
+    headers: {
+      Authorization: `Bearer ${token}`
     }
-  );
+  });
   return data.items;
 }

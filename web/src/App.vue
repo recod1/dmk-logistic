@@ -46,6 +46,7 @@ import {
   getVapidPublicKey,
   getChatUnreadSummary,
   getMyChatUnreadSummary,
+  type ChatUnreadRow,
   fetchChatAttachmentBlob,
   // chats hub
   postChatsBootstrap,
@@ -283,6 +284,7 @@ const chatMessages = ref<
 const chatLoading = ref(false);
 const chatError = ref("");
 const chatUnreadByRoute = ref<Record<string, number>>({});
+const chatUnreadStatusByRoute = ref<Record<string, string>>({});
 
 const driverActiveRouteId = ref<string | null>(null);
 const useLegacyBrowserNotification = ref(true);
@@ -1357,8 +1359,7 @@ function connectChatSocket(): void {
               chatMessages.value = [...chatMessages.value, { ...item, read: Boolean(item.read), delivered: Boolean(item.delivered) }];
             }
           } else if (authUser.value?.id && item.user_id !== authUser.value.id) {
-            const current = chatUnreadByRoute.value[item.route_id] ?? 0;
-            chatUnreadByRoute.value = { ...chatUnreadByRoute.value, [item.route_id]: current + 1 };
+            bumpRouteChatUnread(item.route_id);
           }
           if (authUser.value?.id && item.user_id !== authUser.value.id) {
             noteChatDelivered("route", item.route_id, item.id, item.user_id);
@@ -1515,8 +1516,7 @@ function applyChatNavFromNotification(item: NotificationDto): void {
   if (currentSection.value === "chat" && chatRouteId.value === routeId) {
     return;
   }
-  const current = chatUnreadByRoute.value[routeId] ?? 0;
-  chatUnreadByRoute.value = { ...chatUnreadByRoute.value, [routeId]: current + 1 };
+  bumpRouteChatUnread(routeId);
 }
 
 async function refreshChatNavUnread(): Promise<void> {
@@ -2149,12 +2149,7 @@ async function refreshDriverRoutes(): Promise<void> {
 
     try {
       const routeIds = [...assignedItems.map((x) => x.id), ...history.items.map((x) => x.id)];
-      const unread = await getChatUnreadSummary(authToken.value, routeIds);
-      const map = { ...chatUnreadByRoute.value };
-      unread.forEach((row) => {
-        map[row.route_id] = row.unread_count;
-      });
-      chatUnreadByRoute.value = map;
+      mergeChatUnreadRows(await getChatUnreadSummary(authToken.value, routeIds));
     } catch {
       // ignore chat unread errors
     }
@@ -2507,12 +2502,7 @@ async function loadMoreAdminRoutes(): Promise<void> {
     adminRoutesTotal.value = page.total ?? adminRoutesTotal.value;
     const routeIds = page.items.map((x) => x.id);
     if (routeIds.length) {
-      const unread = await getChatUnreadSummary(authToken.value, routeIds);
-      const map = { ...chatUnreadByRoute.value };
-      unread.forEach((row) => {
-        map[row.route_id] = row.unread_count;
-      });
-      chatUnreadByRoute.value = map;
+      mergeChatUnreadRows(await getChatUnreadSummary(authToken.value, routeIds));
     }
   } catch (error) {
     routesError.value = (error as Error).message;
@@ -2926,12 +2916,7 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
 
       try {
         const routeIds = adminRoutes.value.map((x) => x.id);
-        const unread = await getChatUnreadSummary(authToken.value, routeIds);
-        const map = { ...chatUnreadByRoute.value };
-        unread.forEach((row) => {
-          map[row.route_id] = row.unread_count;
-        });
-        chatUnreadByRoute.value = map;
+        mergeChatUnreadRows(await getChatUnreadSummary(authToken.value, routeIds));
       } catch {
         // ignore chat unread errors
       }
@@ -3493,17 +3478,64 @@ async function openActiveRouteFromHome(): Promise<void> {
   }
 }
 
+function knownRouteChatStatus(routeId: string): string {
+  const remembered = (chatUnreadStatusByRoute.value[routeId] || "").trim();
+  if (remembered) {
+    return remembered;
+  }
+  const fromAdmin = adminRoutes.value.find((item) => item.id === routeId)?.status;
+  if (fromAdmin) {
+    return fromAdmin;
+  }
+  const fromAssigned = driverAssignedRoutes.value.find((item) => item.id === routeId)?.status;
+  if (fromAssigned) {
+    return fromAssigned;
+  }
+  const fromHistory = driverHistoryRoutes.value.find((item) => item.id === routeId)?.status;
+  if (fromHistory) {
+    return fromHistory;
+  }
+  if (selectedAdminRoute.value?.id === routeId) {
+    return selectedAdminRoute.value.status || "";
+  }
+  if (selectedDriverRoute.value?.id === routeId) {
+    return selectedDriverRoute.value.status || "";
+  }
+  return "";
+}
+
+function mergeChatUnreadRows(rows: ChatUnreadRow[], replace = false): void {
+  const map = replace ? ({} as Record<string, number>) : { ...chatUnreadByRoute.value };
+  const statuses = replace ? ({} as Record<string, string>) : { ...chatUnreadStatusByRoute.value };
+  rows.forEach((row) => {
+    const count = Number(row.unread_count) || 0;
+    map[row.route_id] = count;
+    const status = (row.status || "").trim() || knownRouteChatStatus(row.route_id);
+    if (count > 0 && status) {
+      statuses[row.route_id] = status;
+    } else if (count <= 0) {
+      delete statuses[row.route_id];
+    }
+  });
+  chatUnreadByRoute.value = map;
+  chatUnreadStatusByRoute.value = statuses;
+}
+
+function bumpRouteChatUnread(routeId: string): void {
+  const current = chatUnreadByRoute.value[routeId] ?? 0;
+  const status = knownRouteChatStatus(routeId);
+  chatUnreadByRoute.value = { ...chatUnreadByRoute.value, [routeId]: current + 1 };
+  if (status) {
+    chatUnreadStatusByRoute.value = { ...chatUnreadStatusByRoute.value, [routeId]: status };
+  }
+}
+
 async function refreshRouteChatUnread(): Promise<void> {
   if (!authToken.value) {
     return;
   }
   try {
-    const unread = await getMyChatUnreadSummary(authToken.value);
-    const map: Record<string, number> = {};
-    unread.forEach((row) => {
-      map[row.route_id] = row.unread_count;
-    });
-    chatUnreadByRoute.value = map;
+    mergeChatUnreadRows(await getMyChatUnreadSummary(authToken.value), true);
   } catch {
     // ignore chat unread errors
   }
@@ -4159,6 +4191,9 @@ async function openChatForRoute(routeId: string): Promise<void> {
   await refreshChat();
   if (chatUnreadByRoute.value[routeId]) {
     chatUnreadByRoute.value = { ...chatUnreadByRoute.value, [routeId]: 0 };
+    const statuses = { ...chatUnreadStatusByRoute.value };
+    delete statuses[routeId];
+    chatUnreadStatusByRoute.value = statuses;
   }
   startChatPolling();
 }
@@ -5606,6 +5641,7 @@ onUnmounted(() => {
         :loading="routesLoading"
         :error="routesError"
         :unread-by-route="chatUnreadByRoute"
+        :unread-status-by-route="chatUnreadStatusByRoute"
         :initial-filters="routeFilters"
         :total="adminRoutesTotal"
         @refresh="refreshAdminRoutes"

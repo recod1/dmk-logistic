@@ -35,6 +35,7 @@ const props = defineProps<{
   loading: boolean;
   error: string;
   unreadByRoute?: Record<string, number>;
+  unreadStatusByRoute?: Record<string, string>;
   initialFilters?: RouteSearchFilters;
   total?: number;
 }>();
@@ -123,6 +124,22 @@ const tableColspan = computed(() => 6 + (isNewTab.value ? 1 : 0) + (showPointCol
 
 function unreadCount(routeId: string): number {
   return props.unreadByRoute?.[routeId] ?? 0;
+}
+
+function tabHasUnread(status: string): boolean {
+  const counts = props.unreadByRoute || {};
+  const ids = Object.keys(counts).filter((id) => (counts[id] ?? 0) > 0);
+  if (!ids.length) {
+    return false;
+  }
+  if (!status) {
+    return true;
+  }
+  return ids.some((id) => {
+    const remembered = props.unreadStatusByRoute?.[id];
+    const fromList = props.routes.find((route) => route.id === id)?.status;
+    return (remembered || fromList) === status;
+  });
 }
 
 function currentListPoint(route: AdminRoute): {
@@ -515,27 +532,43 @@ onMounted(() => {
                 @click="setStatusTab(tab.value)"
               >
                 {{ tab.label }}
+                <span
+                  v-if="tabHasUnread(tab.value)"
+                  class="chat-dot tab-unread"
+                  aria-label="Есть непрочитанные сообщения"
+                />
               </button>
             </div>
             <label class="mobile-status">
-              Статус
+              <span class="mobile-status-label">
+                Статус
+                <span
+                  v-if="tabHasUnread(filters.status)"
+                  class="chat-dot tab-unread"
+                  aria-label="Есть непрочитанные сообщения"
+                />
+              </span>
               <select :value="filters.status" @change="setStatusTab(($event.target as HTMLSelectElement).value)">
-                <option v-for="tab in statusTabs" :key="tab.value" :value="tab.value">{{ tab.label }}</option>
+                <option v-for="tab in statusTabs" :key="tab.value" :value="tab.value">
+                  {{ tabHasUnread(tab.value) ? `${tab.label} ●` : tab.label }}
+                </option>
               </select>
             </label>
-            <button
-              class="tab-btn unread-filter"
-              :class="{ active: filters.unread_chat }"
-              type="button"
-              @click="toggleUnreadFilter"
-            >
-              Непрочитанные
-            </button>
           </div>
           <button class="ghost search-toggle" type="button" @click="searchOpen = !searchOpen">
             {{ searchOpen ? "Скрыть поиск" : "Поиск" }}
           </button>
         </div>
+        <button
+          class="unread-toggle"
+          type="button"
+          :class="{ active: filters.unread_chat }"
+          :aria-pressed="filters.unread_chat"
+          @click="toggleUnreadFilter"
+        >
+          <span class="unread-toggle-box" aria-hidden="true" />
+          Непрочитанные
+        </button>
         <div class="filters-head">
           <h2>{{ filteredTitle }}</h2>
         </div>
@@ -849,6 +882,10 @@ onMounted(() => {
 }
 .tab-btn {
   width: auto;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
   border: 1px solid var(--border-strong);
   border-radius: 999px;
   background: var(--surface);
@@ -860,8 +897,55 @@ onMounted(() => {
   border-color: #60a5fa;
   box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
 }
-.unread-filter {
-  margin-top: 0.45rem;
+.tab-unread {
+  width: 9px;
+  height: 9px;
+  box-shadow: 0 0 0 2px rgba(3, 7, 18, 0.7);
+}
+.unread-toggle {
+  justify-self: start;
+  width: auto;
+  margin-top: 0.65rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px dashed rgba(34, 197, 94, 0.55);
+  border-radius: 10px;
+  background: rgba(34, 197, 94, 0.08);
+  color: #86efac;
+  padding: 0.4rem 0.75rem;
+  font-weight: 650;
+  font-size: 0.82rem;
+  letter-spacing: 0.01em;
+}
+.unread-toggle-box {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 4px;
+  border: 1.5px solid #4ade80;
+  background: transparent;
+  flex: 0 0 auto;
+}
+.unread-toggle.active {
+  border-style: solid;
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.22);
+  color: #dcfce7;
+  box-shadow: none;
+}
+.unread-toggle.active .unread-toggle-box {
+  background: #22c55e;
+  background-image: linear-gradient(transparent, transparent),
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 10'%3E%3Cpath fill='none' stroke='%2303130a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M1.4 5.2 4.4 8.2 10.6 1.6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 0.7rem 0.58rem;
+  border-color: #86efac;
+}
+.mobile-status-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
 }
 .filters-grid {
   display: grid;

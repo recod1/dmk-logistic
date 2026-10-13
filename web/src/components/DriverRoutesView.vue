@@ -39,6 +39,8 @@ const historySorted = computed(() => {
   const items = newestFirst(props.history);
   return unreadOnly.value ? items.filter((item) => unreadCount(item.id) > 0) : items;
 });
+const assignedHasUnread = computed(() => props.assigned.some((item) => unreadCount(item.id) > 0));
+const historyHasUnread = computed(() => props.history.some((item) => unreadCount(item.id) > 0));
 
 function routeStatusLabel(status: string): string {
   const labels: Record<string, string> = {
@@ -77,11 +79,21 @@ function unreadCount(routeId: string): number {
 <template>
   <section class="routes-wrap">
     <button class="ghost back" type="button" @click="emit('back')">← Назад</button>
-    <button class="filter-btn" :class="{ active: unreadOnly }" type="button" @click="unreadOnly = !unreadOnly">
+    <button
+      class="unread-toggle"
+      type="button"
+      :class="{ active: unreadOnly }"
+      :aria-pressed="unreadOnly"
+      @click="unreadOnly = !unreadOnly"
+    >
+      <span class="unread-toggle-box" aria-hidden="true" />
       Непрочитанные
     </button>
     <article class="card">
-      <h2>Назначенные</h2>
+      <h2>
+        Назначенные
+        <span v-if="assignedHasUnread" class="chat-dot" aria-label="Есть непрочитанные сообщения" />
+      </h2>
       <div class="list">
         <button v-for="item in assignedSorted" :key="item.id" class="route-card" @click="emit('openRoute', item.id)">
           <div class="row">
@@ -107,7 +119,10 @@ function unreadCount(routeId: string): number {
     </article>
 
     <article class="card">
-      <h2>Прошедшие</h2>
+      <h2>
+        Прошедшие
+        <span v-if="historyHasUnread" class="chat-dot" aria-label="Есть непрочитанные сообщения" />
+      </h2>
       <div class="list">
         <button v-for="item in historySorted" :key="item.id" class="route-card" @click="emit('openRoute', item.id)">
           <div class="row">
@@ -136,19 +151,41 @@ function unreadCount(routeId: string): number {
   max-width: 720px;
   margin: 0 auto;
 }
-.filter-btn {
+.unread-toggle {
   justify-self: start;
   width: auto;
-  border: 1px solid var(--border-strong);
-  border-radius: 999px;
-  background: var(--surface);
-  color: #dbeafe;
-  padding: 0.42rem 0.8rem;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px dashed rgba(34, 197, 94, 0.55);
+  border-radius: 10px;
+  background: rgba(34, 197, 94, 0.08);
+  color: #86efac;
+  padding: 0.4rem 0.75rem;
   font-weight: 650;
+  font-size: 0.82rem;
 }
-.filter-btn.active {
-  background: var(--primary-strong);
-  border-color: #60a5fa;
+.unread-toggle-box {
+  width: 0.95rem;
+  height: 0.95rem;
+  border-radius: 4px;
+  border: 1.5px solid #4ade80;
+  background: transparent;
+  flex: 0 0 auto;
+}
+.unread-toggle.active {
+  border-style: solid;
+  border-color: #22c55e;
+  background: rgba(34, 197, 94, 0.22);
+  color: #dcfce7;
+}
+.unread-toggle.active .unread-toggle-box {
+  background: #22c55e;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 10'%3E%3Cpath fill='none' stroke='%2303130a' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M1.4 5.2 4.4 8.2 10.6 1.6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 0.7rem 0.58rem;
+  border-color: #86efac;
 }
 .card {
   border: 1px solid var(--border);
@@ -162,6 +199,9 @@ function unreadCount(routeId: string): number {
   font-size: 0.95rem;
   color: var(--text-muted);
   font-weight: 650;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
 }
 .list {
   display: grid;

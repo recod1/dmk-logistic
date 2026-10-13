@@ -296,6 +296,10 @@ def unread_summary(
         select(RouteChatRead).where(RouteChatRead.user_id == current_user.id, RouteChatRead.route_id.in_(route_ids))
     ).all()
     last_by_route = {str(r.route_id): int(r.last_read_message_id or 0) for r in reads}
+    status_by_route = {
+        str(route_id): str(status or "")
+        for route_id, status in db.execute(select(Route.id, Route.status).where(Route.id.in_(route_ids))).all()
+    }
 
     # Count messages newer than last_read_message_id excluding own messages.
     items: list[dict] = []
@@ -306,7 +310,7 @@ def unread_summary(
             .select_from(RouteChatMessage)
             .where(RouteChatMessage.route_id == rid, RouteChatMessage.id > last_id, RouteChatMessage.user_id != current_user.id)
         ) or 0
-        items.append({"route_id": rid, "unread_count": int(unread)})
+        items.append({"route_id": rid, "unread_count": int(unread), "status": status_by_route.get(str(rid), "")})
 
     return {"items": items}
 
@@ -332,17 +336,24 @@ def unread_summary_mine(
         .subquery()
     )
     rows = db.execute(
-        select(RouteChatMessage.route_id, func.count())
+        select(RouteChatMessage.route_id, Route.status, func.count())
         .select_from(RouteChatMessage)
+        .join(Route, Route.id == RouteChatMessage.route_id)
         .outerjoin(last_subq, last_subq.c.route_id == RouteChatMessage.route_id)
         .where(
             route_filter,
             RouteChatMessage.user_id != current_user.id,
             RouteChatMessage.id > func.coalesce(last_subq.c.last_read_message_id, 0),
         )
-        .group_by(RouteChatMessage.route_id)
+        .group_by(RouteChatMessage.route_id, Route.status)
     ).all()
-    return {"items": [{"route_id": str(route_id), "unread_count": int(count)} for route_id, count in rows if int(count) > 0]}
+    return {
+        "items": [
+            {"route_id": str(route_id), "unread_count": int(count), "status": str(status or "")}
+            for route_id, status, count in rows
+            if int(count) > 0
+        ]
+    }
 
 
 @router.post("/v1/chat/routes/{route_id:path}/messages", status_code=status.HTTP_201_CREATED)
