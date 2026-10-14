@@ -3008,9 +3008,6 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
         const selected = adminRoutes.value.find((item) => item.id === selectedAdminRoute.value?.id);
         if (selected) {
           selectedAdminRoute.value = await getAdminRoute(authToken.value, selected.id);
-        } else if (currentSection.value === "admin_route_details") {
-          selectedAdminRoute.value = null;
-          goBack();
         }
       }
     } catch (error) {
@@ -3236,19 +3233,41 @@ async function doUploadAdminPointDocs(pointId: number, files: File[]): Promise<v
   }
 }
 
+function snapshotCancelledRouteCreate(route: {
+  id: string;
+  driver?: { id?: number } | null;
+  number_auto?: string;
+  trailer_number?: string;
+}): {
+  route_id: string;
+  driver_user_id?: number;
+  number_auto?: string;
+  trailer_number?: string;
+} {
+  return {
+    route_id: String(route.id || ""),
+    driver_user_id: route.driver?.id,
+    number_auto: route.number_auto || "",
+    trailer_number: route.trailer_number || ""
+  };
+}
+
 function openCreateForCancelledRoute(route: {
   id: string;
   driver?: { id?: number } | null;
   number_auto?: string;
   trailer_number?: string;
 }): void {
-  pendingRouteCreate.value = {
-    route_id: route.id,
-    driver_user_id: route.driver?.id,
-    number_auto: route.number_auto || "",
-    trailer_number: route.trailer_number || ""
-  };
-  pushSection("admin_routes");
+  const prefill = snapshotCancelledRouteCreate(route);
+  if (!prefill.route_id) {
+    return;
+  }
+  if (currentSection.value !== "admin_routes") {
+    pushSection("admin_routes");
+  }
+  void nextTick(() => {
+    pendingRouteCreate.value = prefill;
+  });
 }
 
 async function doCancelAdminRoute(routeId: string, reason: string): Promise<void> {
@@ -3259,9 +3278,9 @@ async function doCancelAdminRoute(routeId: string, reason: string): Promise<void
   routesError.value = "";
   try {
     await cancelAdminRoute(authToken.value, routeId, reason);
-    selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
+    const cancelled = await getAdminRoute(authToken.value, routeId);
+    selectedAdminRoute.value = cancelled;
     await refreshAdminRoutes(routeFilters.value);
-    const cancelled = selectedAdminRoute.value;
     recreateConfirm.value = {
       title: "Создать рейс с тем же номером?",
       text: `Рейс ${routeId} отменён. Причина сохранена. Создать новый рейс с тем же номером и другими параметрами?`,
@@ -3269,9 +3288,7 @@ async function doCancelAdminRoute(routeId: string, reason: string): Promise<void
       cancelLabel: "Позже",
       onConfirm: () => {
         recreateConfirm.value = null;
-        if (cancelled) {
-          openCreateForCancelledRoute(cancelled);
-        }
+        openCreateForCancelledRoute(cancelled);
       }
     };
   } catch (error) {

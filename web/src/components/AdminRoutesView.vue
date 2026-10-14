@@ -87,11 +87,15 @@ const statusTabs: Array<{ label: string; value: RouteWorkflowStatus | "" }> = [
 
 const showCreate = ref(false);
 const showCreateOnec = ref(false);
+const keepCreateOpen = ref(false);
 const createCardEl = ref<HTMLElement | null>(null);
 
 watch(
   () => [props.loading, props.error] as const,
   ([loading, error], prev) => {
+    if (keepCreateOpen.value) {
+      return;
+    }
     if (!prev?.[0] || loading || error) {
       return;
     }
@@ -405,6 +409,7 @@ function openCreate(prefill?: {
   number_auto?: string;
   trailer_number?: string;
 }): void {
+  keepCreateOpen.value = Boolean(prefill?.route_id);
   showCreate.value = true;
   showCreateOnec.value = false;
   createForm.route_id = prefill?.route_id || "";
@@ -439,7 +444,13 @@ watch(
   () => fillLogistContactsIfEmpty()
 );
 
+function closeCreate(): void {
+  showCreate.value = false;
+  keepCreateOpen.value = false;
+}
+
 function openCreateOnec(): void {
+  keepCreateOpen.value = false;
   showCreateOnec.value = true;
   showCreate.value = false;
   onecForm.raw_text = "";
@@ -844,7 +855,7 @@ onMounted(() => {
       <div class="actions">
         <button class="secondary" type="button" @click="addCreatePoint">Добавить точку</button>
         <button class="primary" type="button" @click="submitCreate">Сохранить</button>
-        <button class="ghost" type="button" @click="showCreate = false">Отмена</button>
+        <button class="ghost" type="button" @click="closeCreate">Отмена</button>
       </div>
     </section>
   </section>
