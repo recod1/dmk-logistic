@@ -173,6 +173,10 @@ function formatExtra(item: NotificationDto): string {
   if (ovp && item.event_type === "point_status_changed") {
     parts.push(`ОВП: ${ovp}`);
   }
+  const cancelReason = (item.payload?.cancel_reason || "").toString().trim();
+  if (cancelReason && item.event_type === "route_cancelled") {
+    parts.push(`Причина: ${cancelReason}`);
+  }
   if (item.event_type === "point_status_stale") {
     const duration = (item.payload?.duration || "").toString().trim();
     parts.unshift(duration ? `Стоит ${duration}` : "Стоит на этапе");

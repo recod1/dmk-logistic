@@ -13,7 +13,16 @@ from sqlalchemy.orm import Session
 from mobile_api.auth import get_current_route_manager
 from mobile_api.db import get_db
 from mobile_api.chat_router import unread_route_ids_for_user
-from mobile_api.models import Notification, Point, PointDocumentImage, Route, RouteEvent, RoutePoint, User
+from mobile_api.models import (
+    Notification,
+    Point,
+    PointDocumentImage,
+    Route,
+    RouteCancellation,
+    RouteEvent,
+    RoutePoint,
+    User,
+)
 from mobile_api.route_notification_logic import (
     notify_driver_route_updated,
     notify_route_assigned,
@@ -179,6 +188,7 @@ class AdminRouteCreatePayload(BaseModel):
     registration_number: str = ""
     trailer_number: str = ""
     points: list[AdminRoutePointCreate] = Field(default_factory=list, max_items=200)
+    recreate_cancelled: bool = False
 
 
 class AdminRouteCreateFromOnecPayload(BaseModel):
@@ -187,6 +197,11 @@ class AdminRouteCreateFromOnecPayload(BaseModel):
     created_by_user_id: int | None = None
     number_auto: str | None = Field(default=None, max_length=64)
     trailer_number: str | None = Field(default=None, max_length=64)
+    recreate_cancelled: bool = False
+
+
+class CancelRoutePayload(BaseModel):
+    reason: str = Field(min_length=1, max_length=2000)
 
 
 class AssignDriverPayload(BaseModel):
@@ -539,6 +554,7 @@ def _route_out(
         "last_loading_time": last_loading_time,
         "analytics": _route_analytics(points) if include_points else None,
         "points": [_point_out(db, point, idx) for idx, point in enumerate(points)] if include_points else None,
+        "cancellations": _cancellations_out(db, route.id) if include_points else None,
     }
 
 
@@ -554,6 +570,128 @@ def _assert_route_status_transition(current_status: str, next_status: str) -> No
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Invalid route status transition: {current_status} -> {next_status}",
         )
+
+
+def _cancellations_out(db: Session, route_id: str) -> list[dict]:
+    rows = db.scalars(
+        select(RouteCancellation)
+        .where(RouteCancellation.route_id == route_id)
+        .order_by(RouteCancellation.cancelled_at.desc())
+    ).all()
+    items: list[dict] = []
+    for row in rows:
+        actor = db.get(User, row.cancelled_by_user_id) if row.cancelled_by_user_id else None
+        items.append(
+            {
+                "id": row.id,
+                "reason": row.reason,
+                "previous_status": row.previous_status,
+                "cancelled_at": row.cancelled_at.isoformat() if row.cancelled_at else None,
+                "cancelled_by": _driver_out(actor) if actor else None,
+            }
+        )
+    return items
+
+
+def _latest_cancellation(db: Session, route_id: str) -> RouteCancellation | None:
+    return db.scalars(
+        select(RouteCancellation)
+        .where(RouteCancellation.route_id == route_id)
+        .order_by(RouteCancellation.cancelled_at.desc())
+        .limit(1)
+    ).first()
+
+
+def _cancelled_route_conflict(db: Session, route: Route) -> None:
+    last = _latest_cancellation(db, route.id)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "cancelled_route_exists",
+            "route_id": route.id,
+            "cancel_reason": (last.reason if last else "") or "",
+            "cancelled_at": last.cancelled_at.isoformat() if last and last.cancelled_at else None,
+            "message": f"Рейс {route.id} уже есть и отменён. Подтвердите пересоздание с новыми параметрами.",
+        },
+    )
+
+
+def _route_id_taken_conflict(route_id: str) -> None:
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "route_id_exists",
+            "route_id": route_id,
+            "message": "Рейс с таким номером уже есть. Укажите другой ID.",
+        },
+    )
+
+
+def _ensure_route_id_for_create(db: Session, route: Route | None, *, recreate_cancelled: bool) -> Route | None:
+    if route is None:
+        return None
+    if route.status == "cancelled":
+        if recreate_cancelled:
+            return route
+        _cancelled_route_conflict(db, route)
+    _route_id_taken_conflict(route.id)
+    return None
+
+
+def _record_route_cancellation(
+    db: Session,
+    *,
+    route: Route,
+    actor_user: User,
+    reason: str,
+) -> RouteCancellation:
+    row = RouteCancellation(
+        route_id=route.id,
+        cancelled_by_user_id=actor_user.id,
+        reason=reason.strip(),
+        previous_status=route.status,
+        previous_driver_user_id=route.assigned_user_id,
+        previous_number_auto=route.number_auto or "",
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
+def _reset_cancelled_route(
+    db: Session,
+    route: Route,
+    *,
+    driver: User,
+    creator: User | None,
+    number_auto: str,
+    temperature: str,
+    dispatcher_contacts: str,
+    logist_contacts: str,
+    registration_number: str,
+    trailer_number: str,
+    points: list[AdminRoutePointCreate],
+) -> Route:
+    route.legacy_driver_tg_id = int(driver.legacy_tg_id) if (driver.legacy_tg_id or "").isdigit() else None
+    route.assigned_user_id = driver.id
+    route.created_by_user_id = creator.id if creator else route.created_by_user_id
+    route.status = "new"
+    route.number_auto = number_auto
+    route.temperature = temperature
+    route.dispatcher_contacts = dispatcher_contacts
+    route.logist_contacts = logist_contacts
+    route.registration_number = registration_number
+    route.trailer_number = trailer_number
+    route.accepted_at = None
+    route.driver_received_at = None
+    route.driver_lat = None
+    route.driver_lng = None
+    route.driver_location_at = None
+    route.driver_location_requested_at = None
+    db.add(route)
+    db.flush()
+    _apply_points_replace(db, route, points, preserve_progress=False)
+    return route
 
 
 def _can_mark_success(db: Session, route_id: str) -> bool:
@@ -813,9 +951,9 @@ def create_route(
     if not route_id:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="route_id is required")
 
-    existing = db.get(Route, route_id)
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Route id already exists")
+    existing = _ensure_route_id_for_create(
+        db, db.get(Route, route_id), recreate_cancelled=payload.recreate_cancelled
+    )
 
     driver: User | None = None
     if payload.driver_user_id is not None:
@@ -840,24 +978,38 @@ def create_route(
     )
     contacts = (payload.dispatcher_contacts or "").strip()
     logist_contacts = _resolve_logist_contacts(db, payload.logist_contacts, fallback_settings=True)
-    route = Route(
-        id=route_id,
-        legacy_driver_tg_id=legacy_driver_tg_id,
-        assigned_user_id=driver.id,
-        created_by_user_id=creator.id,
-        status="new",
-        number_auto=number_auto,
-        temperature=(payload.temperature or "").strip(),
-        dispatcher_contacts=contacts,
-        logist_contacts=logist_contacts,
-        registration_number=(payload.registration_number or "").strip(),
-        trailer_number=trailer_number,
-    )
-    db.add(route)
-    db.flush()
-
-    if payload.points:
-        _apply_points_replace(db, route, payload.points)
+    if existing is not None:
+        route = _reset_cancelled_route(
+            db,
+            existing,
+            driver=driver,
+            creator=creator,
+            number_auto=number_auto,
+            temperature=(payload.temperature or "").strip(),
+            dispatcher_contacts=contacts,
+            logist_contacts=logist_contacts,
+            registration_number=(payload.registration_number or "").strip(),
+            trailer_number=trailer_number,
+            points=payload.points or [],
+        )
+    else:
+        route = Route(
+            id=route_id,
+            legacy_driver_tg_id=legacy_driver_tg_id,
+            assigned_user_id=driver.id,
+            created_by_user_id=creator.id,
+            status="new",
+            number_auto=number_auto,
+            temperature=(payload.temperature or "").strip(),
+            dispatcher_contacts=contacts,
+            logist_contacts=logist_contacts,
+            registration_number=(payload.registration_number or "").strip(),
+            trailer_number=trailer_number,
+        )
+        db.add(route)
+        db.flush()
+        if payload.points:
+            _apply_points_replace(db, route, payload.points)
 
     notify_route_assigned(
         db,
@@ -880,9 +1032,9 @@ def create_route_from_onec(
     if not parsed.route_id:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Не найден номер рейса в тексте 1С")
 
-    existing = db.get(Route, parsed.route_id)
-    if existing is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Route id already exists")
+    existing = _ensure_route_id_for_create(
+        db, db.get(Route, parsed.route_id), recreate_cancelled=payload.recreate_cancelled
+    )
 
     driver: User | None = None
     if payload.driver_user_id is not None:
@@ -909,37 +1061,51 @@ def create_route_from_onec(
     )
     contacts = (parsed.dispatcher_contacts or "").strip()
     logist_contacts = _default_logist_contacts(db)
-    route = Route(
-        id=parsed.route_id,
-        legacy_driver_tg_id=legacy_driver_tg_id,
-        assigned_user_id=driver.id,
-        created_by_user_id=creator.id if creator else None,
-        status="new",
-        number_auto=number_auto,
-        temperature=(parsed.temperature or "").strip(),
-        dispatcher_contacts=contacts,
-        logist_contacts=logist_contacts,
-        registration_number=(parsed.registration_number or "").strip(),
-        trailer_number=trailer_number,
-    )
-    db.add(route)
-    db.flush()
-
-    if parsed.points:
-        points_payload = [
-            AdminRoutePointCreate(
-                type_point=p.type_point,
-                place_point=p.place_point,
-                date_point=p.date_point,
-                point_name=p.point_name,
-                point_contacts=p.point_contacts,
-                point_time=p.point_time,
-                point_note="",
-                order_index=i,
-            )
-            for i, p in enumerate(parsed.points)
-        ]
-        _apply_points_replace(db, route, points_payload)
+    points_payload = [
+        AdminRoutePointCreate(
+            type_point=p.type_point,
+            place_point=p.place_point,
+            date_point=p.date_point,
+            point_name=p.point_name,
+            point_contacts=p.point_contacts,
+            point_time=p.point_time,
+            point_note="",
+            order_index=i,
+        )
+        for i, p in enumerate(parsed.points or [])
+    ]
+    if existing is not None:
+        route = _reset_cancelled_route(
+            db,
+            existing,
+            driver=driver,
+            creator=creator,
+            number_auto=number_auto,
+            temperature=(parsed.temperature or "").strip(),
+            dispatcher_contacts=contacts,
+            logist_contacts=logist_contacts,
+            registration_number=(parsed.registration_number or "").strip(),
+            trailer_number=trailer_number,
+            points=points_payload,
+        )
+    else:
+        route = Route(
+            id=parsed.route_id,
+            legacy_driver_tg_id=legacy_driver_tg_id,
+            assigned_user_id=driver.id,
+            created_by_user_id=creator.id if creator else None,
+            status="new",
+            number_auto=number_auto,
+            temperature=(parsed.temperature or "").strip(),
+            dispatcher_contacts=contacts,
+            logist_contacts=logist_contacts,
+            registration_number=(parsed.registration_number or "").strip(),
+            trailer_number=trailer_number,
+        )
+        db.add(route)
+        db.flush()
+        if points_payload:
+            _apply_points_replace(db, route, points_payload)
 
     notify_route_assigned(db, route=route, assigned_user=driver, actor_user=current_user)
     db.commit()
@@ -1217,6 +1383,7 @@ def assign_route_driver(
 @router.post("/{route_id:path}/cancel")
 def cancel_route(
     route_id: str,
+    payload: CancelRoutePayload,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_route_manager),
 ) -> dict:
@@ -1225,7 +1392,12 @@ def cancel_route(
     if route is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Route not found")
 
+    reason = payload.reason.strip()
+    if not reason:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Укажите причину отмены")
+
     _assert_route_status_transition(route.status, "cancelled")
+    _record_route_cancellation(db, route=route, actor_user=current_user, reason=reason)
     route.status = "cancelled"
     db.add(route)
     assigned_user = db.get(User, route.assigned_user_id) if route.assigned_user_id else None
@@ -1234,6 +1406,7 @@ def cancel_route(
         route=route,
         assigned_user=assigned_user,
         actor_user=current_user,
+        reason=reason,
     )
     db.commit()
     db.refresh(route)
@@ -1299,12 +1472,9 @@ def update_route_status(
     route.status = next_status
     db.add(route)
     if next_status == "cancelled":
-        assigned_user = db.get(User, route.assigned_user_id) if route.assigned_user_id else None
-        notify_route_cancelled(
-            db,
-            route=route,
-            assigned_user=assigned_user,
-            actor_user=current_user,
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Для отмены рейса укажите причину через действие «Отменить»",
         )
     elif next_status == "success":
         notify_route_completed(

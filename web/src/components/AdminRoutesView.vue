@@ -37,6 +37,12 @@ const props = defineProps<{
   unreadByRoute?: Record<string, number>;
   unreadStatusByRoute?: Record<string, string>;
   initialFilters?: RouteSearchFilters;
+  pendingCreate?: {
+    route_id: string;
+    driver_user_id?: number;
+    number_auto?: string;
+    trailer_number?: string;
+  } | null;
   total?: number;
 }>();
 
@@ -68,6 +74,7 @@ const emit = defineEmits<{
   ];
   selectRoute: [routeId: string];
   loadMore: [];
+  createPrefillApplied: [];
 }>();
 
 const statusTabs: Array<{ label: string; value: RouteWorkflowStatus | "" }> = [
@@ -392,22 +399,40 @@ function fillLogistContactsIfEmpty(): void {
   createForm.logist_contacts = defaultContactsText();
 }
 
-function openCreate(): void {
+function openCreate(prefill?: {
+  route_id?: string;
+  driver_user_id?: number;
+  number_auto?: string;
+  trailer_number?: string;
+}): void {
   showCreate.value = true;
   showCreateOnec.value = false;
-  createForm.route_id = "";
-  createForm.driver_user_id = 0;
+  createForm.route_id = prefill?.route_id || "";
+  createForm.driver_user_id = prefill?.driver_user_id || 0;
   createForm.created_by_user_id = props.currentUserId || 0;
-  createDriverQuery.value = "";
-  createForm.number_auto = "";
+  const driver = props.drivers.find((item) => item.id === createForm.driver_user_id);
+  createDriverQuery.value = driver ? (driver.full_name || driver.login || "").trim() : "";
+  createForm.number_auto = prefill?.number_auto || "";
   createForm.temperature = "";
   createForm.dispatcher_contacts = "";
   createForm.logist_contacts = defaultContactsText();
   createForm.registration_number = "";
-  createForm.trailer_number = "";
+  createForm.trailer_number = prefill?.trailer_number || "";
   createForm.points = [];
   scrollCreateCardIntoView();
 }
+
+watch(
+  () => props.pendingCreate,
+  (pending) => {
+    if (!pending?.route_id) {
+      return;
+    }
+    openCreate(pending);
+    emit("createPrefillApplied");
+  },
+  { immediate: true }
+);
 
 watch(
   () => props.logisticsContacts,

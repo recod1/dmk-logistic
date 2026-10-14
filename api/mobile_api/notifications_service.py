@@ -199,16 +199,20 @@ def notify_route_assigned(db: Session, *, route: Route, assigned_user: User | No
     )
 
 
-def notify_route_cancelled(db: Session, *, route: Route, actor_user: User | None) -> None:
+def notify_route_cancelled(db: Session, *, route: Route, actor_user: User | None, reason: str = "") -> None:
     actor_name = (actor_user.full_name or actor_user.login) if actor_user else "Система"
+    reason_text = (reason or "").strip()
+    message = f"{actor_name} отменил(а) рейс {route.id}."
+    if reason_text:
+        message = f"{message} Причина: {reason_text}"
     create_notification_for_users(
         db,
         user_ids=_route_recipients(db, route),
         event_type="route_cancelled",
         title=f"Рейс {route.id} отменён",
-        message=f"{actor_name} отменил(а) рейс {route.id}.",
+        message=message,
         route_id=route.id,
-        payload={"route_id": route.id},
+        payload={"route_id": route.id, "cancel_reason": reason_text or None},
         skip_user_ids=[actor_user.id] if actor_user else [],
     )
 

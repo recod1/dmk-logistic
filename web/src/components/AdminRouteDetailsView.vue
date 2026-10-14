@@ -68,7 +68,8 @@ const props = defineProps<{
 const emit = defineEmits<{
   back: [];
   assignDriver: [routeId: string, driverUserId: number, extras?: { number_auto?: string; trailer_number?: string }];
-  cancelRoute: [routeId: string];
+  cancelRoute: [routeId: string, reason: string];
+  recreateRoute: [route: AdminRoute];
   deleteRoute: [routeId: string];
   updateRoute: [
     routeId: string,
@@ -101,6 +102,9 @@ function locationAtLabel(value: string | null | undefined): string {
 
 const showReassign = ref(false);
 const showEdit = ref(false);
+const showCancel = ref(false);
+const cancelReason = ref("");
+const cancelError = ref("");
 const reassignDriverId = ref(0);
 const reassignDriverQuery = ref("");
 const reassignNumberAuto = ref("");
@@ -185,6 +189,32 @@ function pointStatusLabel(status: string): string {
 
 function canCancel(status: RouteWorkflowStatus): boolean {
   return status === "new" || status === "process";
+}
+
+function openCancel(): void {
+  showCancel.value = true;
+  cancelReason.value = "";
+  cancelError.value = "";
+}
+
+function submitCancel(): void {
+  const reason = cancelReason.value.trim();
+  if (!reason) {
+    cancelError.value = "Укажите причину отмены";
+    return;
+  }
+  cancelError.value = "";
+  showCancel.value = false;
+  emit("cancelRoute", props.route.id, reason);
+}
+
+function formatCancelWhen(value?: string | null): string {
+  if (!value) return "";
+  try {
+    return new Date(value).toLocaleString("ru-RU");
+  } catch {
+    return value;
+  }
 }
 
 const nowMs = useLiveNow();
@@ -639,6 +669,16 @@ function removeRoute(): void {
           <span class="k">N регистрации</span>
           <span class="v">{{ route.registration_number || "—" }}</span>
         </div>
+        <div v-if="route.cancellations?.length" class="kv">
+          <span class="k">История отмен</span>
+          <span class="v cancel-history">
+            <span v-for="item in route.cancellations" :key="item.id" class="cancel-item">
+              {{ formatCancelWhen(item.cancelled_at) || "ранее" }}
+              · {{ item.reason || "без причины" }}
+              <template v-if="item.cancelled_by"> · {{ item.cancelled_by.full_name || item.cancelled_by.login }}</template>
+            </span>
+          </span>
+        </div>
       </div>
       <section class="analytics-card">
         <h3>Аналитика рейса</h3>
@@ -712,9 +752,29 @@ function removeRoute(): void {
         <button class="secondary" type="button" :disabled="loading || !canCompleteRoute()" @click="emit('completeRoute', route.id)">
           Завершить рейс
         </button>
-        <button class="danger" type="button" :disabled="loading || !canCancel(route.status)" @click="emit('cancelRoute', route.id)">
+        <button class="danger" type="button" :disabled="loading || !canCancel(route.status)" @click="openCancel">
           Отменить
         </button>
+        <button
+          v-if="route.status === 'cancelled'"
+          class="secondary"
+          type="button"
+          :disabled="loading"
+          @click="emit('recreateRoute', route)"
+        >
+          Создать с тем же номером
+        </button>
+        <div v-if="showCancel" class="cancel-box">
+          <label>
+            Причина отмены
+            <textarea v-model="cancelReason" rows="3" placeholder="Например: рейс снят заказчиком" />
+          </label>
+          <p v-if="cancelError" class="error">{{ cancelError }}</p>
+          <div class="actions">
+            <button class="danger" type="button" :disabled="loading" @click="submitCancel">Подтвердить отмену</button>
+            <button class="ghost" type="button" @click="showCancel = false">Назад</button>
+          </div>
+        </div>
         <button class="danger soft" type="button" :disabled="loading" @click="removeRoute">Удалить рейс</button>
       </section>
 
@@ -1158,6 +1218,28 @@ function removeRoute(): void {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+}
+.cancel-box {
+  width: 100%;
+  display: grid;
+  gap: 0.5rem;
+  padding: 0.7rem;
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: rgba(127, 29, 29, 0.18);
+}
+.cancel-box textarea {
+  width: 100%;
+  min-height: 4.5rem;
+  font-size: 16px;
+}
+.cancel-history {
+  display: grid;
+  gap: 0.25rem;
+}
+.cancel-item {
+  display: block;
+  color: #fecaca;
 }
 .point-view-grid {
   display: grid;

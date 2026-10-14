@@ -3,7 +3,10 @@ from __future__ import annotations
 from types import SimpleNamespace
 from unittest import TestCase
 
-from mobile_api.route_notification_logic import build_point_status_changed_notifications
+from mobile_api.route_notification_logic import (
+    build_point_status_changed_notifications,
+    build_route_cancelled_notifications,
+)
 
 
 class PointStatusNotificationTests(TestCase):
@@ -52,3 +55,19 @@ class PointStatusNotificationTests(TestCase):
             new_status="registration",
         )
         self.assertNotIn("ОВП", items[0]["message"])
+
+
+class RouteCancelledNotificationTests(TestCase):
+    def test_cancel_reason_is_included(self) -> None:
+        route = SimpleNamespace(id="R-9", created_by_user_id=2, assigned_user_id=5, status="cancelled", updated_at=None)
+        assigned = SimpleNamespace(id=5)
+        actor = SimpleNamespace(id=3)
+        items = build_route_cancelled_notifications(
+            route=route,  # type: ignore[arg-type]
+            assigned_user=assigned,  # type: ignore[arg-type]
+            actor_user=actor,  # type: ignore[arg-type]
+            reason="Заказчик снял рейс",
+        )
+        self.assertEqual(len(items), 1)
+        self.assertIn("Причина: Заказчик снял рейс", items[0]["message"])
+        self.assertEqual(items[0]["payload"].get("cancel_reason"), "Заказчик снял рейс")

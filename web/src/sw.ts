@@ -85,10 +85,10 @@ self.addEventListener("push", (event: PushEvent) => {
     setAppBadge?: (count?: number) => Promise<void>;
     clearAppBadge?: () => Promise<void>;
   };
-  if (typeof nav?.setAppBadge === "function") {
+  if (typeof nav?.setAppBadge === "function" && badgeCount != null) {
     try {
       tasks.push(
-        badgeCount != null && badgeCount > 0
+        badgeCount > 0
           ? nav.setAppBadge(badgeCount)
           : typeof nav.clearAppBadge === "function"
             ? nav.clearAppBadge()

@@ -32,27 +32,61 @@ export class ApiError extends Error {
   status: number;
   bodyText: string;
   detail: string | null;
+  detailData: Record<string, unknown> | null;
   url: string | null;
   method: string | null;
 
   constructor(
     message: string,
-    opts: { status: number; bodyText: string; detail?: string | null; url?: string | null; method?: string | null }
+    opts: {
+      status: number;
+      bodyText: string;
+      detail?: string | null;
+      detailData?: Record<string, unknown> | null;
+      url?: string | null;
+      method?: string | null;
+    }
   ) {
     super(message);
     this.name = "ApiError";
     this.status = opts.status;
     this.bodyText = opts.bodyText;
     this.detail = opts.detail ?? null;
+    this.detailData = opts.detailData ?? null;
     this.url = opts.url ?? null;
     this.method = opts.method ?? null;
   }
 }
 
+export function cancelledRouteConflict(error: unknown): {
+  route_id: string;
+  cancel_reason: string;
+  cancelled_at: string | null;
+  message: string;
+} | null {
+  if (!(error instanceof ApiError) || error.status !== 409) {
+    return null;
+  }
+  const data = error.detailData;
+  if (!data || data.code !== "cancelled_route_exists") {
+    return null;
+  }
+  return {
+    route_id: String(data.route_id || ""),
+    cancel_reason: String(data.cancel_reason || ""),
+    cancelled_at: typeof data.cancelled_at === "string" ? data.cancelled_at : null,
+    message: String(data.message || error.message)
+  };
+}
+
 export function humanizeAdminError(error: unknown, fallback: string): string {
-  const err = error as { message?: string; detail?: string | null; status?: number };
+  const conflict = cancelledRouteConflict(error);
+  if (conflict) {
+    return conflict.message;
+  }
+  const err = error as { message?: string; detail?: string | null; status?: number; detailData?: Record<string, unknown> | null };
   const raw = `${err?.detail || ""} ${err?.message || ""}`.toLowerCase();
-  if (err?.status === 409 || raw.includes("already exists")) {
+  if (err?.status === 409 || raw.includes("already exists") || err?.detailData?.code === "route_id_exists") {
     return "Рейс с таким номером уже есть. Укажите другой ID.";
   }
   const message = (err?.message || "").trim();
@@ -248,16 +282,20 @@ async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs
   if (!response.ok) {
     const bodyText = await response.text();
     let detail: string | null = null;
+    let detailData: Record<string, unknown> | null = null;
     try {
       const parsed = JSON.parse(bodyText) as { detail?: unknown };
       if (typeof parsed?.detail === "string") {
         detail = parsed.detail;
+      } else if (parsed?.detail && typeof parsed.detail === "object" && !Array.isArray(parsed.detail)) {
+        detailData = parsed.detail as Record<string, unknown>;
+        detail = typeof detailData.message === "string" ? detailData.message : JSON.stringify(parsed.detail);
       }
     } catch {
       // ignore non-json body
     }
     const message = detail || bodyText || `HTTP ${response.status}`;
-    const apiError = new ApiError(message, { status: response.status, bodyText, detail, url, method });
+    const apiError = new ApiError(message, { status: response.status, bodyText, detail, detailData, url, method });
     const isExpectedClientError = response.status >= 400 && response.status < 500;
     if (!isExpectedClientError) {
       reportDebugError({
@@ -655,6 +693,7 @@ export async function createAdminRouteFromOnec(
     created_by_user_id?: number | null;
     number_auto?: string;
     trailer_number?: string;
+    recreate_cancelled?: boolean;
   }
 ): Promise<AdminRoute> {
   return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/onec`, {
@@ -685,12 +724,13 @@ export async function assignAdminRouteDriver(
   });
 }
 
-export async function cancelAdminRoute(token: string, routeId: string): Promise<AdminRoute> {
+export async function cancelAdminRoute(token: string, routeId: string, reason: string): Promise<AdminRoute> {
   return requestJson<AdminRoute>(`${API_BASE}/v1/admin/routes/${encodeRouteId(routeId)}/cancel`, {
     method: "POST",
     headers: {
       Authorization: `Bearer ${token}`
-    }
+    },
+    body: JSON.stringify({ reason })
   });
 }
 

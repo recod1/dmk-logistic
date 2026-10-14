@@ -41,6 +41,7 @@ import {
   getAdminRoute,
   getDriverRoute,
   humanizeAdminError,
+  cancelledRouteConflict,
   getPointTelemetry,
   getUnreadNotificationsCount,
   getVapidPublicKey,
@@ -399,6 +400,19 @@ const fleetTrailers = ref<Array<{ id: number; plate: string }>>([]);
 const fleetLoading = ref(false);
 const fleetSaving = ref(false);
 const fleetError = ref("");
+const pendingRouteCreate = ref<{
+  route_id: string;
+  driver_user_id?: number;
+  number_auto?: string;
+  trailer_number?: string;
+} | null>(null);
+const recreateConfirm = ref<{
+  title: string;
+  text: string;
+  confirmLabel: string;
+  cancelLabel: string;
+  onConfirm: () => void;
+} | null>(null);
 
 const isAuthed = computed(() => Boolean(authToken.value));
 const isChatSection = computed(
@@ -458,7 +472,6 @@ const accountantDriverChatRoomsDisplay = computed(() => {
 });
 
 const hasUnreadGenericChats = computed(() => {
-  if (Object.values(roomUnreadBump.value).some((count) => Number(count) > 0)) return true;
   if (chatsRoomsForDisplay.value.some((r) => (r.unread_count ?? 0) > 0)) return true;
   if (logisticDriverChatRoomsDisplay.value.some((row) => (row.room.unread_count ?? 0) > 0)) return true;
   if (accountantDriverChatRoomsDisplay.value.some((row) => (row.room.unread_count ?? 0) > 0)) return true;
@@ -466,7 +479,7 @@ const hasUnreadGenericChats = computed(() => {
 });
 
 const hasUnreadRouteChats = computed(() => Object.values(chatUnreadByRoute.value).some((count) => Number(count) > 0));
-const hasUnreadChatsNav = computed(() => hasUnreadGenericChats.value || hasUnreadRouteChats.value);
+const hasUnreadChatsNav = computed(() => hasUnreadGenericChats.value);
 const hasUnreadSalary = computed(() =>
   notifications.value.some((item) => !item.is_read && item.event_type === "salary_new")
 );
@@ -546,23 +559,64 @@ async function refreshWebPushSubscriptionState(): Promise<void> {
   }
 }
 
-function appIconBadgeCount(): number {
-  return Math.max(0, unreadNotificationsCount.value);
+const BADGE_STORAGE_KEY = "dmk-app-badge-count";
+const badgeReady = ref(false);
+
+function readStoredBadge(): number {
+  if (typeof window === "undefined") {
+    return 0;
+  }
+  try {
+    const raw = Number(window.localStorage.getItem(BADGE_STORAGE_KEY) || "0");
+    return Number.isFinite(raw) && raw > 0 ? Math.round(raw) : 0;
+  } catch {
+    return 0;
+  }
 }
 
-function updateUiNotificationIndicators(): void {
-  if (typeof document !== "undefined") {
-    const base = `ДМК · ${currentPageTitle.value}`;
-    const unread = unreadNotificationsCount.value;
-    document.title = unread > 0 ? `(${unread}) ${base}` : base;
+function writeStoredBadge(count: number): void {
+  if (typeof window === "undefined") {
+    return;
   }
+  try {
+    window.localStorage.setItem(BADGE_STORAGE_KEY, String(Math.max(0, Math.round(count))));
+  } catch {
+    // ignore quota / private mode
+  }
+}
 
-  const unread = appIconBadgeCount();
+function hubChatUnreadTotal(): number {
+  const seen = new Set<number>();
+  let rooms = 0;
+  const addRoom = (id: number, count: number): void => {
+    if (seen.has(id)) {
+      return;
+    }
+    seen.add(id);
+    rooms += Math.max(0, Number(count) || 0);
+  };
+  chatsRoomsForDisplay.value.forEach((room) => addRoom(room.id, room.unread_count ?? 0));
+  logisticDriverChatRoomsDisplay.value.forEach((row) => addRoom(row.room.id, row.room.unread_count ?? 0));
+  accountantDriverChatRoomsDisplay.value.forEach((row) => addRoom(row.room.id, row.room.unread_count ?? 0));
+  const routeChats = Object.values(chatUnreadByRoute.value).reduce(
+    (sum, count) => sum + Math.max(0, Number(count) || 0),
+    0
+  );
+  return rooms + routeChats;
+}
+
+function appIconBadgeCount(): number {
+  return Math.max(0, unreadNotificationsCount.value) + hubChatUnreadTotal();
+}
+
+function pushBadgeToDevice(unread: number): void {
+  if (typeof navigator === "undefined") {
+    return;
+  }
   const nav = navigator as Navigator & {
     setAppBadge?: (count?: number) => Promise<void>;
     clearAppBadge?: () => Promise<void>;
   };
-  // iOS Safari/PWA and Android Chrome expose Badging API for installed apps.
   if (typeof nav?.setAppBadge === "function") {
     if (unread > 0) {
       void nav.setAppBadge(unread);
@@ -572,17 +626,42 @@ function updateUiNotificationIndicators(): void {
       void nav.setAppBadge(0);
     }
   }
-  if (typeof navigator !== "undefined" && "serviceWorker" in navigator) {
+  if ("serviceWorker" in navigator) {
     void navigator.serviceWorker.ready.then((reg) => {
       reg.active?.postMessage({ type: "DMK_SET_BADGE", count: unread });
     });
   }
 }
 
+function applyAppBadge(count: number, opts?: { force?: boolean }): void {
+  const unread = Math.max(0, count);
+  if (!opts?.force && !badgeReady.value && unread === 0) {
+    const stored = readStoredBadge();
+    if (stored > 0) {
+      pushBadgeToDevice(stored);
+    }
+    return;
+  }
+  writeStoredBadge(unread);
+  pushBadgeToDevice(unread);
+}
+
+function updateUiNotificationIndicators(): void {
+  const unread = appIconBadgeCount();
+  if (typeof document !== "undefined") {
+    const base = `ДМК · ${currentPageTitle.value}`;
+    document.title = unread > 0 ? `(${unread}) ${base}` : base;
+  }
+  applyAppBadge(unread);
+}
+
 watchEffect(() => {
-  // Keep tab title + badge in sync while app runs in browser / installed PWA.
   void currentPageTitle.value;
   void unreadNotificationsCount.value;
+  void chatUnreadByRoute.value;
+  void chatsRoomsForDisplay.value;
+  void logisticDriverChatRoomsDisplay.value;
+  void accountantDriverChatRoomsDisplay.value;
   updateUiNotificationIndicators();
 });
 
@@ -1787,6 +1866,8 @@ function clearAuth(): void {
   selectedAdminRoute.value = null;
   notifications.value = [];
   unreadNotificationsCount.value = 0;
+  badgeReady.value = false;
+  applyAppBadge(0, { force: true });
   chatRouteId.value = null;
   chatMessages.value = [];
   chatError.value = "";
@@ -2311,6 +2392,7 @@ function onVisibilityChange(): void {
   if (document.visibilityState !== "visible") {
     return;
   }
+  updateUiNotificationIndicators();
   onForegroundResume();
 }
 
@@ -2512,6 +2594,7 @@ async function loadMoreAdminRoutes(): Promise<void> {
 }
 
 function onPageShow(event: PageTransitionEvent): void {
+  updateUiNotificationIndicators();
   if (event.persisted) {
     onForegroundResume();
   }
@@ -2944,6 +3027,36 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
   return refreshAdminRoutesInFlight;
 }
 
+async function finishCreatedAdminRoute(routeCreated: { id: string }): Promise<void> {
+  pendingRouteCreate.value = null;
+  recreateConfirm.value = null;
+  await refreshAdminRoutes(routeFilters.value);
+  selectedAdminRoute.value = await getAdminRoute(authToken.value as string, routeCreated.id);
+  pushSection("admin_route_details");
+}
+
+function askRecreateCancelled(
+  error: unknown,
+  retry: () => Promise<void>
+): boolean {
+  const conflict = cancelledRouteConflict(error);
+  if (!conflict) {
+    return false;
+  }
+  const reasonLine = conflict.cancel_reason ? ` Причина прошлой отмены: ${conflict.cancel_reason}.` : "";
+  recreateConfirm.value = {
+    title: "Пересоздать отменённый рейс?",
+    text: `Рейс ${conflict.route_id || ""} уже есть в базе и был отменён.${reasonLine} Пересоздать его с новыми параметрами? История отмены сохранится.`,
+    confirmLabel: "Пересоздать",
+    cancelLabel: "Не надо",
+    onConfirm: () => {
+      recreateConfirm.value = null;
+      void retry();
+    }
+  };
+  return true;
+}
+
 async function doCreateAdminRoute(payload: AdminRouteCreatePayload): Promise<void> {
   if (!authToken.value || !isRouteManager.value) {
     return;
@@ -2952,10 +3065,13 @@ async function doCreateAdminRoute(payload: AdminRouteCreatePayload): Promise<voi
   routesError.value = "";
   try {
     const routeCreated = await createAdminRoute(authToken.value, payload);
-    await refreshAdminRoutes(routeFilters.value);
-    selectedAdminRoute.value = await getAdminRoute(authToken.value, routeCreated.id);
-    pushSection("admin_route_details");
+    await finishCreatedAdminRoute(routeCreated);
   } catch (error) {
+    if (
+      askRecreateCancelled(error, () => doCreateAdminRoute({ ...payload, recreate_cancelled: true }))
+    ) {
+      return;
+    }
     routesError.value = humanizeAdminError(error, "Ошибка создания рейса");
   } finally {
     routesLoading.value = false;
@@ -2968,6 +3084,7 @@ async function doCreateAdminRouteFromOnec(payload: {
   created_by_user_id?: number | null;
   number_auto?: string;
   trailer_number?: string;
+  recreate_cancelled?: boolean;
 }): Promise<void> {
   if (!authToken.value || !isRouteManager.value) {
     return;
@@ -2976,10 +3093,15 @@ async function doCreateAdminRouteFromOnec(payload: {
   routesError.value = "";
   try {
     const routeCreated = await createAdminRouteFromOnec(authToken.value, payload);
-    await refreshAdminRoutes(routeFilters.value);
-    selectedAdminRoute.value = await getAdminRoute(authToken.value, routeCreated.id);
-    pushSection("admin_route_details");
+    await finishCreatedAdminRoute(routeCreated);
   } catch (error) {
+    if (
+      askRecreateCancelled(error, () =>
+        doCreateAdminRouteFromOnec({ ...payload, recreate_cancelled: true })
+      )
+    ) {
+      return;
+    }
     routesError.value = humanizeAdminError(error, "Ошибка создания рейса");
   } finally {
     routesLoading.value = false;
@@ -3114,16 +3236,44 @@ async function doUploadAdminPointDocs(pointId: number, files: File[]): Promise<v
   }
 }
 
-async function doCancelAdminRoute(routeId: string): Promise<void> {
+function openCreateForCancelledRoute(route: {
+  id: string;
+  driver?: { id?: number } | null;
+  number_auto?: string;
+  trailer_number?: string;
+}): void {
+  pendingRouteCreate.value = {
+    route_id: route.id,
+    driver_user_id: route.driver?.id,
+    number_auto: route.number_auto || "",
+    trailer_number: route.trailer_number || ""
+  };
+  pushSection("admin_routes");
+}
+
+async function doCancelAdminRoute(routeId: string, reason: string): Promise<void> {
   if (!authToken.value || !isRouteManager.value) {
     return;
   }
   routesLoading.value = true;
   routesError.value = "";
   try {
-    await cancelAdminRoute(authToken.value, routeId);
+    await cancelAdminRoute(authToken.value, routeId, reason);
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
     await refreshAdminRoutes(routeFilters.value);
+    const cancelled = selectedAdminRoute.value;
+    recreateConfirm.value = {
+      title: "Создать рейс с тем же номером?",
+      text: `Рейс ${routeId} отменён. Причина сохранена. Создать новый рейс с тем же номером и другими параметрами?`,
+      confirmLabel: "Создать",
+      cancelLabel: "Позже",
+      onConfirm: () => {
+        recreateConfirm.value = null;
+        if (cancelled) {
+          openCreateForCancelledRoute(cancelled);
+        }
+      }
+    };
   } catch (error) {
     routesError.value = `Ошибка отмены рейса: ${(error as Error).message}`;
   } finally {
@@ -3230,8 +3380,10 @@ async function refreshNotifications(): Promise<void> {
       const cached = await loadMessageSnapshot<NotificationDto>("notifications");
       if (cached?.length) {
         notifications.value = cached;
+        unreadNotificationsCount.value = cached.filter((item) => !item.is_read).length;
       }
     }
+    badgeReady.value = true;
     return;
   }
   notificationsLoading.value = true;
@@ -3244,7 +3396,9 @@ async function refreshNotifications(): Promise<void> {
     catchUpChatDeliveriesFromNotifications(latestNotifications);
     try {
       unreadNotificationsCount.value = await getUnreadNotificationsCount(authToken.value);
+      badgeReady.value = true;
     } catch (error) {
+      badgeReady.value = true;
       if (!isOfflineLikeError(error) && !isPageHidden()) {
         throw error;
       }
@@ -5643,12 +5797,14 @@ onUnmounted(() => {
         :unread-by-route="chatUnreadByRoute"
         :unread-status-by-route="chatUnreadStatusByRoute"
         :initial-filters="routeFilters"
+        :pending-create="pendingRouteCreate"
         :total="adminRoutesTotal"
         @refresh="refreshAdminRoutes"
         @load-more="loadMoreAdminRoutes"
         @create="doCreateAdminRoute"
         @create-onec="doCreateAdminRouteFromOnec"
         @select-route="doSelectAdminRoute"
+        @create-prefill-applied="pendingRouteCreate = null"
       />
     </section>
 
@@ -5667,6 +5823,7 @@ onUnmounted(() => {
         @back="goBack"
         @assign-driver="doAssignAdminRoute"
         @cancel-route="doCancelAdminRoute"
+        @recreate-route="openCreateForCancelledRoute"
         @delete-route="doDeleteAdminRoute"
         @update-route="doUpdateAdminRoute"
         @update-point="doUpdateAdminRoutePoint"
@@ -5933,6 +6090,17 @@ onUnmounted(() => {
     <Transition name="toast">
       <div v-if="isAuthed && toastVisible" class="app-toast" role="status">{{ toastText }}</div>
     </Transition>
+
+    <div v-if="recreateConfirm" class="confirm-overlay" @click.self="recreateConfirm = null">
+      <article class="confirm-sheet" role="dialog" aria-modal="true">
+        <h2>{{ recreateConfirm.title }}</h2>
+        <p>{{ recreateConfirm.text }}</p>
+        <div class="confirm-actions">
+          <button class="primary" type="button" @click="recreateConfirm.onConfirm">{{ recreateConfirm.confirmLabel }}</button>
+          <button class="ghost" type="button" @click="recreateConfirm = null">{{ recreateConfirm.cancelLabel }}</button>
+        </div>
+      </article>
+    </div>
 
     <StatusConfirmDialog
       v-if="isAuthed && statusConfirm"
@@ -6219,6 +6387,44 @@ onUnmounted(() => {
   background: var(--danger-bg);
   border-color: var(--danger-bg);
   margin-top: 0.2rem;
+}
+.confirm-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(2, 6, 23, 0.62);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+.confirm-sheet {
+  width: min(100%, 420px);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 1rem 1.05rem 1.1rem;
+  display: grid;
+  gap: 0.7rem;
+}
+.confirm-sheet h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+.confirm-sheet p {
+  margin: 0;
+  color: var(--text-body);
+  line-height: 1.4;
+}
+.confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.confirm-actions .ghost {
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  color: #bfdbfe;
 }
 .app-toast {
   position: fixed;

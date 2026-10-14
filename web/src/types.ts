@@ -205,6 +205,15 @@ export interface AdminRouteCreatePayload {
   registration_number?: string;
   trailer_number?: string;
   points?: AdminRoutePointPayload[];
+  recreate_cancelled?: boolean;
+}
+
+export interface RouteCancellationRecord {
+  id: number;
+  reason: string;
+  previous_status?: string;
+  cancelled_at: string | null;
+  cancelled_by?: DriverOption | null;
 }
 
 export type RouteWorkflowStatus = "new" | "process" | "success" | "cancelled";
@@ -238,6 +247,7 @@ export interface AdminRoute {
   last_loading_point_name?: string | null;
   last_loading_date?: string | null;
   last_loading_time?: string | null;
+  cancellations?: RouteCancellationRecord[];
   analytics?: {
     total_minutes?: number | null;
     total_km?: number | null;

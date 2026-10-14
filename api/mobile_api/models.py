@@ -99,6 +99,27 @@ class Route(Base):
         cascade="all, delete-orphan",
     )
     notifications: Mapped[list[Notification]] = relationship(back_populates="route")
+    cancellations: Mapped[list["RouteCancellation"]] = relationship(
+        back_populates="route",
+        cascade="all, delete-orphan",
+    )
+
+
+class RouteCancellation(Base):
+    __tablename__ = "route_cancellations"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    route_id: Mapped[str] = mapped_column(ForeignKey("routes.id", ondelete="CASCADE"), nullable=False, index=True)
+    cancelled_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    previous_status: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    previous_driver_user_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    previous_number_auto: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
+    cancelled_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+
+    route: Mapped[Route] = relationship(back_populates="cancellations")
 
 
 class Point(Base):

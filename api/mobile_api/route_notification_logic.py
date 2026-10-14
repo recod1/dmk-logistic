@@ -84,22 +84,27 @@ def build_route_cancelled_notifications(
     route: Route,
     assigned_user: User | None,
     actor_user: User,
+    reason: str = "",
 ) -> list[dict]:
     recipients: list[int | None] = [route.created_by_user_id]
     if assigned_user is not None:
         recipients.append(assigned_user.id)
     action = "Отменен рейс"
     skip = [actor_user.id]
+    message = _format_notification_message(action, route.id, route.updated_at)
+    reason_text = (reason or "").strip()
+    if reason_text:
+        message = f"{message} · Причина: {reason_text}"
     return [
         {
             "user_ids": recipients,
             "skip_user_ids": skip,
             "event_type": "route_cancelled",
             "title": action,
-            "message": _format_notification_message(action, route.id, route.updated_at),
+            "message": message,
             "route_id": route.id,
             "point_id": None,
-            "payload": {"route_status": route.status},
+            "payload": {"route_status": route.status, "cancel_reason": reason_text or None},
         }
     ]
 
@@ -323,11 +328,13 @@ def notify_route_cancelled(
     route: Route,
     assigned_user: User | None,
     actor_user: User,
+    reason: str = "",
 ) -> None:
     notifications = build_route_cancelled_notifications(
         route=route,
         assigned_user=assigned_user,
         actor_user=actor_user,
+        reason=reason,
     )
     manager_ids = _manager_ids(db)
     for item in notifications:
