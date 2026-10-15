@@ -15,6 +15,8 @@ const props = defineProps<{
   pushHint?: string;
   showKindTabs?: boolean;
   showSalaryTab?: boolean;
+  showPointTab?: boolean;
+  allowKindMute?: boolean;
   prefs?: NotificationPrefs;
 }>();
 
@@ -28,7 +30,9 @@ const emit = defineEmits<{
   updatePrefs: [prefs: NotificationPrefs];
 }>();
 
-const kindTabs = computed(() => visibleNotificationKindTabs(Boolean(props.showSalaryTab)));
+const kindTabs = computed(() =>
+  visibleNotificationKindTabs(Boolean(props.showSalaryTab), props.showPointTab !== false)
+);
 const kindTab = ref<NotificationKind>("point");
 
 watch(
@@ -212,7 +216,7 @@ function formatExtra(item: NotificationDto): string {
           <span v-if="unreadByKind[kind]" class="kind-count">{{ unreadByKind[kind] }}</span>
         </button>
       </div>
-      <label v-if="showKindTabs && kindTab !== 'salary'" class="mute-row">
+      <label v-if="showKindTabs && allowKindMute !== false && kindTab !== 'salary'" class="mute-row">
         <input type="checkbox" :checked="!currentMuted" @change="toggleKindMute" />
         Оповещения этого типа включены
       </label>

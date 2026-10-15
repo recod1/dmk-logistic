@@ -2,7 +2,7 @@
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 
 import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel } from "../status";
-import { plannedDateDisplay, plannedTimeDisplay } from "../plannedTime";
+import { normalizePlannedTimeInput, plannedDateDisplay, plannedTimeDisplay } from "../plannedTime";
 import { normalizePlate } from "../vehiclePlate";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, RouteWorkflowStatus } from "../types";
 import SuggestField from "./SuggestField.vue";
@@ -848,7 +848,15 @@ onMounted(() => {
           </label>
           <label>
             Время
-            <input v-model="point.point_time" type="time" step="60" lang="ru" />
+            <input
+              v-model="point.point_time"
+              type="text"
+              inputmode="numeric"
+              placeholder="18:00"
+              maxlength="8"
+              autocomplete="off"
+              @blur="point.point_time = normalizePlannedTimeInput(point.point_time)"
+            />
           </label>
         </div>
       </article>

@@ -48,6 +48,18 @@ class OnecDatetimeTests(TestCase):
         self.assertEqual(split_onec_wall_datetime("2026-09-21T17:00:00"), ("21.09.2026", "17:00"))
         self.assertNotEqual(split_onec_wall_datetime("21.09.2026 17:00")[1], "05:00")
 
+    def test_keeps_1800_and_2100(self) -> None:
+        self.assertEqual(split_onec_wall_datetime("14.10.2026 18:00"), ("14.10.2026", "18:00"))
+        self.assertEqual(split_onec_wall_datetime("14.10.2026 21:00"), ("14.10.2026", "21:00"))
+        self.assertEqual(planned_wall_fields("14.10.2026", "18:00"), ("14.10.2026", "18:00"))
+        self.assertEqual(planned_wall_fields("14.10.2026", "21:00"), ("14.10.2026", "21:00"))
+        self.assertNotEqual(split_onec_wall_datetime("14.10.2026 18:00")[1], "06:00")
+        self.assertNotEqual(split_onec_wall_datetime("14.10.2026 21:00")[1], "09:00")
+
+    def test_hour_over_12_ignores_ampm_glue(self) -> None:
+        self.assertEqual(split_onec_wall_datetime("14.10.2026 18:00pm"), ("14.10.2026", "18:00"))
+        self.assertEqual(split_onec_wall_datetime("14.10.2026 18:00 AM"), ("14.10.2026", "18:00"))
+
 
 class OnecParseTests(TestCase):
     def test_parse_loading_keeps_1630(self) -> None:
@@ -141,3 +153,30 @@ class OnecParseTests(TestCase):
         self.assertEqual(parsed.points[1].point_name, "НОВАБЕВ")
         self.assertIn("Москва", parsed.points[1].place_point)
         self.assertIn("495", parsed.points[1].point_contacts)
+
+    def test_barilla_sample_keeps_evening_times_and_route_id(self) -> None:
+        from mobile_api.onec_routes import parse_onec_message
+
+        raw = (
+            "00ЭК-039739 Номер для регистрации: 14.10/7\n"
+            "Температура: нет\n"
+            "Диспетчер Олимп-транс 24/7: 89164611473\n"
+            "Логист: Королева Анастасия\n"
+            "\n"
+            "Загр: 14.10.2026 18:00\n"
+            "Организация: Барилла Солнечногорск 141503 РФ, МО, г. Солнечногорск, Бутырский тупик, д. 1\n"
+            "\n"
+            "Выгр: 14.10.2026 21:00\n"
+            "Организация БАРИЛЛА РУС ООО Россия, 141870, Московская область, Дмитровский район, "
+            "городское поселение Икша, деревня Кузяево, строение 4 тел. +7 (499) 519-07-07 "
+            "тел. 937-65-65 доб.152/169\n"
+        )
+        parsed = parse_onec_message(raw)
+        self.assertEqual(parsed.route_id, "00ЭК-039739")
+        self.assertEqual(parsed.registration_number, "14.10/7")
+        self.assertEqual(parsed.logistic_name, "Королева Анастасия")
+        self.assertEqual(len(parsed.points), 2)
+        self.assertEqual(parsed.points[0].point_time, "18:00")
+        self.assertEqual(parsed.points[1].point_time, "21:00")
+        self.assertEqual(parsed.points[0].date_point, "14.10.2026")
+        self.assertEqual(parsed.points[1].date_point, "14.10.2026")

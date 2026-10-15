@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import re
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 _DATE_ISO = re.compile(r"(\d{4})-(\d{2})-(\d{2})")
 _DATE_DMY = re.compile(r"(\d{1,2})[./](\d{1,2})[./](\d{2,4})")
-_TIME = re.compile(r"(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp][Mm]))?")
+_TIME = re.compile(r"(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp][Mm])(?![A-Za-z]))?")
 _TIME_FLEX = re.compile(r"(?<!\d)(\d{1,2})[.\-](\d{2})(?:[.\-](\d{2}))?(?!\d)")
+_MOSCOW = ZoneInfo("Europe/Moscow")
 
 
 def _pad2(value: int) -> str:
@@ -23,7 +26,7 @@ def format_planned_time(hour: int, minute: int) -> str:
 
 
 def _hour_from_token(hour: int, ampm: str | None) -> int:
-    if not ampm:
+    if not ampm or hour > 12:
         return hour
     suffix = ampm.upper()
     if suffix == "AM":
@@ -69,23 +72,17 @@ def split_onec_wall_datetime(raw: str | None) -> tuple[str, str]:
     search_in = rest if date_s else text
     time_s = ""
     tm = _TIME.search(search_in)
-    ampm = None
     hour = minute = None
     if tm:
         hour = _hour_from_token(int(tm.group(1)), tm.group(4))
         minute = int(tm.group(2))
-        ampm = tm.group(4)
     else:
         flex = _TIME_FLEX.search(search_in)
         if flex:
             hour = int(flex.group(1))
             minute = int(flex.group(2))
     if hour is not None and minute is not None and 0 <= hour <= 23 and 0 <= minute <= 59:
-        # Keep 13:00 as 13:00. AM/PM is applied only when the token is present.
-        if not ampm and hour > 12:
-            time_s = format_planned_time(hour, minute)
-        else:
-            time_s = format_planned_time(hour, minute)
+        time_s = format_planned_time(hour, minute)
     return date_s, time_s
 
 
@@ -114,3 +111,15 @@ def planned_wall_fields(date_raw: str | None, time_raw: str | None = None) -> tu
     date_s, time_from_date = split_onec_wall_datetime(date_raw)
     time_s = normalize_planned_time(time_raw) or time_from_date
     return date_s or (date_raw or "").strip(), time_s
+
+
+def planned_wall_datetime(date_raw: str | None, time_raw: str | None = None) -> datetime | None:
+    """Moscow-aware datetime for a planned wall clock, or None if incomplete."""
+    date_s, time_s = planned_wall_fields(date_raw, time_raw)
+    if not date_s or not time_s:
+        return None
+    try:
+        naive = datetime.strptime(f"{date_s} {time_s}", "%d.%m.%Y %H:%M")
+    except ValueError:
+        return None
+    return naive.replace(tzinfo=_MOSCOW)

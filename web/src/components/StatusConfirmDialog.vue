@@ -12,6 +12,7 @@ const props = defineProps<{
   telemetryLoading?: boolean;
   showEta?: boolean;
   etaTime?: string;
+  allowSkip?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -22,6 +23,7 @@ const emit = defineEmits<{
       odometer: string;
       odometer_source: "manual" | "wialon" | null;
       etaTime: string;
+      skipped?: boolean;
     }
   ];
   "update:datetimeLocal": [value: string];
@@ -67,14 +69,14 @@ watch(
 );
 
 const odometerReady = computed(() => {
-  if (!props.showOdometer) {
+  if (!props.showOdometer || props.allowSkip) {
     return true;
   }
   return Boolean((odometerValue.value || "").trim());
 });
 
 const etaReady = computed(() => {
-  if (!props.showEta) {
+  if (!props.showEta || props.allowSkip) {
     return true;
   }
   return Boolean((etaValue.value || "").trim());
@@ -109,7 +111,18 @@ function confirm(): void {
     datetimeLocal: localValue.value,
     odometer: odo,
     odometer_source: source,
-    etaTime: (etaValue.value || "").trim()
+    etaTime: (etaValue.value || "").trim(),
+    skipped: false
+  });
+}
+
+function skip(): void {
+  emit("confirm", {
+    datetimeLocal: localValue.value,
+    odometer: "",
+    odometer_source: null,
+    etaTime: "",
+    skipped: true
   });
 }
 </script>
@@ -119,7 +132,9 @@ function confirm(): void {
     <article class="dialog" role="dialog" aria-modal="true">
       <h2 class="title">Подтвердите этап</h2>
       <p class="desc">
-        Следующий этап: <strong>{{ nextStatusLabel }}</strong>. Проверьте время и показания одометра.
+        Следующий этап: <strong>{{ nextStatusLabel }}</strong>.
+        <template v-if="allowSkip"> Сверьте дату, время и одометр — или пропустите.</template>
+        <template v-else> Проверьте время и показания одометра.</template>
       </p>
       <label class="field">
         Дата и время
@@ -143,11 +158,13 @@ function confirm(): void {
         <label v-else class="field nested">
           <input v-model="odometerValue" inputmode="text" placeholder="Например: 123456 или 123456 км" />
           <small v-if="odometerPrefillSource === 'wialon'" class="hint">Исправьте значение из Wialon и сохраните.</small>
+          <small v-else-if="allowSkip" class="hint">Можно оставить пустым и пропустить.</small>
           <small v-else class="hint">Если Wialon не ответил — введите показания вручную.</small>
         </label>
       </div>
       <div class="actions">
         <button type="button" class="secondary" @click="emit('cancel')">Отмена</button>
+        <button v-if="allowSkip" type="button" class="ghost" @click="skip">Пропустить</button>
         <button v-if="odometerMode !== 'ask'" type="button" class="primary" :disabled="!formReady" @click="confirm">
           Сохранить
         </button>
@@ -254,7 +271,8 @@ input {
   justify-content: flex-end;
 }
 .primary,
-.secondary {
+.secondary,
+.ghost {
   min-height: 42px;
   border-radius: 12px;
   padding: 0.5rem 0.9rem;
@@ -272,5 +290,10 @@ input {
   border: 1px solid var(--border-strong);
   background: transparent;
   color: #e2e8f0;
+}
+.ghost {
+  border: none;
+  background: transparent;
+  color: #94a3b8;
 }
 </style>

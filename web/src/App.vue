@@ -191,6 +191,7 @@ import type {
   DriverRouteListItem,
   EventPayload,
   NotificationDto,
+  PointStatus,
   RouteDto
 } from "./types";
 
@@ -290,6 +291,7 @@ const chatUnreadStatusByRoute = ref<Record<string, string>>({});
 const driverActiveRouteId = ref<string | null>(null);
 const useLegacyBrowserNotification = ref(true);
 const statusConfirm = ref<{
+  mode: "driver" | "manager";
   pointId: number;
   nextLabel: string;
   datetimeLocal: string;
@@ -301,6 +303,7 @@ const statusConfirm = ref<{
   telemetryLoading: boolean;
   showEta: boolean;
   etaTime: string;
+  allowSkip: boolean;
 } | null>(null);
 const docsUpload = ref<{
   pointId: number;
@@ -427,6 +430,8 @@ const isAccountant = computed(() => isAccountantRole(authUser.value?.role_code |
 const showNotificationKindTabs = computed(
   () => isAdmin.value || isLogistic.value || isDriver.value || isAccountant.value
 );
+const showPointNotificationTab = computed(() => isAdmin.value || isLogistic.value);
+const allowNotificationKindMute = computed(() => !isDriver.value);
 const showSalaryNotificationTab = computed(() => isAdmin.value || isDriver.value || isAccountant.value);
 const salaryDriverOptions = computed(() => {
   const fromRoutes = routeDrivers.value.map((d) => ({
@@ -3925,29 +3930,36 @@ async function doAcceptRoute(routeId?: string): Promise<void> {
   void syncOutboxInBackground();
 }
 
-function openStatusConfirm(pointId: number): void {
-  if (!isDriver.value) {
+function openStatusConfirm(pointId: number, mode: "driver" | "manager" = "driver"): void {
+  if (mode === "driver" && !isDriver.value) {
+    return;
+  }
+  if (mode === "manager" && !isRouteManager.value) {
     return;
   }
   const base =
-    currentSection.value === "driver_route_details" && selectedDriverRoute.value
-      ? selectedDriverRoute.value
-      : route.value;
+    mode === "manager"
+      ? selectedAdminRoute.value
+      : currentSection.value === "driver_route_details" && selectedDriverRoute.value
+        ? selectedDriverRoute.value
+        : route.value;
   if (!base) {
     return;
   }
-  const current = base.points.find((point) => point.id === pointId);
+  const current = (base.points || []).find((point) => point.id === pointId);
   if (!current) {
     return;
   }
-  if (!nextStatus(current.status)) {
+  const fromStatus = current.status as PointStatus;
+  if (!nextStatus(fromStatus)) {
     return;
   }
   const initial = toDatetimeLocalValue(new Date());
-  const to = nextStatus(current.status);
+  const to = nextStatus(fromStatus);
   statusConfirm.value = {
+    mode,
     pointId,
-    nextLabel: nextStatusLabel(current.status) || "",
+    nextLabel: nextStatusLabel(fromStatus) || "",
     datetimeLocal: initial,
     initialDatetimeLocal: initial,
     showOdometer: true,
@@ -3955,10 +3967,14 @@ function openStatusConfirm(pointId: number): void {
     initialOdometer: "",
     odometerPrefillSource: null,
     telemetryLoading: true,
-    showEta: to === "process",
-    etaTime: (current.estimated_arrival || "").trim() || plannedTimeInputValue(current.date_point, current.point_time)
+    showEta: mode === "driver" && to === "process",
+    etaTime:
+      mode === "driver"
+        ? (current.estimated_arrival || "").trim() || plannedTimeInputValue(current.date_point, current.point_time)
+        : "",
+    allowSkip: mode === "manager"
   };
-  if (hasNetwork() && authToken.value) {
+  if (mode === "driver" && hasNetwork() && authToken.value) {
     void (async () => {
       try {
         const tel = await getPointTelemetry(authToken.value, pointId, {
@@ -3989,11 +4005,50 @@ function cancelStatusConfirm(): void {
   statusConfirm.value = null;
 }
 
+async function applyManagerStatusConfirm(
+  pending: NonNullable<typeof statusConfirm.value>,
+  payload: {
+    datetimeLocal: string;
+    odometer: string;
+    odometer_source: "manual" | "wialon" | null;
+    etaTime: string;
+    skipped?: boolean;
+  }
+): Promise<void> {
+  const routeDetails = selectedAdminRoute.value;
+  const current = (routeDetails?.points || []).find((point) => point.id === pending.pointId);
+  if (!current) {
+    return;
+  }
+  const to = nextStatus(current.status as PointStatus);
+  if (!to) {
+    return;
+  }
+  const iso = fromDatetimeLocalToIso(payload.skipped ? pending.initialDatetimeLocal : payload.datetimeLocal);
+  const patch: Record<string, unknown> = { status: to };
+  const odo = payload.skipped ? "" : payload.odometer.trim();
+  if (to === "process") {
+    patch.departure_time = iso;
+    if (odo) patch.departure_odometer = odo;
+  } else if (to === "registration") {
+    patch.registration_time = iso;
+    if (odo) patch.registration_odometer = odo;
+  } else if (to === "load") {
+    patch.gate_time = iso;
+    if (odo) patch.gate_odometer = odo;
+  } else if (to === "docs") {
+    patch.docs_time = iso;
+    if (odo) patch.docs_odometer = odo;
+  }
+  await doUpdateAdminRoutePoint(pending.pointId, patch);
+}
+
 async function applyStatusConfirm(payload: {
   datetimeLocal: string;
   odometer: string;
   odometer_source: "manual" | "wialon" | null;
   etaTime: string;
+  skipped?: boolean;
 }): Promise<void> {
   const pending = statusConfirm.value;
   statusConfirm.value = null;
@@ -4001,6 +4056,10 @@ async function applyStatusConfirm(payload: {
     return;
   }
   try {
+    if (pending.mode === "manager") {
+      await applyManagerStatusConfirm(pending, payload);
+      return;
+    }
     const iso = fromDatetimeLocalToIso(payload.datetimeLocal);
     const timeSource: "device" | "manual" = pending.initialDatetimeLocal === payload.datetimeLocal ? "device" : "manual";
     const base =
@@ -5844,6 +5903,7 @@ onUnmounted(() => {
         @delete-route="doDeleteAdminRoute"
         @update-route="doUpdateAdminRoute"
         @update-point="doUpdateAdminRoutePoint"
+        @advance-point="(pointId) => openStatusConfirm(pointId, 'manager')"
         @complete-route="doCompleteAdminRoute"
         @upload-point-docs="doUploadAdminPointDocs"
         @open-chat="openChatForRoute"
@@ -6065,11 +6125,13 @@ onUnmounted(() => {
         :loading="notificationsLoading"
         :error="notificationsError"
         :unread-count="unreadNotificationsCount"
-        :can-push="pushIsSupported"
+        :can-push="pushIsSupported && !isDriver"
         :push-enabled="webPushSubscribed"
-        :push-hint="pushHint"
+        :push-hint="isDriver ? '' : pushHint"
         :show-kind-tabs="showNotificationKindTabs"
         :show-salary-tab="showSalaryNotificationTab"
+        :show-point-tab="showPointNotificationTab"
+        :allow-kind-mute="allowNotificationKindMute"
         :prefs="notificationPrefs"
         @refresh="refreshNotifications"
         @enable-push="trySubscribeWebPush"
@@ -6131,6 +6193,7 @@ onUnmounted(() => {
       :telemetry-loading="statusConfirm.telemetryLoading"
       :show-eta="statusConfirm.showEta"
       :eta-time="statusConfirm.etaTime"
+      :allow-skip="statusConfirm.allowSkip"
       @update:datetime-local="
         (v) => {
           if (statusConfirm) statusConfirm.datetimeLocal = v;

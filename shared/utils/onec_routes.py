@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from utils.onec_datetime import split_onec_wall_datetime
+
+_INLINE_ROUTE_FIELD = re.compile(
+    r"^(?P<route_id>\S+)\s+(?P<rest>(?:номер для регистрации|номер регистрации|фио водителя|логист|"
+    r"температура|номер тс|номер прицепа)\s*:.*)$",
+    re.IGNORECASE,
+)
 
 _PLACEHOLDER_PHONE_TAILS = frozenset({"9991234567"})
 
@@ -138,6 +145,12 @@ def parse_onec_message(raw: str) -> OnecParsedRoute:
         if lower.startswith("загр:") or lower.startswith("выгр:"):
             points_start_idx = idx
             break
+
+        inline = _INLINE_ROUTE_FIELD.match(line)
+        if inline and not route_id:
+            route_id = inline.group("route_id").strip()
+            line = inline.group("rest").strip()
+            lower = line.lower()
 
         if ":" in line:
             key, value = line.split(":", 1)

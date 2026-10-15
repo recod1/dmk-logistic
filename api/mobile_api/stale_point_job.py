@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from utils.stale_anchor import stale_anchor_started
+
 from mobile_api.db import SessionLocal
 from mobile_api.models import Notification, Point, Route, RoutePoint
 from mobile_api.notifications_service import create_notification_for_users
@@ -29,14 +31,6 @@ STALE_STATUS_LABELS_RU: dict[str, str] = {
     "registration": "Регистрация",
     "load": "На воротах",
 }
-
-
-def _aware(dt: datetime | None) -> datetime | None:
-    if dt is None:
-        return None
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt
 
 
 def _duration_label(delta: timedelta) -> str:
@@ -100,8 +94,12 @@ def scan_stale_points(db: Session, *, now: datetime | None = None) -> int:
         active = _active_open_point(points)
         if active is None or (active.status or "") not in STALE_STATUSES:
             continue
-        started = _aware(_point_event_time(active, active.status)) or _aware(active.updated_at) or _aware(
-            active.created_at
+        started = stale_anchor_started(
+            status_value=active.status,
+            fact=_point_event_time(active, active.status),
+            date_point=active.date_point,
+            point_time=active.point_time,
+            fallback=active.updated_at or active.created_at,
         )
         if started is None or started > cutoff:
             continue

@@ -1,6 +1,6 @@
 const DATE_ISO = /(\d{4})-(\d{2})-(\d{2})/;
 const DATE_DMY = /(\d{1,2})[./](\d{1,2})[./](\d{2,4})/;
-const TIME = /(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp][Mm]))?/;
+const TIME = /(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp][Mm])(?![A-Za-z]))?/;
 const TIME_FLEX = /(\d{1,2})[.\-](\d{2})(?:[.\-](\d{2}))?/;
 
 function pad2(n: number): string {
@@ -8,7 +8,7 @@ function pad2(n: number): string {
 }
 
 function hourFromToken(hour: number, ampm?: string | null): number {
-  if (!ampm) {
+  if (!ampm || hour > 12) {
     return hour;
   }
   const suffix = ampm.toUpperCase();
@@ -116,4 +116,9 @@ export function plannedTimeDisplay(date?: string | null, time?: string | null): 
 
 export function plannedScheduleDisplay(date?: string | null, time?: string | null): string {
   return [plannedDateDisplay(date, time), plannedTimeDisplay(date, time)].filter(Boolean).join(" ");
+}
+
+export function normalizePlannedTimeInput(raw: string): string {
+  const trimmed = (raw || "").trim();
+  return splitPlannedDateTime(trimmed).time || trimmed;
 }

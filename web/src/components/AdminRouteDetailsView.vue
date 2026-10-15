@@ -8,7 +8,7 @@ import { liveRouteElapsedLabel, routeAnalyticsView } from "../routeAnalytics";
 import { useLiveNow } from "../liveNow";
 import { stageDeltasForPoint } from "../stageDeltas";
 import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
-import { plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
+import { normalizePlannedTimeInput, plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
 import { listPointStatusLabel, nextStatus } from "../status";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, ManualEditMeta, PointStatus, RouteWorkflowStatus } from "../types";
 import { normalizePlate } from "../vehiclePlate";
@@ -86,6 +86,7 @@ const emit = defineEmits<{
   ];
   openChat: [routeId: string];
   updatePoint: [pointId: number, payload: Record<string, unknown>];
+  advancePoint: [pointId: number];
   completeRoute: [routeId: string];
   uploadPointDocs: [pointId: number, files: File[]];
   requestLocation: [routeId: string];
@@ -246,13 +247,7 @@ function advancePointStatus(point: AdminRoutePoint): void {
   if (!next) {
     return;
   }
-  const occurredAt = new Date().toISOString();
-  const payload: Record<string, unknown> = { status: next };
-  if (next === "process") payload.departure_time = occurredAt;
-  if (next === "registration") payload.registration_time = occurredAt;
-  if (next === "load") payload.gate_time = occurredAt;
-  if (next === "docs") payload.docs_time = occurredAt;
-  emit("updatePoint", point.id, payload);
+  emit("advancePoint", point.id);
 }
 
 function managerNames(point: AdminRoutePoint): string {
@@ -855,7 +850,15 @@ function removeRoute(): void {
             </label>
             <label>
               Время
-              <input v-model="point.point_time" type="time" step="60" lang="ru" />
+              <input
+                v-model="point.point_time"
+                type="text"
+                inputmode="numeric"
+                placeholder="18:00"
+                maxlength="8"
+                autocomplete="off"
+                @blur="point.point_time = normalizePlannedTimeInput(point.point_time)"
+              />
             </label>
             <label>
               Организация
@@ -936,7 +939,15 @@ function removeRoute(): void {
               </label>
               <label>
                 Время плана
-                <input v-model="pointEdit.point_time" type="time" step="60" lang="ru" />
+                <input
+                  v-model="pointEdit.point_time"
+                  type="text"
+                  inputmode="numeric"
+                  placeholder="18:00"
+                  maxlength="8"
+                  autocomplete="off"
+                  @blur="pointEdit.point_time = normalizePlannedTimeInput(pointEdit.point_time)"
+                />
                 <small v-if="editHint(point.manual_edits, 'point_time')" class="edit-hint">{{ editHint(point.manual_edits, 'point_time') }}</small>
               </label>
               <label class="full">
