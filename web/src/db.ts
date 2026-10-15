@@ -31,6 +31,7 @@ export interface PointStatusOverlay {
   status: Exclude<PointStatus, "new">;
   occurred_at_client: string;
   time?: string | null;
+  pressed_at?: string | null;
   odometer?: string | null;
   time_source?: string | null;
   odometer_source?: string | null;
@@ -266,6 +267,7 @@ export async function savePointOverlay(
   occurredAtClient: string,
   extras?: {
     time?: string | null;
+    pressed_at?: string | null;
     odometer?: string | null;
     time_source?: string | null;
     odometer_source?: string | null;
@@ -280,6 +282,7 @@ export async function savePointOverlay(
     status,
     occurred_at_client: occurredAtClient,
     time: extras?.time ?? occurredAtClient,
+    pressed_at: extras?.pressed_at ?? null,
     odometer: extras?.odometer ?? null,
     time_source: extras?.time_source ?? null,
     odometer_source: extras?.odometer_source ?? null,

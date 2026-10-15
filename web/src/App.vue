@@ -160,6 +160,7 @@ import {
 import { DRIVER_PREFETCH_SYNC_TAG, persistPrefetchPayload, prefetchAssignedRoutesFromSession, routeToListItem } from "./offlinePrefetch";
 import { applyLatestAppVersion } from "./appUpdate";
 import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
+import { datetimeLocalKey } from "./factTime";
 import { readDeviceCoordinates } from "./deviceLocation";
 import { plannedTimeInputValue } from "./plannedTime";
 import { prepareDocumentImageBlobs } from "./imageUploadPrep";
@@ -296,6 +297,7 @@ const statusConfirm = ref<{
   nextLabel: string;
   datetimeLocal: string;
   initialDatetimeLocal: string;
+  pressedAtIso: string;
   showOdometer: boolean;
   odometer: string;
   initialOdometer: string;
@@ -308,6 +310,7 @@ const statusConfirm = ref<{
 const docsUpload = ref<{
   pointId: number;
   occurredAtIso: string;
+  pressedAtIso: string;
   timeSource: "device" | "manual";
   odometer: string;
   odometer_source: "manual" | "wialon" | null;
@@ -2786,6 +2789,7 @@ async function syncOutboxInBackground(): Promise<void> {
           const payload: EventPayload = {
             client_event_id: event.client_event_id,
             occurred_at_client: event.occurred_at_client,
+            pressed_at_client: event.pressed_at_client ?? event.occurred_at_client,
             point_id: event.point_id,
             to_status: event.to_status,
             time_source: event.time_source ?? null,
@@ -3954,7 +3958,9 @@ function openStatusConfirm(pointId: number, mode: "driver" | "manager" = "driver
   if (!nextStatus(fromStatus)) {
     return;
   }
-  const initial = toDatetimeLocalValue(new Date());
+  const pressed = new Date();
+  const pressedAtIso = pressed.toISOString();
+  const initial = toDatetimeLocalValue(pressed);
   const to = nextStatus(fromStatus);
   statusConfirm.value = {
     mode,
@@ -3962,6 +3968,7 @@ function openStatusConfirm(pointId: number, mode: "driver" | "manager" = "driver
     nextLabel: nextStatusLabel(fromStatus) || "",
     datetimeLocal: initial,
     initialDatetimeLocal: initial,
+    pressedAtIso,
     showOdometer: true,
     odometer: "",
     initialOdometer: "",
@@ -4060,8 +4067,10 @@ async function applyStatusConfirm(payload: {
       await applyManagerStatusConfirm(pending, payload);
       return;
     }
-    const iso = fromDatetimeLocalToIso(payload.datetimeLocal);
-    const timeSource: "device" | "manual" = pending.initialDatetimeLocal === payload.datetimeLocal ? "device" : "manual";
+    const timeSource: "device" | "manual" =
+      datetimeLocalKey(pending.initialDatetimeLocal) === datetimeLocalKey(payload.datetimeLocal) ? "device" : "manual";
+    const iso =
+      timeSource === "device" ? pending.pressedAtIso : fromDatetimeLocalToIso(payload.datetimeLocal);
     const base =
       currentSection.value === "driver_route_details" && selectedDriverRoute.value
         ? selectedDriverRoute.value
@@ -4075,6 +4084,7 @@ async function applyStatusConfirm(payload: {
       docsUpload.value = {
         pointId: pending.pointId,
         occurredAtIso: iso,
+        pressedAtIso: pending.pressedAtIso,
         timeSource,
         odometer: payload.odometer,
         odometer_source: payload.odometer_source
@@ -4083,6 +4093,7 @@ async function applyStatusConfirm(payload: {
     }
     await markPointNext(pending.pointId, iso, undefined, {
       timeSource,
+      pressedAt: pending.pressedAtIso,
       odometer: payload.odometer,
       odometer_source: payload.odometer_source,
       estimatedArrival: to === "process" ? payload.etaTime : undefined
@@ -4134,7 +4145,12 @@ async function applyDocsUpload(files: File[]): Promise<void> {
       ctx.pointId,
       ctx.occurredAtIso,
       attach,
-      { timeSource: ctx.timeSource, odometer: ctx.odometer, odometer_source: ctx.odometer_source }
+      {
+        timeSource: ctx.timeSource,
+        pressedAt: ctx.pressedAtIso,
+        odometer: ctx.odometer,
+        odometer_source: ctx.odometer_source
+      }
     );
     await refreshConnectionQueue();
     syncMessage.value = hasNetwork()
@@ -4162,6 +4178,7 @@ async function markPointNext(
   docsAttach?: DocsAttach,
   options?: {
     timeSource?: "device" | "manual";
+    pressedAt?: string;
     odometer?: string;
     odometer_source?: "manual" | "wialon" | null;
     estimatedArrival?: string;
@@ -4194,11 +4211,13 @@ async function markPointNext(
   }
 
   const occurredAt = occurredAtOverride ?? new Date().toISOString();
+  const pressedAt = options?.pressedAt || occurredAt;
   const coords = await readDeviceCoordinates();
   const eta = (options?.estimatedArrival || "").trim();
   const event: EventPayload = {
     client_event_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
     occurred_at_client: occurredAt,
+    pressed_at_client: pressedAt,
     point_id: pointId,
     to_status: toStatus,
     time_source: options?.timeSource ?? "device",
@@ -4217,6 +4236,7 @@ async function markPointNext(
 
   const overlayFields = {
     time: occurredAt,
+    pressed_at: pressedAt,
     odometer: (options?.odometer || "").trim() || null,
     time_source: options?.timeSource ?? "device",
     odometer_source: options?.odometer_source ?? null,

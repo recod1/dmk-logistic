@@ -1,7 +1,9 @@
+import { formatInstantMoscow } from "./factTime";
 import type { PointDto, PointStatus, RouteDto } from "./types";
 
 export type OverlayStageFields = {
   time?: string | null;
+  pressed_at?: string | null;
   odometer?: string | null;
   time_source?: string | null;
   odometer_source?: string | null;
@@ -13,6 +15,7 @@ const STATUS_STAGE: Record<
   {
     time: keyof PointDto;
     legacyTime: keyof PointDto;
+    pressedAt: keyof PointDto;
     odometer: keyof PointDto;
     timeSource: keyof PointDto;
     odometerSource: keyof PointDto;
@@ -21,6 +24,7 @@ const STATUS_STAGE: Record<
   process: {
     time: "departure_time",
     legacyTime: "time_accepted",
+    pressedAt: "departure_pressed_at",
     odometer: "departure_odometer",
     timeSource: "departure_time_source",
     odometerSource: "departure_odometer_source"
@@ -28,6 +32,7 @@ const STATUS_STAGE: Record<
   registration: {
     time: "registration_time",
     legacyTime: "time_registration",
+    pressedAt: "registration_pressed_at",
     odometer: "registration_odometer",
     timeSource: "registration_time_source",
     odometerSource: "registration_odometer_source"
@@ -35,6 +40,7 @@ const STATUS_STAGE: Record<
   load: {
     time: "gate_time",
     legacyTime: "time_put_on_gate",
+    pressedAt: "gate_pressed_at",
     odometer: "gate_odometer",
     timeSource: "gate_time_source",
     odometerSource: "gate_odometer_source"
@@ -42,6 +48,7 @@ const STATUS_STAGE: Record<
   docs: {
     time: "docs_time",
     legacyTime: "time_docs",
+    pressedAt: "docs_pressed_at",
     odometer: "docs_odometer",
     timeSource: "docs_time_source",
     odometerSource: "docs_odometer_source"
@@ -49,6 +56,7 @@ const STATUS_STAGE: Record<
   success: {
     time: "docs_time",
     legacyTime: "time_docs",
+    pressedAt: "docs_pressed_at",
     odometer: "docs_odometer",
     timeSource: "docs_time_source",
     odometerSource: "docs_odometer_source"
@@ -56,17 +64,7 @@ const STATUS_STAGE: Record<
 };
 
 export function formatOverlayTime(raw: string | null | undefined): string {
-  const text = (raw || "").trim();
-  if (!text) return "";
-  if (/^\d{2}\.\d{2}\.\d{4}/.test(text)) {
-    return text.length >= 16 ? text.slice(0, 16) : text;
-  }
-  const dt = new Date(text);
-  if (Number.isNaN(dt.getTime())) {
-    return text;
-  }
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(dt.getDate())}.${pad(dt.getMonth() + 1)}.${dt.getFullYear()} ${pad(dt.getHours())}:${pad(dt.getMinutes())}`;
+  return formatInstantMoscow(raw);
 }
 
 export function rollbackStageOnPoint(
@@ -75,18 +73,22 @@ export function rollbackStageOnPoint(
   previousStatus: PointStatus
 ): PointDto {
   const spec = STATUS_STAGE[rejectedStatus];
-  const next: PointDto = { ...point, status: previousStatus };
-  if (spec) {
-    (next as Record<string, unknown>)[spec.time as string] = null;
-    (next as Record<string, unknown>)[spec.legacyTime as string] = null;
-    (next as Record<string, unknown>)[spec.odometer as string] = null;
-    (next as Record<string, unknown>)[spec.timeSource as string] = null;
-    (next as Record<string, unknown>)[spec.odometerSource as string] = null;
-  }
-  if (rejectedStatus === "process") {
-    next.estimated_arrival = "";
-  }
-  return next;
+  const cleared = spec
+    ? {
+        [spec.time]: null,
+        [spec.legacyTime]: null,
+        [spec.pressedAt]: null,
+        [spec.odometer]: null,
+        [spec.timeSource]: null,
+        [spec.odometerSource]: null
+      }
+    : {};
+  return {
+    ...point,
+    ...cleared,
+    status: previousStatus,
+    estimated_arrival: rejectedStatus === "process" ? "" : point.estimated_arrival
+  } as PointDto;
 }
 
 export function applyStageOverlayToPoint(point: PointDto, status: PointStatus, fields: OverlayStageFields): PointDto {
@@ -95,6 +97,7 @@ export function applyStageOverlayToPoint(point: PointDto, status: PointStatus, f
     return { ...point, status };
   }
   const time = formatOverlayTime(fields.time);
+  const pressed = formatOverlayTime(fields.pressed_at);
   const odometer = (fields.odometer || "").trim();
   const eta = (fields.estimated_arrival || "").trim();
   return {
@@ -103,6 +106,7 @@ export function applyStageOverlayToPoint(point: PointDto, status: PointStatus, f
     estimated_arrival: eta || point.estimated_arrival || "",
     [spec.time]: time || point[spec.time],
     [spec.legacyTime]: time || point[spec.legacyTime],
+    [spec.pressedAt]: pressed && pressed !== time ? pressed : null,
     [spec.odometer]: odometer || point[spec.odometer],
     [spec.timeSource]: fields.time_source || point[spec.timeSource],
     [spec.odometerSource]: fields.odometer_source || point[spec.odometerSource]
@@ -116,6 +120,7 @@ export function applyOverlaysToPoints(
     status: Exclude<PointStatus, "new">;
     occurred_at_client?: string | null;
     time?: string | null;
+    pressed_at?: string | null;
     odometer?: string | null;
     time_source?: string | null;
     odometer_source?: string | null;
@@ -134,6 +139,7 @@ export function applyOverlaysToPoints(
     }
     return applyStageOverlayToPoint(point, overlay.status, {
       time: overlay.time || overlay.occurred_at_client,
+      pressed_at: overlay.pressed_at,
       odometer: overlay.odometer,
       time_source: overlay.time_source,
       odometer_source: overlay.odometer_source,

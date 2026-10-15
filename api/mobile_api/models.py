@@ -254,6 +254,7 @@ class RouteEvent(Base):
     device_id: Mapped[str] = mapped_column(String(128), nullable=False)
     client_event_id: Mapped[str] = mapped_column(String(128), nullable=False)
     occurred_at_client: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    pressed_at_client: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     to_status: Mapped[str] = mapped_column(String(32), nullable=False)
     time_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
     applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")

@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 
 import type { NotificationPrefs } from "../api";
+import { formatNotificationReceivedAt } from "../factTime";
 import { NOTIFICATION_KIND_LABELS, notificationKind, visibleNotificationKindTabs, type NotificationKind } from "../notificationKinds";
 import type { NotificationDto } from "../types";
 
@@ -239,7 +240,10 @@ function formatExtra(item: NotificationDto): string {
       >
         <div class="row-top">
           <strong>{{ item.message }}</strong>
-          <span v-if="chatKindLabel(item)" class="chat-kind">{{ chatKindLabel(item) }}</span>
+          <div class="row-aside">
+            <span v-if="chatKindLabel(item)" class="chat-kind">{{ chatKindLabel(item) }}</span>
+            <time v-if="item.created_at" class="received-at">{{ formatNotificationReceivedAt(item.created_at) }}</time>
+          </div>
         </div>
         <p v-if="formatExtra(item)" class="extra">{{ formatExtra(item) }}</p>
         <div v-if="!item.is_read" class="meta">
@@ -434,6 +438,25 @@ function formatExtra(item: NotificationDto): string {
   min-width: 0;
   overflow-wrap: anywhere;
   word-break: break-word;
+}
+.row-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.28rem;
+  flex: 0 0 auto;
+}
+.received-at {
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.02em;
+  padding: 0.08rem 0.42rem;
+  border-radius: 999px;
+  background: rgba(100, 116, 139, 0.16);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  white-space: nowrap;
 }
 p {
   margin: 0;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from "vue";
 
+import FactTimeCell from "./FactTimeCell.vue";
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
 import PointDocLinks from "./PointDocLinks.vue";
@@ -1084,7 +1085,11 @@ function removeRoute(): void {
               <tr>
                 <td>{{ normalizePointStageLabel("accepted") }}</td>
                 <td>
-                  {{ point.departure_time || point.time_accepted || "—" }}
+                  <FactTimeCell
+                    :time="point.departure_time || point.time_accepted"
+                    :source="point.departure_time_source"
+                    :pressed-at="point.departure_pressed_at"
+                  />
                   <small v-if="editHint(point.manual_edits, 'departure_time')" class="edit-hint">{{ editHint(point.manual_edits, 'departure_time') }}</small>
                 </td>
                 <td>
@@ -1099,7 +1104,11 @@ function removeRoute(): void {
               <tr>
                 <td>{{ normalizePointStageLabel("registration") }}</td>
                 <td>
-                  {{ point.registration_time || point.time_registration || "—" }}
+                  <FactTimeCell
+                    :time="point.registration_time || point.time_registration"
+                    :source="point.registration_time_source"
+                    :pressed-at="point.registration_pressed_at"
+                  />
                   <small v-if="editHint(point.manual_edits, 'registration_time')" class="edit-hint">{{ editHint(point.manual_edits, 'registration_time') }}</small>
                 </td>
                 <td>
@@ -1114,7 +1123,11 @@ function removeRoute(): void {
               <tr>
                 <td>{{ normalizePointStageLabel("load") }}</td>
                 <td>
-                  {{ point.gate_time || point.time_put_on_gate || "—" }}
+                  <FactTimeCell
+                    :time="point.gate_time || point.time_put_on_gate"
+                    :source="point.gate_time_source"
+                    :pressed-at="point.gate_pressed_at"
+                  />
                   <small v-if="editHint(point.manual_edits, 'gate_time')" class="edit-hint">{{ editHint(point.manual_edits, 'gate_time') }}</small>
                 </td>
                 <td>
@@ -1129,7 +1142,11 @@ function removeRoute(): void {
               <tr>
                 <td>{{ normalizePointStageLabel("docs") }}</td>
                 <td>
-                  {{ point.docs_time || point.time_docs || "—" }}
+                  <FactTimeCell
+                    :time="point.docs_time || point.time_docs"
+                    :source="point.docs_time_source"
+                    :pressed-at="point.docs_pressed_at"
+                  />
                   <small v-if="editHint(point.manual_edits, 'docs_time')" class="edit-hint">{{ editHint(point.manual_edits, 'docs_time') }}</small>
                 </td>
                 <td>

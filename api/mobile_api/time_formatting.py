@@ -22,3 +22,11 @@ def format_dt_for_app(dt: datetime | None) -> str | None:
     if value.tzinfo is None:
         value = value.replace(tzinfo=timezone.utc)
     return value.astimezone(display_zone()).strftime("%d.%m.%Y %H:%M")
+
+
+def format_pressed_if_differs(occurred: datetime | None, pressed: datetime | None) -> str | None:
+    occurred_s = format_dt_for_app(occurred)
+    pressed_s = format_dt_for_app(pressed)
+    if not pressed_s or pressed_s == occurred_s:
+        return None
+    return pressed_s

@@ -34,6 +34,7 @@ from mobile_api.route_notification_logic import (
 from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.onec_routes import parse_onec_message
 from mobile_api.roles import RoleCode, role_label_ru
+from mobile_api.point_event_meta import load_point_event_meta, stage_meta_fields
 from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.logistics_contacts_router import logistics_contacts_payload
 from mobile_api.fleet_router import ensure_fleet_trailer, ensure_fleet_vehicle
@@ -348,7 +349,12 @@ def _driver_out(user: User | None) -> dict | None:
     }
 
 
-def _point_out(db: Session, point: Point, order_index: int) -> dict:
+def _point_out(
+    db: Session,
+    point: Point,
+    order_index: int,
+    event_meta: dict[str, dict[str, str]] | None = None,
+) -> dict:
     docs_rows = db.scalars(
         select(PointDocumentImage)
         .where(PointDocumentImage.point_id == point.id)
@@ -356,6 +362,7 @@ def _point_out(db: Session, point: Point, order_index: int) -> dict:
     ).all()
     docs_images = [{"id": row.id, "content_type": row.content_type} for row in docs_rows]
     date_point, point_time = planned_wall_fields(point.date_point, point.point_time)
+    meta = event_meta if event_meta is not None else load_point_event_meta(db, [int(point.id)]).get(int(point.id))
     return {
         "id": point.id,
         "order_index": order_index,
@@ -393,6 +400,7 @@ def _point_out(db: Session, point: Point, order_index: int) -> dict:
         "coordinates": {"lat": point.lat, "lng": point.lng},
         "docs_images": docs_images,
         "manual_edits": _load_manual_edits(point),
+        **stage_meta_fields(meta),
     }
 
 
@@ -519,6 +527,7 @@ def _route_out(
         current_point.date_point if current_point else "",
         current_point.point_time if current_point else "",
     ) if current_point else ("", "")
+    event_meta_by_point = load_point_event_meta(db, [int(point.id) for point in points]) if include_points else {}
     return {
         "id": route.id,
         "status": route.status,
@@ -553,7 +562,14 @@ def _route_out(
         "last_loading_date": last_loading_date,
         "last_loading_time": last_loading_time,
         "analytics": _route_analytics(points) if include_points else None,
-        "points": [_point_out(db, point, idx) for idx, point in enumerate(points)] if include_points else None,
+        "points": (
+            [
+                _point_out(db, point, idx, event_meta=event_meta_by_point.get(int(point.id)))
+                for idx, point in enumerate(points)
+            ]
+            if include_points
+            else None
+        ),
         "cancellations": _cancellations_out(db, route.id) if include_points else None,
     }
 

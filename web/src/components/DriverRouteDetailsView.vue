@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from "vue";
 
+import FactTimeCell from "./FactTimeCell.vue";
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
 import { liveRouteElapsedLabel, routeAnalyticsView } from "../routeAnalytics";
@@ -105,12 +106,6 @@ const logisticsContacts = computed(() => {
 
 function phoneToTel(phoneRaw: string): string {
   return phoneRaw.replace(/[^+\d]/g, "");
-}
-
-function timeSourceLabel(value?: string | null): string {
-  if (value === "manual") return " (вручную)";
-  if (value === "device") return " (устройство)";
-  return "";
 }
 
 function odoSourceLabel(value?: string | null): string {
@@ -315,7 +310,13 @@ function showRevert(pointId: number): boolean {
                 <tbody>
                   <tr>
                     <td>{{ stageLabel("accepted") }}</td>
-                    <td>{{ point.departure_time || point.time_accepted || "—" }}{{ timeSourceLabel(point.departure_time_source) }}</td>
+                    <td>
+                      <FactTimeCell
+                        :time="point.departure_time || point.time_accepted"
+                        :source="point.departure_time_source"
+                        :pressed-at="point.departure_pressed_at"
+                      />
+                    </td>
                     <td>{{ point.departure_odometer || "—" }}{{ odoSourceLabel(point.departure_odometer_source) }}</td>
                     <td>
                       <MapsCoordsLink :lat="point.departure_coordinates?.lat" :lng="point.departure_coordinates?.lng" />
@@ -323,7 +324,13 @@ function showRevert(pointId: number): boolean {
                   </tr>
                   <tr>
                     <td>{{ stageLabel("registration") }}</td>
-                    <td>{{ point.registration_time || point.time_registration || "—" }}{{ timeSourceLabel(point.registration_time_source) }}</td>
+                    <td>
+                      <FactTimeCell
+                        :time="point.registration_time || point.time_registration"
+                        :source="point.registration_time_source"
+                        :pressed-at="point.registration_pressed_at"
+                      />
+                    </td>
                     <td>{{ point.registration_odometer || "—" }}{{ odoSourceLabel(point.registration_odometer_source) }}</td>
                     <td>
                       <MapsCoordsLink :lat="point.registration_coordinates?.lat" :lng="point.registration_coordinates?.lng" />
@@ -331,7 +338,13 @@ function showRevert(pointId: number): boolean {
                   </tr>
                   <tr>
                     <td>{{ stageLabel("load") }}</td>
-                    <td>{{ point.gate_time || point.time_put_on_gate || "—" }}{{ timeSourceLabel(point.gate_time_source) }}</td>
+                    <td>
+                      <FactTimeCell
+                        :time="point.gate_time || point.time_put_on_gate"
+                        :source="point.gate_time_source"
+                        :pressed-at="point.gate_pressed_at"
+                      />
+                    </td>
                     <td>{{ point.gate_odometer || "—" }}{{ odoSourceLabel(point.gate_odometer_source) }}</td>
                     <td>
                       <MapsCoordsLink :lat="point.gate_coordinates?.lat" :lng="point.gate_coordinates?.lng" />
@@ -339,7 +352,13 @@ function showRevert(pointId: number): boolean {
                   </tr>
                   <tr>
                     <td>{{ stageLabel("docs") }}</td>
-                    <td>{{ point.docs_time || point.time_docs || "—" }}{{ timeSourceLabel(point.docs_time_source) }}</td>
+                    <td>
+                      <FactTimeCell
+                        :time="point.docs_time || point.time_docs"
+                        :source="point.docs_time_source"
+                        :pressed-at="point.docs_pressed_at"
+                      />
+                    </td>
                     <td>{{ point.docs_odometer || "—" }}{{ odoSourceLabel(point.docs_odometer_source) }}</td>
                     <td>
                       <MapsCoordsLink :lat="point.docs_coordinates?.lat" :lng="point.docs_coordinates?.lng" />

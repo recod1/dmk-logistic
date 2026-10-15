@@ -41,7 +41,8 @@ export interface PointDto {
   time_docs: string | null;
   time_departure: string | null;
   departure_time?: string | null;
-  departure_time_source?: "device" | "manual" | null;
+  departure_time_source?: "device" | "manual" | "wialon" | null;
+  departure_pressed_at?: string | null;
   departure_odometer?: string | null;
   departure_odometer_source?: "manual" | "wialon" | null;
   departure_coordinates?: {
@@ -49,7 +50,8 @@ export interface PointDto {
     lng: number | null;
   } | null;
   registration_time?: string | null;
-  registration_time_source?: "device" | "manual" | null;
+  registration_time_source?: "device" | "manual" | "wialon" | null;
+  registration_pressed_at?: string | null;
   registration_odometer?: string | null;
   registration_odometer_source?: "manual" | "wialon" | null;
   registration_coordinates?: {
@@ -57,7 +59,8 @@ export interface PointDto {
     lng: number | null;
   } | null;
   gate_time?: string | null;
-  gate_time_source?: "device" | "manual" | null;
+  gate_time_source?: "device" | "manual" | "wialon" | null;
+  gate_pressed_at?: string | null;
   gate_odometer?: string | null;
   gate_odometer_source?: "manual" | "wialon" | null;
   gate_coordinates?: {
@@ -65,7 +68,8 @@ export interface PointDto {
     lng: number | null;
   } | null;
   docs_time?: string | null;
-  docs_time_source?: "device" | "manual" | null;
+  docs_time_source?: "device" | "manual" | "wialon" | null;
+  docs_pressed_at?: string | null;
   docs_odometer?: string | null;
   docs_odometer_source?: "manual" | "wialon" | null;
   docs_coordinates?: {
@@ -107,6 +111,7 @@ export interface ActiveRouteResponse {
 export interface EventPayload {
   client_event_id: string;
   occurred_at_client: string;
+  pressed_at_client?: string | null;
   point_id: number;
   to_status: Exclude<PointStatus, "new">;
   time_source?: "device" | "manual" | null;
@@ -273,6 +278,8 @@ export interface AdminRoute {
       time_docs: string | null;
       time_departure: string | null;
       departure_time?: string | null;
+      departure_time_source?: "device" | "manual" | "wialon" | null;
+      departure_pressed_at?: string | null;
       departure_odometer?: string | null;
       departure_odometer_source?: "manual" | "wialon" | null;
       departure_coordinates?: {
@@ -280,6 +287,8 @@ export interface AdminRoute {
         lng: number | null;
       } | null;
       registration_time?: string | null;
+      registration_time_source?: "device" | "manual" | "wialon" | null;
+      registration_pressed_at?: string | null;
       registration_odometer?: string | null;
       registration_odometer_source?: "manual" | "wialon" | null;
       registration_coordinates?: {
@@ -287,6 +296,8 @@ export interface AdminRoute {
         lng: number | null;
       } | null;
       gate_time?: string | null;
+      gate_time_source?: "device" | "manual" | "wialon" | null;
+      gate_pressed_at?: string | null;
       gate_odometer?: string | null;
       gate_odometer_source?: "manual" | "wialon" | null;
       gate_coordinates?: {
@@ -294,6 +305,8 @@ export interface AdminRoute {
         lng: number | null;
       } | null;
       docs_time?: string | null;
+      docs_time_source?: "device" | "manual" | "wialon" | null;
+      docs_pressed_at?: string | null;
       docs_odometer?: string | null;
       docs_odometer_source?: "manual" | "wialon" | null;
       docs_coordinates?: {
