@@ -2050,6 +2050,10 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
   return outputArray;
 }
 
+let pushEnsureInFlight = false;
+let lastPushEnsureOkAt = 0;
+let lastPushEnsureFailAt = 0;
+
 async function ensureWebPushSubscription(): Promise<void> {
   if (!authToken.value || typeof window === "undefined") {
     return;
@@ -2060,6 +2064,16 @@ async function ensureWebPushSubscription(): Promise<void> {
   if (!("serviceWorker" in navigator) || !("PushManager" in window)) {
     return;
   }
+  if (pushEnsureInFlight) {
+    return;
+  }
+  if (lastPushEnsureOkAt && Date.now() - lastPushEnsureOkAt < 10 * 60_000) {
+    return;
+  }
+  if (lastPushEnsureFailAt && Date.now() - lastPushEnsureFailAt < 120_000) {
+    return;
+  }
+  pushEnsureInFlight = true;
   try {
     const registration = await navigator.serviceWorker.ready;
     const existing = await registration.pushManager.getSubscription();
@@ -2072,18 +2086,22 @@ async function ensureWebPushSubscription(): Promise<void> {
             endpoint: json.endpoint,
             keys: { p256dh: key.p256dh, auth: key.auth }
           });
+          lastPushEnsureOkAt = Date.now();
         } catch {
-          // keep local subscription; server sync retries on next resume
+          lastPushEnsureFailAt = Date.now();
         }
       }
       webPushSubscribed.value = true;
       useLegacyBrowserNotification.value = false;
       return;
     }
+    await trySubscribeWebPush();
+    lastPushEnsureOkAt = Date.now();
   } catch {
-    // fall through to subscribe
+    lastPushEnsureFailAt = Date.now();
+  } finally {
+    pushEnsureInFlight = false;
   }
-  await trySubscribeWebPush();
 }
 
 async function trySubscribeWebPush(): Promise<void> {
@@ -3480,11 +3498,14 @@ async function doMarkNotificationRead(notificationId: number): Promise<void> {
 }
 
 function markUnreadSalaryNotifications(): void {
-  notifications.value
-    .filter((item) => !item.is_read && item.event_type === "salary_new")
-    .forEach((item) => {
-      void doMarkNotificationRead(item.id);
-    });
+  const unreadSalary = notifications.value.filter((item) => !item.is_read && item.event_type === "salary_new");
+  for (const item of unreadSalary) {
+    applyLocalNotificationRead(item.id);
+    queuePendingNotificationRead(item.id);
+  }
+  if (unreadSalary.length) {
+    void flushPendingNotificationReads();
+  }
 }
 
 async function doMarkAllNotificationsRead(kind?: string): Promise<void> {

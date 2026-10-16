@@ -1,5 +1,5 @@
-import { reportDebugError } from "./debugLog";
-import { noteApiReachable, setApiLoad } from "./connectionWatch";
+import { connectionNetInfo, reportDebugError } from "./debugLog";
+import { lastHealthDurationMs, noteApiReachable, setApiLoad } from "./connectionWatch";
 import { fetchWithHardTimeout, mergeAbortSignals, withRetryBust } from "./hardFetch";
 import type {
   ActiveRouteResponse,
@@ -97,15 +97,37 @@ function isCoarsePointer(): boolean {
   return typeof window !== "undefined" && Boolean(window.matchMedia?.("(pointer: coarse)")?.matches);
 }
 
+function networkLooksSlow(): boolean {
+  const net = connectionNetInfo();
+  const healthMs = lastHealthDurationMs();
+  if (typeof net.downlink === "number" && net.downlink > 0 && net.downlink < 2) {
+    return true;
+  }
+  if (typeof net.rtt === "number" && net.rtt >= 80) {
+    return true;
+  }
+  if (typeof healthMs === "number" && healthMs >= 2500) {
+    return true;
+  }
+  const kind = (net.effectiveType || "").toLowerCase();
+  return kind === "slow-2g" || kind === "2g" || kind === "3g";
+}
+
 function defaultFetchTimeoutMs(): number {
   if (typeof window === "undefined") {
     return 20_000;
   }
-  return isCoarsePointer() ? 16_000 : 18_000;
+  if (networkLooksSlow()) {
+    return 40_000;
+  }
+  return isCoarsePointer() ? 22_000 : 28_000;
 }
 
 function maxApiConcurrency(): number {
-  return isCoarsePointer() ? 1 : 3;
+  if (isCoarsePointer() || networkLooksSlow()) {
+    return 1;
+  }
+  return 2;
 }
 
 let apiRunning = 0;
@@ -147,6 +169,17 @@ function sleep(ms: number): Promise<void> {
 function isAbortLike(error: unknown): boolean {
   const name = (error as { name?: string } | null)?.name || "";
   return name === "AbortError" || name === "TimeoutError";
+}
+
+function isHardTimeout(error: unknown): boolean {
+  const name = (error as { name?: string } | null)?.name || "";
+  const message = ((error as Error | null)?.message || "").toLowerCase();
+  return name === "TimeoutError" || name === "AbortError" || message === "timeout" || message.includes("aborted");
+}
+
+function isInstantNetworkFail(error: unknown): boolean {
+  const message = ((error as Error | null)?.message || "").toLowerCase();
+  return message.includes("failed to fetch") || message.includes("load failed") || message.includes("networkerror");
 }
 
 export function isPageHidden(): boolean {
@@ -238,14 +271,24 @@ async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs
   const maxAttempts = canRetry ? (isCoarsePointer() ? 3 : 2) : 1;
   let response: Response | undefined;
   let lastError: unknown;
+  let attemptsUsed = 0;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    attemptsUsed = attempt + 1;
+    const startedAt = Date.now();
     try {
       response = await fetchWithTimeout(withRetryBust(url, attempt), init, headers, timeoutMs);
       lastError = null;
       break;
     } catch (error) {
       lastError = error;
-      if (attempt + 1 >= maxAttempts || isPageHidden() || !(isAbortLike(error) || isOfflineLikeError(error))) {
+      const usedBudget = Date.now() - startedAt >= timeoutMs - 250;
+      const canRetryThis =
+        canRetry &&
+        !isPageHidden() &&
+        !usedBudget &&
+        isInstantNetworkFail(error) &&
+        !isHardTimeout(error);
+      if (attempt + 1 >= maxAttempts || !canRetryThis) {
         break;
       }
       await sleep(isCoarsePointer() ? 600 + attempt * 400 : 350);
@@ -270,7 +313,7 @@ async function requestJsonInner<T>(url: string, init?: RequestInit & { timeoutMs
         error: apiError,
         url,
         method,
-        extra: { timeout_ms: timeoutMs, name, retried: canRetry, attempts: maxAttempts }
+        extra: { timeout_ms: timeoutMs, name, retried: attemptsUsed > 1, attempts: attemptsUsed }
       });
     }
     if (apiError instanceof ApiError) {
@@ -912,6 +955,7 @@ export async function subscribeWebPush(
 ): Promise<void> {
   await requestJson<{ ok: boolean }>(`${API_BASE}/v1/notifications/push/subscribe`, {
     method: "POST",
+    timeoutMs: 25_000,
     headers: {
       Authorization: `Bearer ${token}`,
       "Content-Type": "application/json"

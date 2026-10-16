@@ -40,12 +40,12 @@ export async function fetchWithHardTimeout(
   });
   const timeoutPromise = new Promise<never>((_, reject) => {
     timer = globalThis.setTimeout(() => {
+      reject(createTimeoutError());
       try {
         timeoutCtrl.abort();
       } catch {
         // Safari may keep the HTTP request alive.
       }
-      reject(createTimeoutError());
     }, timeoutMs);
   });
   try {

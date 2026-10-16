@@ -32,11 +32,11 @@ let apiQueued = false;
 let healthAbort: AbortController | null = null;
 
 function healthTimeoutMs(): number {
-  if (typeof window === "undefined") {
-    return 12_000;
-  }
-  const coarse = window.matchMedia?.("(pointer: coarse)")?.matches;
-  return coarse ? 10_000 : 8_000;
+  return 12_000;
+}
+
+export function lastHealthDurationMs(): number | null {
+  return lastHealthMs.value;
 }
 
 export function setApiLoad(busy: boolean, queued: boolean): void {

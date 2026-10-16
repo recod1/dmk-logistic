@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -250,6 +250,85 @@ def _room_out(db: Session, room: ChatRoom, current_user: User, unread_by_room: d
         "last_message_delivered": last_delivered,
         "created_at": room.created_at.isoformat() if isinstance(room.created_at, datetime) else str(room.created_at),
     }
+
+
+def _rooms_list_out(db: Session, rooms: list[ChatRoom], current_user: User) -> list[dict]:
+    """Hub list without per-room N+1 (unread, last message, author)."""
+    if not rooms:
+        return []
+    room_ids = [int(room.id) for room in rooms]
+    reads = db.scalars(
+        select(ChatRead).where(ChatRead.user_id == current_user.id, ChatRead.room_id.in_(room_ids))
+    ).all()
+    last_read_by_room = {int(row.room_id): int(row.last_read_message_id or 0) for row in reads}
+    unread_by_room = {room_id: 0 for room_id in room_ids}
+    unread_q = select(ChatMessage.room_id, func.count()).where(
+        ChatMessage.room_id.in_(room_ids),
+        ChatMessage.user_id != current_user.id,
+    )
+    if last_read_by_room:
+        unread_q = unread_q.where(ChatMessage.id > case(last_read_by_room, value=ChatMessage.room_id, else_=0))
+    for room_id, count in db.execute(unread_q.group_by(ChatMessage.room_id)).all():
+        unread_by_room[int(room_id)] = int(count)
+
+    max_sub = (
+        select(ChatMessage.room_id, func.max(ChatMessage.id).label("max_id"))
+        .where(ChatMessage.room_id.in_(room_ids))
+        .group_by(ChatMessage.room_id)
+        .subquery()
+    )
+    last_msgs = db.scalars(
+        select(ChatMessage).join(
+            max_sub,
+            (ChatMessage.room_id == max_sub.c.room_id) & (ChatMessage.id == max_sub.c.max_id),
+        )
+    ).all()
+    last_by_room = {int(msg.room_id): msg for msg in last_msgs}
+    author_ids = {int(msg.user_id) for msg in last_msgs}
+    authors = (
+        {int(user.id): user for user in db.scalars(select(User).where(User.id.in_(author_ids))).all()}
+        if author_ids
+        else {}
+    )
+
+    items: list[dict] = []
+    for room in rooms:
+        last = last_by_room.get(int(room.id))
+        title = room.title
+        if room.kind == "direct":
+            title = _room_title_for_direct(db, room, current_user)
+        last_author = ""
+        last_text = ""
+        last_at = None
+        last_user_id = None
+        if last is not None:
+            author = authors.get(int(last.user_id))
+            last_author = ((author.full_name or author.login) if author else f"user#{last.user_id}") or ""
+            last_text = (last.text or "").strip() or "Вложение"
+            last_at = last.created_at.isoformat() if isinstance(last.created_at, datetime) else str(last.created_at)
+            last_user_id = int(last.user_id)
+        last_read = False
+        last_delivered = False
+        if last is not None and last_user_id == int(current_user.id):
+            last_read = int(last.id) <= _others_room_read_watermark(db, int(room.id), int(current_user.id))
+            last_delivered = int(last.id) <= _others_room_delivered_watermark(db, int(room.id), int(current_user.id))
+        items.append(
+            {
+                "id": int(room.id),
+                "kind": room.kind,
+                "title": title or "",
+                "system_key": room.system_key,
+                "unread_count": unread_by_room.get(int(room.id), 0),
+                "last_message_text": last_text,
+                "last_message_at": last_at,
+                "last_author_name": last_author,
+                "last_message_user_id": last_user_id,
+                "last_message_read": last_read,
+                "last_message_delivered": last_delivered,
+                "created_at": room.created_at.isoformat() if isinstance(room.created_at, datetime) else str(room.created_at),
+            }
+        )
+    return items
 
 
 def _message_out(db: Session, msg: ChatMessage, *, read: bool | None = None, delivered: bool | None = None) -> dict:
@@ -500,20 +579,7 @@ def list_rooms(
             return {"items": []}
         rooms = db.scalars(q.where(ChatRoom.id.in_(allowed))).all()
 
-    # unread counts
-    reads = db.scalars(select(ChatRead).where(ChatRead.user_id == current_user.id, ChatRead.room_id.in_([r.id for r in rooms]))).all()
-    last_by_room = {int(r.room_id): int(r.last_read_message_id or 0) for r in reads}
-    unread_by_room: dict[int, int] = {}
-    for room in rooms:
-        last_id = last_by_room.get(int(room.id), 0)
-        unread = db.scalar(
-            select(func.count())
-            .select_from(ChatMessage)
-            .where(ChatMessage.room_id == room.id, ChatMessage.id > last_id, ChatMessage.user_id != current_user.id)
-        ) or 0
-        unread_by_room[int(room.id)] = int(unread)
-
-    items = [_room_out(db, r, current_user, unread_by_room) for r in rooms]
+    items = _rooms_list_out(db, rooms, current_user)
     items.sort(key=lambda row: row.get("last_message_at") or row.get("created_at") or "", reverse=True)
     return {"items": items}
 

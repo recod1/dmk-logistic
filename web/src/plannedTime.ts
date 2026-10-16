@@ -91,11 +91,7 @@ export function plannedDateInputValue(date?: string | null, time?: string | null
 }
 
 export function plannedTimeInputValue(date?: string | null, time?: string | null): string {
-  const fromTime = splitPlannedDateTime(time || "").time;
-  if (fromTime) {
-    return fromTime;
-  }
-  return splitPlannedDateTime(date || "").time;
+  return plannedTimeDisplay(date, time);
 }
 
 export function plannedDateDisplay(date?: string | null, time?: string | null): string {
@@ -106,12 +102,40 @@ export function plannedDateDisplay(date?: string | null, time?: string | null): 
   return splitPlannedDateTime(time || "").date;
 }
 
+function clockHm(value: string): { hour: number; minute: number } | null {
+  const match = /^(\d{1,2}):(\d{2})/.exec((value || "").trim());
+  if (!match) {
+    return null;
+  }
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+  return { hour, minute };
+}
+
+/** If 1C sent 14:00 on the date and 02:00 in a 12-hour time field, keep 14:00. */
+export function prefer24hWallTime(timeFromDate: string, timeFromTime: string): string {
+  if (timeFromDate && timeFromTime) {
+    const left = clockHm(timeFromDate);
+    const right = clockHm(timeFromTime);
+    if (left && right && left.minute === right.minute && Math.abs(left.hour - right.hour) === 12) {
+      const hour = Math.max(left.hour, right.hour);
+      return `${pad2(hour)}:${pad2(left.minute)}`;
+    }
+    if (left && right && left.hour >= 13 && right.hour <= 12) {
+      return timeFromDate;
+    }
+    return timeFromTime;
+  }
+  return timeFromTime || timeFromDate;
+}
+
 export function plannedTimeDisplay(date?: string | null, time?: string | null): string {
   const fromTime = splitPlannedDateTime(time || "").time;
-  if (fromTime) {
-    return fromTime;
-  }
-  return splitPlannedDateTime(date || "").time;
+  const fromDate = splitPlannedDateTime(date || "").time;
+  return prefer24hWallTime(fromDate, fromTime);
 }
 
 export function plannedScheduleDisplay(date?: string | null, time?: string | null): string {

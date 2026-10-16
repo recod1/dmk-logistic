@@ -60,6 +60,17 @@ class OnecDatetimeTests(TestCase):
         self.assertEqual(split_onec_wall_datetime("14.10.2026 18:00pm"), ("14.10.2026", "18:00"))
         self.assertEqual(split_onec_wall_datetime("14.10.2026 18:00 AM"), ("14.10.2026", "18:00"))
 
+    def test_keeps_1400_literal(self) -> None:
+        self.assertEqual(split_onec_wall_datetime("16.10.2026 14:00"), ("16.10.2026", "14:00"))
+        self.assertEqual(split_onec_wall_datetime("2026-10-16T14:00:00"), ("16.10.2026", "14:00"))
+        self.assertEqual(split_onec_wall_datetime("2026-10-16T14:00:00Z"), ("16.10.2026", "14:00"))
+        self.assertEqual(planned_wall_fields("16.10.2026 14:00", ""), ("16.10.2026", "14:00"))
+        self.assertNotEqual(split_onec_wall_datetime("16.10.2026 14:00")[1], "02:00")
+
+    def test_prefers_24h_when_time_field_is_12h_clash(self) -> None:
+        self.assertEqual(planned_wall_fields("16.10.2026 14:00", "02:00"), ("16.10.2026", "14:00"))
+        self.assertEqual(planned_wall_fields("2026-10-16T14:00:00", "2:00:00"), ("16.10.2026", "14:00"))
+
 
 class OnecParseTests(TestCase):
     def test_parse_loading_keeps_1630(self) -> None:
@@ -180,3 +191,15 @@ class OnecParseTests(TestCase):
         self.assertEqual(parsed.points[1].point_time, "21:00")
         self.assertEqual(parsed.points[0].date_point, "14.10.2026")
         self.assertEqual(parsed.points[1].date_point, "14.10.2026")
+
+    def test_keeps_1400_from_onec_text(self) -> None:
+        from mobile_api.onec_routes import parse_onec_message
+
+        parsed = parse_onec_message(
+            "00ЭК-1\nЗагр: 16.10.2026 14:00 Организация: Склад\nВыгр: 16.10.2026 14:00 Организация: Магазин\n"
+        )
+        self.assertEqual(parsed.points[0].point_time, "14:00")
+        self.assertEqual(parsed.points[1].point_time, "14:00")
+        self.assertNotEqual(parsed.points[0].point_time, "02:00")
+        self.assertEqual(parsed.points[0].date_point, "16.10.2026")
+        self.assertEqual(parsed.points[1].date_point, "16.10.2026")

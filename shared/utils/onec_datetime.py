@@ -106,10 +106,39 @@ def normalize_planned_time(raw: str | None) -> str:
     return ""
 
 
+def _clock_hm(value: str) -> tuple[int, int] | None:
+    text = (value or "").strip()
+    if len(text) < 4 or ":" not in text:
+        return None
+    hour_s, minute_s = text.split(":", 1)
+    try:
+        hour = int(hour_s)
+        minute = int(minute_s[:2])
+    except ValueError:
+        return None
+    if 0 <= hour <= 23 and 0 <= minute <= 59:
+        return hour, minute
+    return None
+
+
+def prefer_24h_wall_time(time_from_date: str, time_from_time: str) -> str:
+    """If 1C sends 14:00 on the date and 02:00 in a 12-hour time field, keep 14:00."""
+    if time_from_date and time_from_time:
+        left = _clock_hm(time_from_date)
+        right = _clock_hm(time_from_time)
+        if left and right and left[1] == right[1] and abs(left[0] - right[0]) == 12:
+            return format_planned_time(max(left[0], right[0]), left[1])
+        if left and right and left[0] >= 13 and right[0] <= 12:
+            return time_from_date
+        return time_from_time
+    return time_from_time or time_from_date
+
+
 def planned_wall_fields(date_raw: str | None, time_raw: str | None = None) -> tuple[str, str]:
     """Return (dd.MM.yyyy, HH:mm) without TZ/12-hour conversion."""
     date_s, time_from_date = split_onec_wall_datetime(date_raw)
-    time_s = normalize_planned_time(time_raw) or time_from_date
+    time_from_time = normalize_planned_time(time_raw)
+    time_s = prefer_24h_wall_time(time_from_date, time_from_time)
     return date_s or (date_raw or "").strip(), time_s
 
 

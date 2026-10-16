@@ -53,6 +53,12 @@ API_KEY = os.getenv("API_KEY")
 def bootstrap_mobile_user():
     """Опционально создаёт демо-пользователя для нового mobile-стека."""
     try:
+        import anyio
+
+        anyio.to_thread.current_default_thread_limiter().total_tokens = 64
+    except Exception as exc:
+        logger.warning("Threadpool limiter not raised: %s", exc)
+    try:
         from services.wialon_service import wialon_runtime_diagnostics
 
         wd = wialon_runtime_diagnostics()
@@ -87,7 +93,8 @@ async def root():
 
 
 @app.get("/health")
-def health() -> dict:
+async def health() -> dict:
+    """Async so a busy threadpool of sync routes cannot block the liveness check."""
     return {"ok": True}
 
 
@@ -151,7 +158,8 @@ class RoutePointCreate(BaseModel):
     """Точка маршрута (загрузка/выгрузка)."""
     type_point: str  # "loading" или "unloading"
     place_point: str
-    date_point: str  # формат дд.мм.гггг
+    date_point: str  # дата или дата+время как в 1С, настенные часы без сдвига TZ
+    point_time: Optional[str] = ""
 
 
 class RouteCreate(BaseModel):
@@ -200,10 +208,13 @@ async def create_route(route_data: RouteCreate):
         raise HTTPException(status_code=500, detail="Failed to create route")
     point_ids = []
     if route_data.points:
+        from utils.onec_datetime import planned_wall_fields
+
         for p in route_data.points:
             type_point = (p.type_point or "").strip().lower()
             if type_point not in ("loading", "unloading"):
                 type_point = "loading"
+            date_point, point_time = planned_wall_fields(p.date_point or "", p.point_time or "")
             last_id = route_repo.get_last_point_id()
             point_id = last_id + 1 if last_id else 1
             route_repo.create_point(
@@ -211,7 +222,8 @@ async def create_route(route_data: RouteCreate):
                 route_id=route_data.route_id,
                 type_point=type_point,
                 place_point=(p.place_point or "").strip(),
-                date_point=(p.date_point or "").strip(),
+                date_point=date_point,
+                point_time=point_time,
             )
             point_ids.append(str(point_id))
         if point_ids:
