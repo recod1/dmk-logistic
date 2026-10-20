@@ -88,19 +88,21 @@ const statusTabs: Array<{ label: string; value: RouteWorkflowStatus | "" }> = [
 const showCreate = ref(false);
 const showCreateOnec = ref(false);
 const keepCreateOpen = ref(false);
+const createSubmitPending = ref(false);
 const createCardEl = ref<HTMLElement | null>(null);
 
 watch(
   () => [props.loading, props.error] as const,
-  ([loading, error], prev) => {
-    if (keepCreateOpen.value) {
+  ([loading, error]) => {
+    if (!createSubmitPending.value || loading) {
       return;
     }
-    if (!prev?.[0] || loading || error) {
-      return;
+    createSubmitPending.value = false;
+    if (!error) {
+      showCreate.value = false;
+      showCreateOnec.value = false;
+      keepCreateOpen.value = false;
     }
-    showCreate.value = false;
-    showCreateOnec.value = false;
   }
 );
 const searchOpen = ref(
@@ -409,7 +411,8 @@ function openCreate(prefill?: {
   number_auto?: string;
   trailer_number?: string;
 }): void {
-  keepCreateOpen.value = Boolean(prefill?.route_id);
+  keepCreateOpen.value = true;
+  createSubmitPending.value = false;
   showCreate.value = true;
   showCreateOnec.value = false;
   createForm.route_id = prefill?.route_id || "";
@@ -447,10 +450,12 @@ watch(
 function closeCreate(): void {
   showCreate.value = false;
   keepCreateOpen.value = false;
+  createSubmitPending.value = false;
 }
 
 function openCreateOnec(): void {
-  keepCreateOpen.value = false;
+  keepCreateOpen.value = true;
+  createSubmitPending.value = false;
   showCreateOnec.value = true;
   showCreate.value = false;
   onecForm.raw_text = "";
@@ -511,6 +516,8 @@ function submitCreate(): void {
   if (!driverFio) {
     return;
   }
+  createSubmitPending.value = true;
+  keepCreateOpen.value = true;
   emit("create", {
     route_id: createForm.route_id.trim(),
     driver_fio: driverFio,
@@ -531,6 +538,8 @@ function submitCreateOnec(): void {
   if (!raw) {
     return;
   }
+  createSubmitPending.value = true;
+  keepCreateOpen.value = true;
   emit("createOnec", {
     raw_text: raw,
     driver_user_id: onecForm.driver_user_id || null,
@@ -541,7 +550,9 @@ function submitCreateOnec(): void {
 }
 
 onMounted(() => {
-  doSearch();
+  if (!props.routes.length) {
+    doSearch();
+  }
 });
 </script>
 

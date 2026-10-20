@@ -23,10 +23,10 @@ const open = ref(false);
 const matches = computed(() => {
   const q = (props.modelValue || "").trim().toLowerCase();
   const list = props.items || [];
-  if (!q) {
-    return list.slice(0, 12);
-  }
-  return list.filter((item) => item.label.toLowerCase().includes(q)).slice(0, 12);
+  const exactPick = Boolean(q && list.some((item) => item.label.toLowerCase() === q));
+  const showAll = !q || (props.picked && exactPick);
+  const filtered = showAll ? list : list.filter((item) => item.label.toLowerCase().includes(q));
+  return filtered.slice(0, 80);
 });
 
 function onPick(item: SuggestItem): void {
@@ -132,7 +132,7 @@ onUnmounted(() => {
 }
 .suggest {
   position: absolute;
-  z-index: 6;
+  z-index: 20;
   left: 0;
   right: 0;
   top: calc(100% + 4px);

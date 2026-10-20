@@ -203,6 +203,7 @@ export interface AdminRouteCreatePayload {
   driver_fio: string;
   driver_user_id?: number | null;
   created_by_user_id?: number | null;
+  created_by_fio?: string;
   number_auto?: string;
   temperature?: string;
   dispatcher_contacts?: string;

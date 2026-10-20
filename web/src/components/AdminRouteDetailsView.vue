@@ -722,12 +722,17 @@ function removeRoute(): void {
         </button>
         <div v-if="showReassign" class="reassign-wrap">
           <SuggestField
+            class="reassign-driver"
             v-model="reassignDriverQuery"
             :items="driverSuggest"
             :picked="reassignDriverId > 0"
-            placeholder="Начните вводить ФИО"
+            placeholder="Нажмите, чтобы выбрать"
+            empty-label="Сбросить водителя"
             @pick="(item) => (reassignDriverId = item.id)"
-          />
+            @clear="reassignDriverId = 0; reassignDriverQuery = ''"
+          >
+            <template #label>ФИО водителя</template>
+          </SuggestField>
           <SuggestField
             v-model="reassignNumberAuto"
             :items="vehicleSuggest"
@@ -1246,6 +1251,10 @@ function removeRoute(): void {
   display: flex;
   flex-wrap: wrap;
   gap: 0.45rem;
+  overflow: visible;
+}
+.reassign-driver {
+  flex: 1 1 100%;
 }
 .cancel-box {
   width: 100%;

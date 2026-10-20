@@ -53,25 +53,37 @@ export function splitPlannedDateTime(raw?: string | null): { date: string; time:
     rest = `${text.slice(0, dmy.index)} ${text.slice(dmy.index + dmy[0].length)}`.trim();
   }
   const search = date ? rest : text;
-  const tm = TIME.exec(search);
-  let time = "";
-  if (tm) {
+  return { date, time: pickWallClockTime(search) };
+}
+
+function pickWallClockTime(search: string): string {
+  const candidates: Array<{ hour: number; minute: number; afternoon: boolean }> = [];
+  const timeRe = new RegExp(TIME.source, "g");
+  let tm: RegExpExecArray | null;
+  while ((tm = timeRe.exec(search))) {
     const hour = hourFromToken(Number(tm[1]), tm[4]);
     const minute = Number(tm[2]);
     if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
-      time = `${pad2(hour)}:${pad2(minute)}`;
+      candidates.push({ hour, minute, afternoon: hour >= 13 || Boolean(tm[4]) });
     }
-  } else {
-    const flex = TIME_FLEX.exec(search);
-    if (flex) {
+  }
+  if (!candidates.length) {
+    const flexRe = new RegExp(TIME_FLEX.source, "g");
+    let flex: RegExpExecArray | null;
+    while ((flex = flexRe.exec(search))) {
       const hour = Number(flex[1]);
       const minute = Number(flex[2]);
       if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
-        time = `${pad2(hour)}:${pad2(minute)}`;
+        candidates.push({ hour, minute, afternoon: hour >= 13 });
       }
     }
   }
-  return { date, time };
+  if (!candidates.length) {
+    return "";
+  }
+  const afternoon = candidates.find((item) => item.hour >= 13);
+  const chosen = afternoon || candidates[0];
+  return `${pad2(chosen.hour)}:${pad2(chosen.minute)}`;
 }
 
 export function plannedDateInputValue(date?: string | null, time?: string | null): string {

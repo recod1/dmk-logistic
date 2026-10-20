@@ -7,7 +7,7 @@ import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_route_manager
@@ -19,10 +19,15 @@ from mobile_api.models import (
     PointDocumentImage,
     Route,
     RouteCancellation,
+    RouteChatAttachment,
+    RouteChatDelivery,
+    RouteChatMessage,
+    RouteChatRead,
     RouteEvent,
     RoutePoint,
     User,
 )
+from mobile_api.route_id_archive import next_archived_route_id, route_id_search_like
 from mobile_api.route_notification_logic import (
     notify_driver_route_updated,
     notify_route_assigned,
@@ -182,6 +187,7 @@ class AdminRouteCreatePayload(BaseModel):
     driver_fio: str = Field(default="", max_length=255)
     driver_user_id: int | None = None
     created_by_user_id: int | None = None
+    created_by_fio: str = Field(default="", max_length=255)
     number_auto: str = ""
     temperature: str = ""
     dispatcher_contacts: str = ""
@@ -196,6 +202,7 @@ class AdminRouteCreateFromOnecPayload(BaseModel):
     raw_text: str = Field(min_length=1, max_length=20000)
     driver_user_id: int | None = None
     created_by_user_id: int | None = None
+    created_by_fio: str = Field(default="", max_length=255)
     number_auto: str | None = Field(default=None, max_length=64)
     trailer_number: str | None = Field(default=None, max_length=64)
     recreate_cancelled: bool = False
@@ -647,10 +654,73 @@ def _ensure_route_id_for_create(db: Session, route: Route | None, *, recreate_ca
     if route is None:
         return None
     if route.status == "cancelled":
-        if recreate_cancelled:
-            return route
-        _cancelled_route_conflict(db, route)
+        _ = recreate_cancelled
+        return route
     _route_id_taken_conflict(route.id)
+    return None
+
+
+_ROUTE_ID_CHILD_MODELS = (
+    Point,
+    RoutePoint,
+    RouteEvent,
+    Notification,
+    RouteCancellation,
+    PointDocumentImage,
+    RouteChatMessage,
+    RouteChatAttachment,
+    RouteChatRead,
+    RouteChatDelivery,
+)
+
+
+def _archive_cancelled_route(db: Session, route: Route) -> str:
+    existing_ids = set(db.scalars(select(Route.id)).all())
+    archive_id = next_archived_route_id(route.id, existing_ids)
+    archived = Route(
+        id=archive_id,
+        legacy_driver_tg_id=route.legacy_driver_tg_id,
+        assigned_user_id=route.assigned_user_id,
+        created_by_user_id=route.created_by_user_id,
+        status=route.status,
+        number_auto=route.number_auto,
+        temperature=route.temperature,
+        dispatcher_contacts=route.dispatcher_contacts,
+        logist_contacts=route.logist_contacts,
+        registration_number=route.registration_number,
+        trailer_number=route.trailer_number,
+        accepted_at=route.accepted_at,
+        driver_received_at=route.driver_received_at,
+        driver_lat=route.driver_lat,
+        driver_lng=route.driver_lng,
+        driver_location_at=route.driver_location_at,
+        driver_location_requested_at=route.driver_location_requested_at,
+        created_at=route.created_at,
+        updated_at=route.updated_at,
+    )
+    db.add(archived)
+    db.flush()
+    old_id = route.id
+    for model in _ROUTE_ID_CHILD_MODELS:
+        db.execute(update(model).where(model.route_id == old_id).values(route_id=archive_id))
+    db.delete(route)
+    db.flush()
+    return archive_id
+
+
+def _resolve_route_creator(
+    db: Session,
+    *,
+    created_by_user_id: int | None,
+    created_by_fio: str | None = None,
+    logistic_name: str | None = None,
+) -> User | None:
+    if created_by_user_id:
+        return _ensure_logistic(db, created_by_user_id)
+    for name in (created_by_fio, logistic_name):
+        found = _try_find_logistic_by_name(db, name or "")
+        if found is not None:
+            return found
     return None
 
 
@@ -983,9 +1053,11 @@ def create_route(
             )
     legacy_driver_tg_id = int(driver.legacy_tg_id) if (driver.legacy_tg_id or "").isdigit() else None
 
-    creator = current_user
-    if payload.created_by_user_id:
-        creator = _ensure_logistic(db, payload.created_by_user_id)
+    creator = _resolve_route_creator(
+        db,
+        created_by_user_id=payload.created_by_user_id,
+        created_by_fio=payload.created_by_fio,
+    )
 
     number_auto, trailer_number = _store_route_plates(
         db,
@@ -995,37 +1067,24 @@ def create_route(
     contacts = (payload.dispatcher_contacts or "").strip()
     logist_contacts = _resolve_logist_contacts(db, payload.logist_contacts, fallback_settings=True)
     if existing is not None:
-        route = _reset_cancelled_route(
-            db,
-            existing,
-            driver=driver,
-            creator=creator,
-            number_auto=number_auto,
-            temperature=(payload.temperature or "").strip(),
-            dispatcher_contacts=contacts,
-            logist_contacts=logist_contacts,
-            registration_number=(payload.registration_number or "").strip(),
-            trailer_number=trailer_number,
-            points=payload.points or [],
-        )
-    else:
-        route = Route(
-            id=route_id,
-            legacy_driver_tg_id=legacy_driver_tg_id,
-            assigned_user_id=driver.id,
-            created_by_user_id=creator.id,
-            status="new",
-            number_auto=number_auto,
-            temperature=(payload.temperature or "").strip(),
-            dispatcher_contacts=contacts,
-            logist_contacts=logist_contacts,
-            registration_number=(payload.registration_number or "").strip(),
-            trailer_number=trailer_number,
-        )
-        db.add(route)
-        db.flush()
-        if payload.points:
-            _apply_points_replace(db, route, payload.points)
+        _archive_cancelled_route(db, existing)
+    route = Route(
+        id=route_id,
+        legacy_driver_tg_id=legacy_driver_tg_id,
+        assigned_user_id=driver.id,
+        created_by_user_id=creator.id if creator else None,
+        status="new",
+        number_auto=number_auto,
+        temperature=(payload.temperature or "").strip(),
+        dispatcher_contacts=contacts,
+        logist_contacts=logist_contacts,
+        registration_number=(payload.registration_number or "").strip(),
+        trailer_number=trailer_number,
+    )
+    db.add(route)
+    db.flush()
+    if payload.points:
+        _apply_points_replace(db, route, payload.points)
 
     notify_route_assigned(
         db,
@@ -1064,11 +1123,12 @@ def create_route_from_onec(
             )
 
     legacy_driver_tg_id = int(driver.legacy_tg_id) if (driver.legacy_tg_id or "").isdigit() else None
-    creator: User | None = None
-    if payload.created_by_user_id:
-        creator = _ensure_logistic(db, payload.created_by_user_id)
-    else:
-        creator = _try_find_logistic_by_name(db, parsed.logistic_name)
+    creator = _resolve_route_creator(
+        db,
+        created_by_user_id=payload.created_by_user_id,
+        created_by_fio=payload.created_by_fio,
+        logistic_name=parsed.logistic_name,
+    )
     number_auto, trailer_number = _store_route_plates(
         db,
         number_auto=((payload.number_auto or parsed.number_auto) or "").strip(),
@@ -1091,37 +1151,24 @@ def create_route_from_onec(
         for i, p in enumerate(parsed.points or [])
     ]
     if existing is not None:
-        route = _reset_cancelled_route(
-            db,
-            existing,
-            driver=driver,
-            creator=creator,
-            number_auto=number_auto,
-            temperature=(parsed.temperature or "").strip(),
-            dispatcher_contacts=contacts,
-            logist_contacts=logist_contacts,
-            registration_number=(parsed.registration_number or "").strip(),
-            trailer_number=trailer_number,
-            points=points_payload,
-        )
-    else:
-        route = Route(
-            id=parsed.route_id,
-            legacy_driver_tg_id=legacy_driver_tg_id,
-            assigned_user_id=driver.id,
-            created_by_user_id=creator.id if creator else None,
-            status="new",
-            number_auto=number_auto,
-            temperature=(parsed.temperature or "").strip(),
-            dispatcher_contacts=contacts,
-            logist_contacts=logist_contacts,
-            registration_number=(parsed.registration_number or "").strip(),
-            trailer_number=trailer_number,
-        )
-        db.add(route)
-        db.flush()
-        if points_payload:
-            _apply_points_replace(db, route, points_payload)
+        _archive_cancelled_route(db, existing)
+    route = Route(
+        id=parsed.route_id,
+        legacy_driver_tg_id=legacy_driver_tg_id,
+        assigned_user_id=driver.id,
+        created_by_user_id=creator.id if creator else None,
+        status="new",
+        number_auto=number_auto,
+        temperature=(parsed.temperature or "").strip(),
+        dispatcher_contacts=contacts,
+        logist_contacts=logist_contacts,
+        registration_number=(parsed.registration_number or "").strip(),
+        trailer_number=trailer_number,
+    )
+    db.add(route)
+    db.flush()
+    if points_payload:
+        _apply_points_replace(db, route, points_payload)
 
     notify_route_assigned(db, route=route, assigned_user=driver, actor_user=current_user)
     db.commit()
@@ -1153,7 +1200,8 @@ def list_routes(
         if statuses:
             query = query.where(Route.status.in_(statuses))
     if route_id:
-        query = query.where(Route.id == route_id.strip())
+        route_id_q = route_id.strip()
+        query = query.where(or_(Route.id == route_id_q, Route.id.like(route_id_search_like(route_id_q))))
     if number_auto:
         query = query.where(func.lower(Route.number_auto) == number_auto.strip().lower())
     if driver_user_id is not None:

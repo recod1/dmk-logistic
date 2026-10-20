@@ -436,6 +436,12 @@ const showNotificationKindTabs = computed(
 const showPointNotificationTab = computed(() => isAdmin.value || isLogistic.value);
 const allowNotificationKindMute = computed(() => !isDriver.value);
 const showSalaryNotificationTab = computed(() => isAdmin.value || isDriver.value || isAccountant.value);
+const isKeepAliveMainSection = computed(
+  () =>
+    currentSection.value === "admin_routes" ||
+    currentSection.value === "admin_route_details" ||
+    currentSection.value === "notifications"
+);
 const salaryDriverOptions = computed(() => {
   const fromRoutes = routeDrivers.value.map((d) => ({
     id: d.id,
@@ -1801,8 +1807,6 @@ function connectNotificationsSocket(): void {
               if (currentSection.value === "driver_route_details" && selectedDriverRoute.value?.id === payload.item.route_id) {
                 void openDriverRouteDetails(payload.item.route_id);
               }
-            } else if (isRouteManager.value) {
-              void refreshAdminRoutes(routeFilters.value);
             }
           }
         }
@@ -5897,10 +5901,11 @@ onUnmounted(() => {
     </header>
 
     <Transition name="page" mode="out-in">
-      <div :key="isAuthed ? currentSection : 'login'" class="page-stage">
+      <div :key="isAuthed ? 'app' : 'login'" class="page-stage">
     <LoginView v-if="!isAuthed" :loading="authLoading" :error="authError" @submit="doLogin" />
 
-    <section v-else-if="isRouteManager && currentSection === 'admin_routes'">
+    <template v-else>
+    <section v-show="isRouteManager && currentSection === 'admin_routes'">
       <AdminRoutesView
         :routes="adminRoutes"
         :drivers="routeDrivers"
@@ -5925,7 +5930,7 @@ onUnmounted(() => {
       />
     </section>
 
-    <section v-else-if="isRouteManager && currentSection === 'admin_route_details' && selectedAdminRoute">
+    <section v-if="isRouteManager && selectedAdminRoute" v-show="currentSection === 'admin_route_details'">
       <AdminRouteDetailsView
         :route="selectedAdminRoute"
         :drivers="routeDrivers"
@@ -5952,7 +5957,31 @@ onUnmounted(() => {
       />
     </section>
 
-    <section v-else-if="isAdmin && currentSection === 'admin_users'">
+    <section v-show="currentSection === 'notifications'">
+      <NotificationsView
+        :items="notifications"
+        :loading="notificationsLoading"
+        :error="notificationsError"
+        :unread-count="unreadNotificationsCount"
+        :can-push="pushIsSupported && !isDriver"
+        :push-enabled="webPushSubscribed"
+        :push-hint="isDriver ? '' : pushHint"
+        :show-kind-tabs="showNotificationKindTabs"
+        :show-salary-tab="showSalaryNotificationTab"
+        :show-point-tab="showPointNotificationTab"
+        :allow-kind-mute="allowNotificationKindMute"
+        :prefs="notificationPrefs"
+        @refresh="refreshNotifications"
+        @enable-push="trySubscribeWebPush"
+        @disable-push="tryUnsubscribeWebPush"
+        @mark-read="doMarkNotificationRead"
+        @mark-all-read="doMarkAllNotificationsRead"
+        @open-from-notification="openNotificationFromItem"
+        @update-prefs="(p) => void updateNotificationPrefs(p)"
+      />
+    </section>
+
+    <section v-if="isAdmin && currentSection === 'admin_users'">
       <AdminUsersView
         :users="adminUsers"
         :loading="usersLoading"
@@ -6160,31 +6189,7 @@ onUnmounted(() => {
       />
     </section>
 
-    <section v-else-if="currentSection === 'notifications'">
-      <NotificationsView
-        :items="notifications"
-        :loading="notificationsLoading"
-        :error="notificationsError"
-        :unread-count="unreadNotificationsCount"
-        :can-push="pushIsSupported && !isDriver"
-        :push-enabled="webPushSubscribed"
-        :push-hint="isDriver ? '' : pushHint"
-        :show-kind-tabs="showNotificationKindTabs"
-        :show-salary-tab="showSalaryNotificationTab"
-        :show-point-tab="showPointNotificationTab"
-        :allow-kind-mute="allowNotificationKindMute"
-        :prefs="notificationPrefs"
-        @refresh="refreshNotifications"
-        @enable-push="trySubscribeWebPush"
-        @disable-push="tryUnsubscribeWebPush"
-        @mark-read="doMarkNotificationRead"
-        @mark-all-read="doMarkAllNotificationsRead"
-        @open-from-notification="openNotificationFromItem"
-        @update-prefs="(p) => void updateNotificationPrefs(p)"
-      />
-    </section>
-
-    <section v-else class="card">
+    <section v-else-if="!isKeepAliveMainSection" class="card">
       <h1 v-if="isDriver">Назначенных рейсов нет</h1>
       <h1 v-else>Раздел пуст</h1>
       <p v-if="isDriver">Когда логист или администратор назначит рейс, он появится здесь.</p>
@@ -6192,6 +6197,7 @@ onUnmounted(() => {
       <button v-if="isDriver" @click="refreshDriverRoutes">Обновить рейсы</button>
       <p class="hint">{{ syncMessage }}</p>
     </section>
+    </template>
       </div>
     </Transition>
     </main>

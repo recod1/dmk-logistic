@@ -70,6 +70,9 @@ class OnecDatetimeTests(TestCase):
     def test_prefers_24h_when_time_field_is_12h_clash(self) -> None:
         self.assertEqual(planned_wall_fields("16.10.2026 14:00", "02:00"), ("16.10.2026", "14:00"))
         self.assertEqual(planned_wall_fields("2026-10-16T14:00:00", "2:00:00"), ("16.10.2026", "14:00"))
+        self.assertEqual(planned_wall_fields("16.10.2026", "0001-01-01T14:00:00"), ("16.10.2026", "14:00"))
+        self.assertEqual(planned_wall_fields("2026-10-16T00:00:00", "1899-12-30T14:00:00"), ("16.10.2026", "14:00"))
+        self.assertEqual(planned_wall_fields("16.10.2026 14:00 (02:00)", ""), ("16.10.2026", "14:00"))
 
 
 class OnecParseTests(TestCase):

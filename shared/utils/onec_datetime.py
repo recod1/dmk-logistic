@@ -70,20 +70,28 @@ def split_onec_wall_datetime(raw: str | None) -> tuple[str, str]:
         rest = (text[: dmy.start()] + " " + text[dmy.end() :]).strip()
 
     search_in = rest if date_s else text
-    time_s = ""
-    tm = _TIME.search(search_in)
-    hour = minute = None
-    if tm:
+    time_s = _pick_wall_clock_time(search_in)
+    return date_s, time_s
+
+
+def _pick_wall_clock_time(search_in: str) -> str:
+    candidates: list[tuple[int, int]] = []
+    for tm in _TIME.finditer(search_in):
         hour = _hour_from_token(int(tm.group(1)), tm.group(4))
         minute = int(tm.group(2))
-    else:
-        flex = _TIME_FLEX.search(search_in)
-        if flex:
+        if 0 <= hour <= 23 and 0 <= minute <= 59:
+            candidates.append((hour, minute))
+    if not candidates:
+        for flex in _TIME_FLEX.finditer(search_in):
             hour = int(flex.group(1))
             minute = int(flex.group(2))
-    if hour is not None and minute is not None and 0 <= hour <= 23 and 0 <= minute <= 59:
-        time_s = format_planned_time(hour, minute)
-    return date_s, time_s
+            if 0 <= hour <= 23 and 0 <= minute <= 59:
+                candidates.append((hour, minute))
+    if not candidates:
+        return ""
+    afternoon = next((item for item in candidates if item[0] >= 13), None)
+    hour, minute = afternoon or candidates[0]
+    return format_planned_time(hour, minute)
 
 
 def normalize_planned_date(raw: str | None) -> str:
