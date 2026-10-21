@@ -31,6 +31,10 @@ class User(Base):
     phone: Mapped[str | None] = mapped_column(String(32), nullable=True)
     legacy_tg_id: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+    last_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    last_location_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -102,6 +106,30 @@ class Route(Base):
     cancellations: Mapped[list["RouteCancellation"]] = relationship(
         back_populates="route",
         cascade="all, delete-orphan",
+    )
+
+
+class RouteIncident(Base):
+    __tablename__ = "route_incidents"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    route_id: Mapped[str] = mapped_column(ForeignKey("routes.id", ondelete="CASCADE"), nullable=False, index=True)
+    point_id: Mapped[int | None] = mapped_column(ForeignKey("points.id", ondelete="SET NULL"), nullable=True, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="open", server_default="open", index=True)
+    comment: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
+    cargo_name: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    quantity: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
+    authorized_by: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
+    return_stage: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    opened_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    chat_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), index=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
 
 

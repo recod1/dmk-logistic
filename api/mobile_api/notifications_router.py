@@ -580,12 +580,16 @@ async def notifications_ws(websocket: WebSocket) -> None:
 
     await notifications_realtime_hub.connect(user.id, websocket)
     try:
+        from mobile_api.presence import touch_user_seen
+
+        touch_user_seen(user.id)
         await websocket.send_json({"type": "ready"})
         while True:
             # Keepalive + future extension: currently client can only ping.
             try:
                 message = await websocket.receive_text()
                 if message == "ping":
+                    touch_user_seen(user.id)
                     await websocket.send_text("pong")
             except RuntimeError:
                 # Some clients can send ping frames without text payload;

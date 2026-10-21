@@ -1,13 +1,30 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, onUnmounted, ref, watch } from "vue";
 
+import MapsCoordsLink from "./MapsCoordsLink.vue";
 import { isValidPlate, normalizePlate, PLATE_HINT } from "../vehiclePlate";
 
 export type FleetItem = { id: number; plate: string };
+export type LiveDriver = {
+  id: number;
+  login: string;
+  full_name: string | null;
+  phone: string | null;
+  route_id?: string | null;
+  route_status?: string | null;
+  number_auto?: string;
+  lat?: number | null;
+  lng?: number | null;
+  location_at?: string | null;
+  last_seen_at?: string | null;
+  connection_status: "online" | "recent" | "offline" | string;
+  connection_label: string;
+};
 
 const props = defineProps<{
   vehicles: FleetItem[];
   trailers: FleetItem[];
+  drivers?: LiveDriver[];
   loading: boolean;
   saving: boolean;
   error: string;
@@ -15,6 +32,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   refresh: [];
+  refreshDrivers: [];
   createVehicle: [plate: string];
   updateVehicle: [payload: { id: number; plate: string }];
   deleteVehicle: [id: number];
@@ -23,7 +41,8 @@ const emit = defineEmits<{
   deleteTrailer: [id: number];
 }>();
 
-const tab = ref<"vehicles" | "trailers">("vehicles");
+const tab = ref<"vehicles" | "trailers" | "drivers">("vehicles");
+let driversTimer: number | null = null;
 const draft = ref("");
 const editId = ref<number | null>(null);
 const editPlate = ref("");
@@ -31,11 +50,43 @@ const localError = ref("");
 
 const currentItems = computed(() => (tab.value === "vehicles" ? props.vehicles : props.trailers));
 
-function switchTab(next: "vehicles" | "trailers"): void {
+function stopDriversPoll(): void {
+  if (driversTimer !== null) {
+    window.clearInterval(driversTimer);
+    driversTimer = null;
+  }
+}
+
+function startDriversPoll(): void {
+  stopDriversPoll();
+  emit("refreshDrivers");
+  driversTimer = window.setInterval(() => emit("refreshDrivers"), 15000);
+}
+
+function switchTab(next: "vehicles" | "trailers" | "drivers"): void {
   tab.value = next;
   draft.value = "";
   editId.value = null;
   localError.value = "";
+  if (next === "drivers") {
+    startDriversPoll();
+  } else {
+    stopDriversPoll();
+  }
+}
+
+watch(tab, (value) => {
+  if (value !== "drivers") {
+    stopDriversPoll();
+  }
+});
+
+onUnmounted(() => stopDriversPoll());
+
+function connectionClass(status: string): string {
+  if (status === "online") return "ok";
+  if (status === "recent") return "warn";
+  return "off";
 }
 
 function submitNew(): void {
@@ -99,8 +150,32 @@ function remove(item: FleetItem): void {
       <button type="button" class="tab-btn" :class="{ active: tab === 'trailers' }" @click="switchTab('trailers')">
         Прицепы
       </button>
+      <button type="button" class="tab-btn" :class="{ active: tab === 'drivers' }" @click="switchTab('drivers')">
+        Водители
+      </button>
     </div>
-    <div class="card">
+    <div v-if="tab === 'drivers'" class="card">
+      <h2>Водители</h2>
+      <p class="hint">Статус соединения и координаты обновляются, пока открыта эта вкладка.</p>
+      <p v-if="!(drivers || []).length && !loading" class="empty">Нет активных водителей</p>
+      <ul class="list">
+        <li v-for="driver in drivers || []" :key="driver.id" class="driver-card">
+          <div class="driver-head">
+            <strong>{{ driver.full_name || driver.login }}</strong>
+            <span class="conn" :class="connectionClass(driver.connection_status)">{{ driver.connection_label }}</span>
+          </div>
+          <p v-if="driver.phone" class="meta">{{ driver.phone }}</p>
+          <p class="meta">Рейс: {{ driver.route_id || "нет активного" }}{{ driver.number_auto ? ` · ТС ${driver.number_auto}` : "" }}</p>
+          <p class="meta">Связь: {{ driver.last_seen_at || "ещё не было" }}</p>
+          <p class="meta">
+            Место:
+            <MapsCoordsLink :lat="driver.lat" :lng="driver.lng" />
+            <span v-if="driver.location_at"> · {{ driver.location_at }}</span>
+          </p>
+        </li>
+      </ul>
+    </div>
+    <div v-else class="card">
       <h2>{{ tab === "vehicles" ? "Транспорт" : "Прицепы" }}</h2>
       <p class="hint">{{ PLATE_HINT }}</p>
       <div class="row">
@@ -235,6 +310,40 @@ input {
 .item strong {
   flex: 1 1 8rem;
   letter-spacing: 0.04em;
+}
+.driver-card {
+  display: grid;
+  gap: 0.2rem;
+  padding: 0.65rem 0.15rem;
+  border-bottom: 1px solid var(--border);
+}
+.driver-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: center;
+}
+.conn {
+  font-size: 0.78rem;
+  border-radius: 999px;
+  padding: 0.12rem 0.5rem;
+}
+.conn.ok {
+  background: rgba(22, 163, 74, 0.25);
+  color: #86efac;
+}
+.conn.warn {
+  background: rgba(245, 158, 11, 0.22);
+  color: #fcd34d;
+}
+.conn.off {
+  background: rgba(148, 163, 184, 0.18);
+  color: #cbd5e1;
+}
+.meta {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.84rem;
 }
 .item-actions {
   display: flex;

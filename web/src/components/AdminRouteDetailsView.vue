@@ -11,6 +11,7 @@ import { stageDeltasForPoint } from "../stageDeltas";
 import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
 import { normalizePlannedTimeInput, plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
 import { listPointStatusLabel, nextStatus } from "../status";
+import type { RouteIncident } from "../routeIncidents";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, ManualEditMeta, PointStatus, RouteWorkflowStatus } from "../types";
 import { normalizePlate } from "../vehiclePlate";
 import SuggestField from "./SuggestField.vue";
@@ -64,6 +65,7 @@ const props = defineProps<{
   authToken: string;
   unreadChatCount?: number;
   error?: string;
+  incidents?: RouteIncident[];
 }>();
 
 const emit = defineEmits<{
@@ -712,6 +714,21 @@ function removeRoute(): void {
             Обновить
           </button>
         </section>
+        <section v-if="(incidents || []).length" class="incident-box">
+          <h3>Проблемы и возвраты</h3>
+          <article v-for="item in incidents" :key="item.id" class="incident">
+            <p>
+              <strong>{{ item.kind_label }}</strong>
+              <span class="muted"> · {{ item.status === "open" ? "открыта" : "закрыта" }}</span>
+            </p>
+            <p v-if="item.comment">{{ item.comment }}</p>
+            <p v-if="item.cargo_name || item.quantity" class="muted">
+              {{ [item.cargo_name, item.quantity].filter(Boolean).join(" · ") }}
+            </p>
+            <p v-if="item.authorized_by" class="muted">Разрешил: {{ item.authorized_by }}</p>
+            <p v-if="item.return_stage_label">Этап возврата: {{ item.return_stage_label }}</p>
+          </article>
+        </section>
         <button class="secondary chat-btn" type="button" @click="emit('openChat', route.id)">
           Открыть чат рейса
           <span v-if="(unreadChatCount ?? 0) > 0" class="chat-badge" aria-label="Новые сообщения" />
@@ -1212,6 +1229,22 @@ function removeRoute(): void {
   padding: 0.7rem 0.8rem;
   display: grid;
   gap: 0.4rem;
+}
+.incident-box {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.7rem 0.8rem;
+  display: grid;
+  gap: 0.45rem;
+}
+.incident-box h3 {
+  margin: 0;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.incident p {
+  margin: 0.15rem 0 0;
 }
 .delta {
   color: #93c5fd;

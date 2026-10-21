@@ -15,6 +15,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.models import Salary, User
 from mobile_api.roles import RoleCode
+from utils.vehicle_plate import normalize_plate
 
 
 def parse_float_token(s: str) -> float:
@@ -252,6 +253,20 @@ def driver_identity_keys(user: User) -> list[str]:
 def salary_belongs_to_driver(salary: Salary, user: User) -> bool:
     sid = (salary.id_driver or "").strip()
     return sid in {k.strip() for k in driver_identity_keys(user)}
+
+
+def salary_vehicle_key(transport: str | None, trailer: str | None) -> tuple[str, str]:
+    return (normalize_plate(transport), normalize_plate(trailer))
+
+
+def should_archive_same_day_salary(
+    old_transport: str | None,
+    old_trailer: str | None,
+    new_transport: str | None,
+    new_trailer: str | None,
+) -> bool:
+    """Archive previous same-day calc only when ТС and trailer both match."""
+    return salary_vehicle_key(old_transport, old_trailer) == salary_vehicle_key(new_transport, new_trailer)
 
 
 def parse_dd_mm_yyyy(value: str) -> datetime:

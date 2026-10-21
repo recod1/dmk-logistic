@@ -356,6 +356,30 @@ def unread_summary_mine(
     }
 
 
+def post_route_chat_and_notify(db: Session, route: Route, user: User, text: str) -> RouteChatMessage:
+    msg = RouteChatMessage(route_id=route.id, user_id=user.id, text=(text or "").strip() or "Сообщение")
+    db.add(msg)
+    db.flush()
+    out = _message_out(db, msg, read=False, delivered=False)
+    recipients = _route_chat_recipient_ids(db, route)
+    _publish_chat(recipients, {"type": "chat_message_created", "item": out})
+    author_name = (user.full_name or user.login or "").strip() or "Пользователь"
+    snippet = (text or "").strip()
+    if len(snippet) > 160:
+        snippet = snippet[:160] + "…"
+    create_notification_for_users(
+        db,
+        user_ids=recipients,
+        event_type="chat_message",
+        title=f"Чат рейса {route.id}",
+        message=f"{author_name}: {snippet}",
+        route_id=route.id,
+        payload={"route_id": route.id, "chat_message_id": int(msg.id)},
+        skip_user_ids=[user.id],
+    )
+    return msg
+
+
 @router.post("/v1/chat/routes/{route_id:path}/messages", status_code=status.HTTP_201_CREATED)
 def send_message(
     route_id: str,

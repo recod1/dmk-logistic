@@ -15,6 +15,7 @@ import {
   statusLabel
 } from "../status";
 import { plannedScheduleDisplay } from "../plannedTime";
+import { RETURN_WARNING, type RouteIncident } from "../routeIncidents";
 import type { RouteDto } from "../types";
 
 const props = defineProps<{
@@ -24,6 +25,7 @@ const props = defineProps<{
   canAcceptRoute: boolean;
   unreadChatCount?: number;
   logisticsContacts?: Array<{ name: string; phone: string }>;
+  incidents?: RouteIncident[];
 }>();
 
 const emit = defineEmits<{
@@ -32,6 +34,10 @@ const emit = defineEmits<{
   revertPoint: [pointId: number];
   acceptRoute: [];
   openChat: [routeId: string];
+  reportProblem: [];
+  startReturn: [];
+  followUp: [incident: RouteIncident];
+  returnStage: [incident: RouteIncident];
 }>();
 
 const firstIncompletePoint = computed(
@@ -52,6 +58,13 @@ const liveRouteTime = computed(() =>
 const isAcceptedCurrentRoute = computed(
   () => props.route.status === "process" && props.route.id === props.activeRouteId
 );
+
+const hasUnloading = computed(() => (props.route.points || []).some((point) => point.type_point === "unloading"));
+const canStartReturn = computed(
+  () => hasUnloading.value && (props.route.status === "process" || props.route.status === "success")
+);
+const openIncidents = computed(() => (props.incidents || []).filter((item) => item.status === "open"));
+const openReturn = computed(() => openIncidents.value.find((item) => item.kind === "return") || null);
 
 async function copyToClipboard(value: string): Promise<void> {
   const text = value.trim();
@@ -276,6 +289,15 @@ function showRevert(pointId: number): boolean {
           Открыть чат рейса
           <span v-if="(unreadChatCount ?? 0) > 0" class="chat-badge" aria-label="Новые сообщения" />
         </button>
+        <button class="secondary wide" type="button" @click="emit('reportProblem')">Проблемы в рейсе</button>
+        <button
+          v-if="canStartReturn && !openReturn"
+          class="secondary wide"
+          type="button"
+          @click="emit('startReturn')"
+        >
+          Возврат
+        </button>
         <p v-if="route.driver_lat != null && route.driver_lng != null" class="loc">
           Моя точка:
           <MapsCoordsLink :lat="route.driver_lat" :lng="route.driver_lng" />
@@ -296,6 +318,14 @@ function showRevert(pointId: number): boolean {
               <MapsAddressLink :address="point.place_point" />
             </p>
             <small>{{ plannedScheduleDisplay(point.date_point, point.point_time) }}</small>
+            <button
+              v-if="point.type_point === 'unloading' && canStartReturn && !openReturn"
+              class="secondary"
+              type="button"
+              @click="emit('startReturn')"
+            >
+              Возврат
+            </button>
             <p v-if="point.estimated_arrival" class="eta">Ориентировочное прибытие: {{ point.estimated_arrival }}</p>
             <div class="stage-scroll">
               <table class="stage-table">
@@ -377,6 +407,36 @@ function showRevert(pointId: number): boolean {
               </table>
             </div>
           </div>
+        </div>
+      </article>
+
+      <article v-if="openIncidents.length" class="card">
+        <h2>Открытые проблемы</h2>
+        <div v-for="item in openIncidents" :key="item.id" class="incident">
+          <strong>{{ item.kind_label }}</strong>
+          <p v-if="item.comment" class="note">{{ item.comment }}</p>
+          <p v-if="item.cargo_name || item.quantity" class="note">
+            {{ [item.cargo_name, item.quantity].filter(Boolean).join(" · ") }}
+          </p>
+          <p v-if="item.authorized_by" class="note">Разрешил: {{ item.authorized_by }}</p>
+          <p v-if="item.kind === 'return' && item.return_warning" class="warn">{{ RETURN_WARNING }}</p>
+          <p v-if="item.return_stage_label" class="note">Этап: {{ item.return_stage_label }}</p>
+          <button
+            v-if="item.follow_up_label"
+            class="secondary"
+            type="button"
+            @click="emit('followUp', item)"
+          >
+            {{ item.follow_up_label }}
+          </button>
+          <button
+            v-if="item.kind === 'return' && item.next_return_stage_label"
+            class="primary"
+            type="button"
+            @click="emit('returnStage', item)"
+          >
+            {{ item.next_return_stage_label }}
+          </button>
         </div>
       </article>
     </div>
@@ -608,6 +668,26 @@ small {
   color: #fff;
   padding: 0.55rem 0.78rem;
   font-weight: 650;
+}
+.secondary.wide,
+.secondary {
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  background: var(--surface);
+  color: #dbeafe;
+  padding: 0.5rem 0.75rem;
+  margin-top: 0.4rem;
+}
+.incident {
+  display: grid;
+  gap: 0.35rem;
+  margin-top: 0.45rem;
+}
+.warn {
+  margin: 0;
+  color: #fecaca;
+  font-weight: 650;
+  line-height: 1.35;
 }
 .ghost {
   border: 1px solid #78350f;

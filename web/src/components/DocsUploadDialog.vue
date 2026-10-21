@@ -4,6 +4,7 @@ import { computed, onUnmounted, ref, watch } from "vue";
 const props = defineProps<{
   open: boolean;
   uploading: boolean;
+  title?: string;
 }>();
 
 const emit = defineEmits<{
@@ -79,7 +80,7 @@ function submit(): void {
 <template>
   <div v-if="open" class="overlay" @click.self="emit('cancel')">
     <article class="dialog" role="dialog" aria-modal="true">
-      <h2 class="title">Фото документов</h2>
+      <h2 class="title">{{ title || "Фото документов" }}</h2>
       <p v-if="!hasPhotos" class="desc">
         Сделайте фото камерой. После снимка спросим, нужно ли ещё одно, или можно отправлять.
       </p>

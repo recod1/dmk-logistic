@@ -19,12 +19,14 @@ import AccountantSalaryView from "./components/AccountantSalaryView.vue";
 import SalaryDetailView from "./components/SalaryDetailView.vue";
 import DriverHomeView from "./components/DriverHomeView.vue";
 import DocsUploadDialog from "./components/DocsUploadDialog.vue";
+import DriverProblemDialog from "./components/DriverProblemDialog.vue";
 import DriverRouteDetailsView from "./components/DriverRouteDetailsView.vue";
 import DriverRoutesView from "./components/DriverRoutesView.vue";
 import LoginView from "./components/LoginView.vue";
 import MapsChooser from "./components/MapsChooser.vue";
 import NotificationsView from "./components/NotificationsView.vue";
 import StatusConfirmDialog from "./components/StatusConfirmDialog.vue";
+import { RETURN_WARNING, type IncidentKind, type RouteIncident } from "./routeIncidents";
 import {
   ApiError,
   API_BASE,
@@ -70,6 +72,13 @@ import {
   listLogisticsContacts,
   listFleetVehicles,
   listFleetTrailers,
+  listLiveDrivers,
+  listRouteIncidents,
+  createRouteIncident,
+  followUpRouteIncident,
+  advanceReturnStage,
+  reportPresence,
+  type LiveDriverCard,
   createFleetVehicle,
   updateFleetVehicle,
   deleteFleetVehicle,
@@ -406,6 +415,12 @@ const fleetTrailers = ref<Array<{ id: number; plate: string }>>([]);
 const fleetLoading = ref(false);
 const fleetSaving = ref(false);
 const fleetError = ref("");
+const fleetDrivers = ref<LiveDriverCard[]>([]);
+const routeIncidents = ref<RouteIncident[]>([]);
+const problemDialogOpen = ref(false);
+const problemBusy = ref(false);
+const problemInitialKind = ref<IncidentKind | "">("");
+const returnPhotoPending = ref<{ incident: RouteIncident; authorizedBy: string } | null>(null);
 const pendingRouteCreate = ref<{
   route_id: string;
   driver_user_id?: number;
@@ -714,6 +729,15 @@ const canAcceptSelectedDriverRoute = computed(() => {
     return true;
   }
   return selected.id === driverActiveRouteId.value || selected.id === route.value?.id;
+});
+
+const canProblemReturn = computed(() => {
+  const selected = selectedDriverRoute.value;
+  if (!selected) {
+    return false;
+  }
+  const hasUnloading = (selected.points || []).some((point) => point.type_point === "unloading");
+  return hasUnloading && (selected.status === "process" || selected.status === "success");
 });
 
 const currentPageTitle = computed(() => {
@@ -1904,7 +1928,13 @@ function clearAuth(): void {
   logisticsContactsError.value = "";
   fleetVehicles.value = [];
   fleetTrailers.value = [];
+  fleetDrivers.value = [];
   fleetError.value = "";
+  routeIncidents.value = [];
+  problemDialogOpen.value = false;
+  problemInitialKind.value = "";
+  returnPhotoPending.value = null;
+  stopPresenceTimer();
   sectionStack.value = [];
   currentSection.value = "driver_home";
   profileMenuOpen.value = false;
@@ -3199,6 +3229,7 @@ async function doSelectAdminRoute(routeId: string): Promise<void> {
   try {
     selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
     pushSection("admin_route_details");
+    void refreshRouteIncidents(routeId);
   } catch (error) {
     routesError.value = `Ошибка загрузки рейса: ${(error as Error).message}`;
   } finally {
@@ -3570,6 +3601,7 @@ async function openRouteDetailsForRole(routeId: string): Promise<void> {
     try {
       selectedDriverRoute.value = await getDriverRoute(authToken.value, routeId);
       pushSection("driver_route_details");
+      void refreshRouteIncidents(routeId);
     } catch (error) {
       syncMessage.value = `Ошибка открытия рейса: ${(error as Error).message}`;
     }
@@ -3579,6 +3611,7 @@ async function openRouteDetailsForRole(routeId: string): Promise<void> {
     try {
       selectedAdminRoute.value = await getAdminRoute(authToken.value, routeId);
       pushSection("admin_route_details");
+      void refreshRouteIncidents(routeId);
     } catch (error) {
       routesError.value = `Ошибка открытия рейса: ${(error as Error).message}`;
     }
@@ -3656,6 +3689,7 @@ async function openActiveRouteFromHome(): Promise<void> {
   selectedDriverRoute.value = await applyOverlaysToRoute(route.value);
   pushSection("driver_route_details");
   void refreshLogisticsContacts();
+  void refreshRouteIncidents(routeId);
   if (!hasNetwork()) {
     return;
   }
@@ -3773,6 +3807,7 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
       ensureDriverGeoPermission();
       await syncOutboxInBackground();
       startBackgroundSyncLoop();
+      startPresenceTimer();
     }
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       void ensureWebPushSubscription();
@@ -4384,6 +4419,7 @@ async function openDriverRouteDetails(routeId: string): Promise<void> {
     selectedDriverRoute.value = await applyOverlaysToRoute(cached);
     pushSection("driver_route_details");
     void refreshLogisticsContacts();
+    void refreshRouteIncidents(routeId);
   }
   if (!hasNetwork()) {
     if (!selectedDriverRoute.value || selectedDriverRoute.value.id !== routeId) {
@@ -4404,6 +4440,7 @@ async function openDriverRouteDetails(routeId: string): Promise<void> {
     }
     pushSection("driver_route_details");
     void refreshLogisticsContacts();
+    void refreshRouteIncidents(routeId);
   } catch (error) {
     if (!selectedDriverRoute.value || selectedDriverRoute.value.id !== routeId) {
       syncMessage.value = `Ошибка загрузки деталей рейса: ${(error as Error).message}`;
@@ -5268,6 +5305,9 @@ async function refreshFleetLists(): Promise<void> {
     ]);
     fleetVehicles.value = vehicles;
     fleetTrailers.value = trailers;
+    if (currentSection.value === "admin_fleet_lists") {
+      await refreshFleetDrivers();
+    }
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
       return;
@@ -5360,6 +5400,186 @@ async function doDeleteFleetTrailer(id: number): Promise<void> {
   } finally {
     fleetSaving.value = false;
   }
+}
+
+async function refreshFleetDrivers(): Promise<void> {
+  if (!authToken.value || !isFleetEditor.value) {
+    return;
+  }
+  try {
+    fleetDrivers.value = await listLiveDrivers(authToken.value);
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново." })) {
+      return;
+    }
+    fleetError.value = (error as Error).message;
+  }
+}
+
+async function refreshRouteIncidents(routeId?: string | null): Promise<void> {
+  const id = (routeId || selectedDriverRoute.value?.id || selectedAdminRoute.value?.id || "").trim();
+  if (!authToken.value || !id || !hasNetwork()) {
+    return;
+  }
+  try {
+    routeIncidents.value = await listRouteIncidents(authToken.value, id);
+  } catch {
+    // keep last known
+  }
+}
+
+function openProblemDialog(kind: IncidentKind | "" = ""): void {
+  problemInitialKind.value = kind;
+  problemDialogOpen.value = true;
+}
+
+function closeProblemDialog(): void {
+  problemDialogOpen.value = false;
+  problemInitialKind.value = "";
+}
+
+async function submitRouteProblem(payload: {
+  kind: IncidentKind;
+  comment: string;
+  cargo_name: string;
+  quantity: string;
+  files: File[];
+}): Promise<void> {
+  const routeId = selectedDriverRoute.value?.id;
+  if (!authToken.value || !routeId) {
+    return;
+  }
+  problemBusy.value = true;
+  try {
+    const created = await createRouteIncident(authToken.value, routeId, {
+      kind: payload.kind,
+      comment: payload.comment,
+      cargo_name: payload.cargo_name,
+      quantity: payload.quantity
+    });
+    if (payload.files.length) {
+      await uploadRouteChatAttachments(authToken.value, routeId, payload.files, {
+        text: payload.kind === "return" ? "Фото возврата / документов" : "Фото к проблеме"
+      });
+    }
+    closeProblemDialog();
+    await refreshRouteIncidents(routeId);
+    if (created.kind === "return") {
+      syncMessage.value = "Возврат создан. Пройдите этапы возврата на карточке рейса.";
+    } else {
+      syncMessage.value = "Проблема отправлена в чат рейса";
+    }
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    problemBusy.value = false;
+  }
+}
+
+async function submitIncidentFollowUp(incident: RouteIncident): Promise<void> {
+  const routeId = selectedDriverRoute.value?.id;
+  if (!authToken.value || !routeId) {
+    return;
+  }
+  try {
+    await followUpRouteIncident(authToken.value, routeId, incident.id, incident.follow_up_label || "");
+    await refreshRouteIncidents(routeId);
+    syncMessage.value = incident.follow_up_label || "Отметка отправлена";
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  }
+}
+
+async function finishReturnStage(incident: RouteIncident, authorizedBy: string, files: File[] = []): Promise<void> {
+  const routeId = selectedDriverRoute.value?.id;
+  if (!authToken.value || !routeId) {
+    return;
+  }
+  problemBusy.value = true;
+  try {
+    await advanceReturnStage(authToken.value, routeId, incident.id, { authorized_by: authorizedBy });
+    if (files.length) {
+      await uploadRouteChatAttachments(authToken.value, routeId, files, {
+        text: incident.next_return_stage_label || "Фото этапа возврата"
+      });
+    }
+    await refreshRouteIncidents(routeId);
+    syncMessage.value = incident.next_return_stage_label || "Этап возврата отмечен";
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    problemBusy.value = false;
+  }
+}
+
+async function startReturnStage(incident: RouteIncident): Promise<void> {
+  if (!incident.next_return_stage) {
+    return;
+  }
+  if (!incident.return_stage) {
+    window.alert(RETURN_WARNING);
+  }
+  let authorizedBy = "";
+  if (incident.next_return_stage === "issued") {
+    const who = window.prompt("Кто разрешил забрать возврат?");
+    if (!who || !who.trim()) {
+      syncMessage.value = "Укажите, кто разрешил забрать возврат";
+      return;
+    }
+    authorizedBy = who.trim();
+  }
+  if (incident.needs_photo) {
+    returnPhotoPending.value = { incident, authorizedBy };
+    return;
+  }
+  await finishReturnStage(incident, authorizedBy);
+}
+
+async function applyReturnPhotos(files: File[]): Promise<void> {
+  const pending = returnPhotoPending.value;
+  returnPhotoPending.value = null;
+  if (!pending) {
+    return;
+  }
+  await finishReturnStage(pending.incident, pending.authorizedBy, files);
+}
+
+let presenceTimer: number | null = null;
+
+function stopPresenceTimer(): void {
+  if (presenceTimer !== null) {
+    window.clearInterval(presenceTimer);
+    presenceTimer = null;
+  }
+}
+
+function startPresenceTimer(): void {
+  stopPresenceTimer();
+  if (!isDriver.value) {
+    return;
+  }
+  const tick = () => {
+    if (!authToken.value || !isDriver.value || !hasNetwork()) {
+      return;
+    }
+    if (readGeoSharingEnabled() && typeof navigator !== "undefined" && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          void reportPresence(authToken.value as string, { lat: pos.coords.latitude, lng: pos.coords.longitude }).catch(
+            () => undefined
+          );
+        },
+        () => {
+          void reportPresence(authToken.value as string).catch(() => undefined);
+        },
+        { enableHighAccuracy: true, timeout: 12000, maximumAge: 20000 }
+      );
+      return;
+    }
+    void reportPresence(authToken.value).catch(() => undefined);
+  };
+  tick();
+  presenceTimer = window.setInterval(tick, 40000);
 }
 
 async function refreshChatRoom(options?: { silent?: boolean }): Promise<void> {
@@ -5595,6 +5815,7 @@ async function resetConnections(): Promise<void> {
     }
     if (isDriver.value) {
       startBackgroundSyncLoop();
+      startPresenceTimer();
     }
     if (currentSection.value === "chat" && chatRouteId.value) {
       startChatPolling();
@@ -5778,6 +5999,7 @@ onUnmounted(() => {
   stopConnectionWatch();
   stopWsWatchdog();
   stopBackgroundSyncLoop();
+  stopPresenceTimer();
   closeNotificationsSocket();
   stopNotificationsPolling();
   closeChatSocket();
@@ -5938,6 +6160,7 @@ onUnmounted(() => {
         :logistics-contacts="logisticsContacts"
         :fleet-vehicles="fleetVehicles"
         :fleet-trailers="fleetTrailers"
+        :incidents="routeIncidents"
         :loading="routesLoading"
         :auth-token="authToken"
         :unread-chat-count="chatUnreadByRoute[selectedAdminRoute.id] ?? 0"
@@ -6008,10 +6231,12 @@ onUnmounted(() => {
       <FleetListsView
         :vehicles="fleetVehicles"
         :trailers="fleetTrailers"
+        :drivers="fleetDrivers"
         :loading="fleetLoading"
         :saving="fleetSaving"
         :error="fleetError"
         @refresh="refreshFleetLists"
+        @refresh-drivers="refreshFleetDrivers"
         @create-vehicle="(plate) => void doCreateFleetVehicle(plate)"
         @update-vehicle="(payload) => void doUpdateFleetVehicle(payload)"
         @delete-vehicle="(id) => void doDeleteFleetVehicle(id)"
@@ -6057,11 +6282,16 @@ onUnmounted(() => {
         :can-accept-route="canAcceptSelectedDriverRoute"
         :unread-chat-count="chatUnreadByRoute[selectedDriverRoute.id] ?? 0"
         :logistics-contacts="logisticsContacts"
+        :incidents="routeIncidents"
         @back="goBack"
         @advance-point="openStatusConfirm"
         @revert-point="doRevertPoint"
         @accept-route="() => doAcceptRoute(selectedDriverRoute.id)"
         @open-chat="openChatForRoute"
+        @report-problem="openProblemDialog()"
+        @start-return="openProblemDialog('return')"
+        @follow-up="submitIncidentFollowUp"
+        @return-stage="startReturnStage"
       />
     </section>
 
@@ -6265,6 +6495,22 @@ onUnmounted(() => {
       :uploading="docsUploading"
       @cancel="cancelDocsUpload"
       @confirm="applyDocsUpload($event)"
+    />
+    <DocsUploadDialog
+      v-if="isDriver && returnPhotoPending"
+      :open="true"
+      :uploading="problemBusy"
+      title="Фото документов возврата"
+      @cancel="returnPhotoPending = null"
+      @confirm="(files) => void applyReturnPhotos(files)"
+    />
+    <DriverProblemDialog
+      :open="problemDialogOpen"
+      :busy="problemBusy"
+      :can-return="canProblemReturn"
+      :initial-kind="problemInitialKind"
+      @cancel="closeProblemDialog"
+      @submit="submitRouteProblem"
     />
     <MapsChooser />
     <AdminErrorDebugPanel v-if="isAdmin && adminDebugOpen" @close="adminDebugOpen = false" />

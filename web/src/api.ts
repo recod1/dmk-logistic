@@ -1550,6 +1550,87 @@ export async function listFleetTrailers(token: string): Promise<FleetPlate[]> {
   return fleetList(token, "trailers");
 }
 
+export type LiveDriverCard = {
+  id: number;
+  login: string;
+  full_name: string | null;
+  phone: string | null;
+  route_id?: string | null;
+  route_status?: string | null;
+  number_auto?: string;
+  lat?: number | null;
+  lng?: number | null;
+  location_at?: string | null;
+  last_seen_at?: string | null;
+  connection_status: string;
+  connection_label: string;
+};
+
+export async function listLiveDrivers(token: string): Promise<LiveDriverCard[]> {
+  const data = await requestJson<{ items: LiveDriverCard[] }>(`${API_BASE}/v1/fleet/drivers`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  return data.items ?? [];
+}
+
+export async function reportPresence(
+  token: string,
+  payload?: { lat?: number; lng?: number }
+): Promise<void> {
+  await requestJson(`${API_BASE}/v1/mobile/presence`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload || {})
+  });
+}
+
+export async function listRouteIncidents(token: string, routeId: string): Promise<import("./routeIncidents").RouteIncident[]> {
+  const data = await requestJson<{ items: import("./routeIncidents").RouteIncident[] }>(
+    `${API_BASE}/v1/routes/${encodeRouteId(routeId)}/incidents`,
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return data.items ?? [];
+}
+
+export async function createRouteIncident(
+  token: string,
+  routeId: string,
+  payload: { kind: string; comment?: string; cargo_name?: string; quantity?: string; point_id?: number }
+): Promise<import("./routeIncidents").RouteIncident> {
+  return requestJson(`${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}/incidents`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function followUpRouteIncident(
+  token: string,
+  routeId: string,
+  incidentId: number,
+  note?: string
+): Promise<import("./routeIncidents").RouteIncident> {
+  return requestJson(`${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}/incidents/${incidentId}/follow-up`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ note: note || "" })
+  });
+}
+
+export async function advanceReturnStage(
+  token: string,
+  routeId: string,
+  incidentId: number,
+  payload?: { authorized_by?: string; comment?: string }
+): Promise<import("./routeIncidents").RouteIncident> {
+  return requestJson(`${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}/incidents/${incidentId}/return-stage`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify(payload || {})
+  });
+}
+
 export async function createFleetVehicle(token: string, plate: string): Promise<FleetPlate> {
   return requestJson<FleetPlate>(`${API_BASE}/v1/fleet/vehicles`, {
     method: "POST",

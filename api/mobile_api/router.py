@@ -490,9 +490,44 @@ def report_driver_location(
     route.driver_lng = float(payload.lng)
     route.driver_location_at = now
     db.add(route)
+    from mobile_api.presence import apply_user_presence
+
+    apply_user_presence(db, current_user, lat=float(payload.lat), lng=float(payload.lng))
     db.commit()
     db.refresh(route)
     return {"route": _route_snapshot(db, route)}
+
+
+class PresenceIn(BaseModel):
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
+
+
+@router.post("/v1/mobile/presence")
+def report_presence(
+    payload: PresenceIn,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    from mobile_api.presence import apply_user_presence, presence_fields
+
+    apply_user_presence(db, current_user, lat=payload.lat, lng=payload.lng)
+    if payload.lat is not None and payload.lng is not None and current_user.role_code == "driver":
+        states = [
+            DriverRouteState(id=item.id, status=item.status, created_at=item.created_at)
+            for item in _driver_routes_for_user(db, current_user.id)
+        ]
+        active_state = pick_active_route(states)
+        if active_state:
+            route = db.get(Route, active_state.id)
+            if route is not None:
+                route.driver_lat = float(payload.lat)
+                route.driver_lng = float(payload.lng)
+                route.driver_location_at = datetime.now(timezone.utc)
+                db.add(route)
+    db.commit()
+    db.refresh(current_user)
+    return presence_fields(current_user)
 
 
 def _validate_document_ids_for_docs(

@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_fleet_editor, get_current_route_manager
 from mobile_api.db import get_db
-from mobile_api.models import FleetTrailer, FleetVehicle, User
+from mobile_api.driver_trip_rules import DriverRouteState, pick_active_route
+from mobile_api.models import FleetTrailer, FleetVehicle, Route, User
+from mobile_api.presence import presence_fields
+from mobile_api.roles import RoleCode
+from mobile_api.time_formatting import format_dt_for_app
 from utils.vehicle_plate import require_plate
 
 router = APIRouter(tags=["fleet"])
@@ -182,3 +186,51 @@ def delete_trailer(
     db.delete(row)
     db.commit()
     return {"ok": True}
+
+
+@router.get("/v1/fleet/drivers")
+def list_live_drivers(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_fleet_editor),
+) -> dict:
+    drivers = db.scalars(
+        select(User)
+        .where(User.role_code == RoleCode.DRIVER.value, User.is_active.is_(True))
+        .order_by(User.full_name.asc(), User.login.asc(), User.id.asc())
+    ).all()
+    driver_ids = [int(d.id) for d in drivers]
+    routes = (
+        db.scalars(select(Route).where(Route.assigned_user_id.in_(driver_ids), Route.status.in_(["new", "process"]))).all()
+        if driver_ids
+        else []
+    )
+    by_driver: dict[int, list[Route]] = {}
+    for route in routes:
+        if route.assigned_user_id:
+            by_driver.setdefault(int(route.assigned_user_id), []).append(route)
+    items = []
+    for driver in drivers:
+        assigned = by_driver.get(int(driver.id), [])
+        states = [DriverRouteState(id=r.id, status=r.status, created_at=r.created_at) for r in assigned]
+        active_state = pick_active_route(states)
+        active = next((r for r in assigned if active_state and r.id == active_state.id), None)
+        presence = presence_fields(driver)
+        lat = presence["last_lat"] if presence["last_lat"] is not None else (active.driver_lat if active else None)
+        lng = presence["last_lng"] if presence["last_lng"] is not None else (active.driver_lng if active else None)
+        loc_at = presence["last_location_at"] or (format_dt_for_app(active.driver_location_at) if active else None)
+        items.append(
+            {
+                "id": int(driver.id),
+                "login": driver.login,
+                "full_name": driver.full_name,
+                "phone": driver.phone,
+                "route_id": active.id if active else None,
+                "route_status": active.status if active else None,
+                "number_auto": (active.number_auto if active else "") or "",
+                "lat": lat,
+                "lng": lng,
+                "location_at": loc_at,
+                **presence,
+            }
+        )
+    return {"items": items}

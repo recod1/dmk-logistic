@@ -24,6 +24,7 @@ from mobile_api.models import (
     RouteChatMessage,
     RouteChatRead,
     RouteEvent,
+    RouteIncident,
     RoutePoint,
     User,
 )
@@ -671,6 +672,7 @@ _ROUTE_ID_CHILD_MODELS = (
     RouteChatAttachment,
     RouteChatRead,
     RouteChatDelivery,
+    RouteIncident,
 )
 
 

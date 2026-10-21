@@ -37,6 +37,7 @@ from mobile_api.salary_logic import (
     resolve_user_for_salary_driver_id,
     salary_belongs_to_driver,
     salary_date_in_range,
+    should_archive_same_day_salary,
     try_find_driver_by_fio,
 )
 from mobile_api.settings import mobile_settings
@@ -228,8 +229,35 @@ def _chat_message_out(
 
 
 def _insert_salary_for_driver(db: Session, driver: User, fields: dict[str, Any]) -> dict[str, Any]:
-    row = Salary(id_driver=driver_salary_key(driver), status_driver=" ", comment_driver=" ", **fields)
+    keys = driver_identity_keys(driver)
+    date_s = str(fields.get("date_salary") or "").strip()
+    previous = [
+        old
+        for old in db.scalars(
+            select(Salary).where(Salary.id_driver.in_(keys), Salary.date_salary == date_s).order_by(Salary.id.asc())
+        ).all()
+        if not _is_archived(old)
+        and should_archive_same_day_salary(
+            old.transport,
+            old.trailer_number,
+            fields.get("transport"),
+            fields.get("trailer_number"),
+        )
+    ]
+    replaces_id = int(previous[-1].id) if previous else None
+    for old in previous:
+        old.status_driver = "archived"
+        db.add(old)
+    extra: dict[str, Any] = {}
+    if replaces_id:
+        extra["replaces_salary_id"] = replaces_id
+    row = Salary(id_driver=driver_salary_key(driver), status_driver=" ", comment_driver=" ", **extra, **fields)
     db.add(row)
+    db.flush()
+    if previous:
+        for old in previous:
+            old.replaced_by_salary_id = int(row.id)
+            db.add(old)
     db.commit()
     db.refresh(row)
     create_notification_for_users(
