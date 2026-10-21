@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import json
+from datetime import datetime
+
 INCIDENT_KINDS = ("delay", "breakdown", "no_pass", "no_data", "not_unloading", "return")
 
 KIND_LABELS = {
@@ -37,6 +40,50 @@ RETURN_WARNING = (
 
 NEEDS_REASON = {"delay", "breakdown", "not_unloading", "return"}
 PHOTO_STAGES = {"loaded", "delivered"}
+
+
+def parse_return_stages(raw: str | None) -> dict:
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def dump_return_stages(data: dict) -> str:
+    return json.dumps(data, ensure_ascii=False)
+
+
+def _as_datetime(value) -> datetime | None:
+    if isinstance(value, datetime):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+    return None
+
+
+def return_stages_out(raw: str | None, *, format_time) -> list[dict]:
+    stored = parse_return_stages(raw)
+    items = []
+    for code in RETURN_STAGES:
+        snap = stored.get(code) if isinstance(stored.get(code), dict) else {}
+        items.append(
+            {
+                "code": code,
+                "label": RETURN_STAGE_LABELS[code],
+                "time": format_time(_as_datetime(snap.get("time"))),
+                "lat": snap.get("lat"),
+                "lng": snap.get("lng"),
+                "odometer": snap.get("odometer") or "",
+                "odometer_source": snap.get("odometer_source") or "",
+            }
+        )
+    return items
 
 
 def next_return_stage(current: str) -> str | None:

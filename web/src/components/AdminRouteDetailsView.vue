@@ -179,6 +179,13 @@ function odoSourceLabel(value?: string | null): string {
   return "";
 }
 
+function returnsForPoint(pointId: number): RouteIncident[] {
+  return (props.incidents || []).filter((item) => item.kind === "return" && item.point_id === pointId);
+}
+
+const problemIncidents = computed(() => (props.incidents || []).filter((item) => item.kind !== "return"));
+const orphanReturns = computed(() => (props.incidents || []).filter((item) => item.kind === "return" && !item.point_id));
+
 function pointStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     new: "Новая",
@@ -714,9 +721,9 @@ function removeRoute(): void {
             Обновить
           </button>
         </section>
-        <section v-if="(incidents || []).length" class="incident-box">
-          <h3>Проблемы и возвраты</h3>
-          <article v-for="item in incidents" :key="item.id" class="incident">
+        <section v-if="problemIncidents.length" class="incident-box">
+          <h3>Проблемы в рейсе</h3>
+          <article v-for="item in problemIncidents" :key="item.id" class="incident">
             <p>
               <strong>{{ item.kind_label }}</strong>
               <span class="muted"> · {{ item.status === "open" ? "открыта" : "закрыта" }}</span>
@@ -1197,6 +1204,69 @@ function removeRoute(): void {
             :token="authToken"
             :images="point.docs_images"
           />
+          <section v-for="item in returnsForPoint(point.id)" :key="`ret-${item.id}`" class="return-box">
+            <h4>Возврат</h4>
+            <p v-if="item.comment" class="muted">{{ item.comment }}</p>
+            <p v-if="item.cargo_name || item.quantity" class="muted">
+              {{ [item.cargo_name, item.quantity].filter(Boolean).join(" · ") }}
+            </p>
+            <p v-if="item.authorized_by" class="muted">Разрешил: {{ item.authorized_by }}</p>
+            <div class="stage-scroll">
+              <table class="stage-table">
+                <thead>
+                  <tr>
+                    <th>Этап</th>
+                    <th>Время</th>
+                    <th>Одометр</th>
+                    <th>Координаты</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="stage in item.stages || []" :key="stage.code">
+                    <td>{{ stage.label }}</td>
+                    <td>
+                      <FactTimeCell :time="stage.time" />
+                    </td>
+                    <td>{{ stage.odometer || "—" }}{{ odoSourceLabel(stage.odometer_source) }}</td>
+                    <td>
+                      <MapsCoordsLink :lat="stage.lat" :lng="stage.lng" />
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </article>
+        <article v-for="item in orphanReturns" :key="`ret-orphan-${item.id}`" class="point-card">
+          <div class="point-top">
+            <strong>Возврат</strong>
+            <span class="status-chip">{{ item.status === "open" ? "открыт" : "сдан" }}</span>
+          </div>
+          <p v-if="item.comment" class="meta-line">{{ item.comment }}</p>
+          <div class="stage-scroll">
+            <table class="stage-table">
+              <thead>
+                <tr>
+                  <th>Этап</th>
+                  <th>Время</th>
+                  <th>Одометр</th>
+                  <th>Координаты</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="stage in item.stages || []" :key="stage.code">
+                  <td>{{ stage.label }}</td>
+                  <td>
+                    <FactTimeCell :time="stage.time" />
+                  </td>
+                  <td>{{ stage.odometer || "—" }}{{ odoSourceLabel(stage.odometer_source) }}</td>
+                  <td>
+                    <MapsCoordsLink :lat="stage.lat" :lng="stage.lng" />
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
         </article>
       </section>
     </section>
@@ -1245,6 +1315,17 @@ function removeRoute(): void {
 }
 .incident p {
   margin: 0.15rem 0 0;
+}
+.return-box {
+  margin-top: 0.7rem;
+  border-top: 1px dashed var(--border);
+  padding-top: 0.65rem;
+  display: grid;
+  gap: 0.35rem;
+}
+.return-box h4 {
+  margin: 0;
+  font-size: 0.92rem;
 }
 .delta {
   color: #93c5fd;

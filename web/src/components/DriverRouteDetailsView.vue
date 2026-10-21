@@ -35,7 +35,6 @@ const emit = defineEmits<{
   acceptRoute: [];
   openChat: [routeId: string];
   reportProblem: [];
-  startReturn: [];
   followUp: [incident: RouteIncident];
   returnStage: [incident: RouteIncident];
 }>();
@@ -59,9 +58,7 @@ const isAcceptedCurrentRoute = computed(
   () => props.route.status === "process" && props.route.id === props.activeRouteId
 );
 
-const canStartReturn = computed(() => props.route.status !== "cancelled");
 const openIncidents = computed(() => (props.incidents || []).filter((item) => item.status === "open"));
-const openReturn = computed(() => openIncidents.value.find((item) => item.kind === "return") || null);
 
 async function copyToClipboard(value: string): Promise<void> {
   const text = value.trim();
@@ -287,14 +284,6 @@ function showRevert(pointId: number): boolean {
           <span v-if="(unreadChatCount ?? 0) > 0" class="chat-badge" aria-label="Новые сообщения" />
         </button>
         <button class="secondary wide" type="button" @click="emit('reportProblem')">Проблемы в рейсе</button>
-        <button
-          v-if="canStartReturn && !openReturn"
-          class="secondary wide"
-          type="button"
-          @click="emit('startReturn')"
-        >
-          Возврат
-        </button>
         <p v-if="route.driver_lat != null && route.driver_lng != null" class="loc">
           Моя точка:
           <MapsCoordsLink :lat="route.driver_lat" :lng="route.driver_lng" />
@@ -315,14 +304,6 @@ function showRevert(pointId: number): boolean {
               <MapsAddressLink :address="point.place_point" />
             </p>
             <small>{{ plannedScheduleDisplay(point.date_point, point.point_time) }}</small>
-            <button
-              v-if="point.type_point === 'unloading' && canStartReturn && !openReturn"
-              class="secondary"
-              type="button"
-              @click="emit('startReturn')"
-            >
-              Возврат
-            </button>
             <p v-if="point.estimated_arrival" class="eta">Ориентировочное прибытие: {{ point.estimated_arrival }}</p>
             <div class="stage-scroll">
               <table class="stage-table">

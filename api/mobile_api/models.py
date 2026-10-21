@@ -122,6 +122,7 @@ class RouteIncident(Base):
     quantity: Mapped[str] = mapped_column(String(64), nullable=False, default="", server_default="")
     authorized_by: Mapped[str] = mapped_column(String(255), nullable=False, default="", server_default="")
     return_stage: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    stages_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
     opened_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     chat_message_id: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -1,5 +1,15 @@
 export type IncidentKind = "delay" | "breakdown" | "no_pass" | "no_data" | "not_unloading" | "return";
 
+export interface ReturnStageSnap {
+  code: string;
+  label: string;
+  time: string | null;
+  lat?: number | null;
+  lng?: number | null;
+  odometer: string;
+  odometer_source: string;
+}
+
 export interface RouteIncident {
   id: number;
   route_id: string;
@@ -20,6 +30,8 @@ export interface RouteIncident {
   follow_up_code: string | null;
   follow_up_label: string | null;
   created_at: string | null;
+  stages?: ReturnStageSnap[];
+  chat_text?: string;
 }
 
 export const PROBLEM_CHOICES: Array<{ kind: IncidentKind; label: string; needsReason: boolean; followUp?: string }> = [

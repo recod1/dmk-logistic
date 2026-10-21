@@ -8,6 +8,7 @@ const props = defineProps<{
   busy: boolean;
   canReturn: boolean;
   initialKind?: IncidentKind | "";
+  unloadingPoints?: Array<{ id: number; label: string }>;
 }>();
 
 const emit = defineEmits<{
@@ -19,6 +20,7 @@ const emit = defineEmits<{
       cargo_name: string;
       quantity: string;
       files: File[];
+      point_id?: number;
     }
   ];
 }>();
@@ -28,12 +30,14 @@ const comment = ref("");
 const cargoName = ref("");
 const quantity = ref("");
 const files = ref<File[]>([]);
+const pointId = ref<number | null>(null);
 const galleryRef = ref<HTMLInputElement | null>(null);
 const cameraRef = ref<HTMLInputElement | null>(null);
 const localError = ref("");
-
+const unloadingPoints = computed(() => props.unloadingPoints || []);
 const choice = computed(() => PROBLEM_CHOICES.find((item) => item.kind === kind.value) || null);
 const isReturn = computed(() => kind.value === "return");
+const needPointPick = computed(() => isReturn.value && unloadingPoints.value.length > 1);
 const visibleChoices = computed(() => PROBLEM_CHOICES);
 
 watch(
@@ -46,9 +50,19 @@ watch(
       quantity.value = "";
       files.value = [];
       localError.value = "";
+      pointId.value = unloadingPoints.value.length === 1 ? unloadingPoints.value[0].id : null;
     }
   }
 );
+
+watch(kind, (value) => {
+  if (value !== "return") {
+    return;
+  }
+  if (unloadingPoints.value.length === 1) {
+    pointId.value = unloadingPoints.value[0].id;
+  }
+});
 
 function onFiles(event: Event): void {
   const input = event.target as HTMLInputElement;
@@ -79,13 +93,22 @@ function submit(): void {
     localError.value = "Для возврата укажите количество и краткое наименование груза";
     return;
   }
+  if (isReturn.value && unloadingPoints.value.length === 0) {
+    localError.value = "Возврат доступен на точках выгрузки";
+    return;
+  }
+  if (isReturn.value && unloadingPoints.value.length > 1 && !pointId.value) {
+    localError.value = "Выберите точку выгрузки";
+    return;
+  }
   localError.value = "";
   emit("submit", {
     kind: kind.value,
     comment: text,
     cargo_name: cargoName.value.trim(),
     quantity: quantity.value.trim(),
-    files: files.value
+    files: files.value,
+    point_id: isReturn.value ? pointId.value || undefined : undefined
   });
 }
 </script>
@@ -108,6 +131,19 @@ function submit(): void {
         </button>
       </div>
       <template v-if="choice">
+        <div v-if="needPointPick" class="points">
+          <p class="hint">Выберите точку выгрузки</p>
+          <button
+            v-for="point in unloadingPoints"
+            :key="point.id"
+            type="button"
+            class="kind"
+            :class="{ active: pointId === point.id }"
+            @click="pointId = point.id"
+          >
+            {{ point.label }}
+          </button>
+        </div>
         <label v-if="isReturn">
           Краткое наименование груза
           <input v-model="cargoName" placeholder="корма, питание, кофе, рыба…" />
@@ -121,10 +157,6 @@ function submit(): void {
           <textarea v-model="comment" rows="3" :placeholder="choice.needsReason ? 'Обязательно' : 'По желанию'" />
         </label>
         <p v-if="isReturn" class="warn">{{ RETURN_WARNING }}</p>
-        <p v-if="isReturn" class="hint">
-          После отправки на карточке рейса появятся этапы: оформил возврат, загрузил, выехал на точку, регистрация,
-          ворота, возврат сдан.
-        </p>
         <div v-if="isReturn" class="photos">
           <p class="hint">Фото возврата и документов, если они уже есть.</p>
           <div class="row">
@@ -185,7 +217,8 @@ h2 {
   font-weight: 650;
   line-height: 1.35;
 }
-.kinds {
+.kinds,
+.points {
   display: grid;
   gap: 0.35rem;
 }

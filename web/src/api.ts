@@ -1622,7 +1622,14 @@ export async function advanceReturnStage(
   token: string,
   routeId: string,
   incidentId: number,
-  payload?: { authorized_by?: string; comment?: string }
+  payload?: {
+    authorized_by?: string;
+    comment?: string;
+    lat?: number | null;
+    lng?: number | null;
+    odometer?: string;
+    odometer_source?: string;
+  }
 ): Promise<import("./routeIncidents").RouteIncident> {
   return requestJson(`${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}/incidents/${incidentId}/return-stage`, {
     method: "POST",

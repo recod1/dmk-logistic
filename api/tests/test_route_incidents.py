@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from unittest import TestCase
 
-from mobile_api.route_incidents import format_incident_chat, next_return_stage
+from mobile_api.route_incidents import format_incident_chat, next_return_stage, return_stages_out
 
 
 class ReturnStageTests(TestCase):
@@ -34,3 +34,8 @@ class ReturnStageTests(TestCase):
         self.assertIn("4 паллеты", text)
         self.assertIn("Иванов", text)
         self.assertIn("Оформил возврат", text)
+
+    def test_return_stages_table_has_all_rows(self) -> None:
+        rows = return_stages_out("{}", format_time=lambda value: value)
+        self.assertEqual([row["code"] for row in rows], ["issued", "loaded", "departed", "registration", "gates", "delivered"])
+        self.assertTrue(all(row["time"] is None for row in rows))

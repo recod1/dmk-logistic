@@ -740,6 +740,16 @@ const canProblemReturn = computed(() => {
   return selected.status !== "cancelled";
 });
 
+const problemUnloadingPoints = computed(() =>
+  (selectedDriverRoute.value?.points || [])
+    .filter((point) => point.type_point === "unloading")
+    .map((point) => ({
+      id: point.id,
+      label:
+        [point.point_name, point.place_point].filter((part) => (part || "").trim()).join(" · ") || `Выгрузка №${point.id}`
+    }))
+);
+
 const currentPageTitle = computed(() => {
   if (!isAuthed.value) {
     return "Вход";
@@ -5454,6 +5464,7 @@ async function submitRouteProblem(payload: {
   cargo_name: string;
   quantity: string;
   files: File[];
+  point_id?: number;
 }): Promise<void> {
   const routeId = selectedDriverRoute.value?.id;
   if (!authToken.value || !routeId) {
@@ -5465,17 +5476,18 @@ async function submitRouteProblem(payload: {
       kind: payload.kind,
       comment: payload.comment,
       cargo_name: payload.cargo_name,
-      quantity: payload.quantity
+      quantity: payload.quantity,
+      point_id: payload.point_id
     });
-    if (payload.files.length) {
+    if (payload.kind !== "return" && payload.files.length) {
       await uploadRouteChatAttachments(authToken.value, routeId, payload.files, {
-        text: payload.kind === "return" ? "Фото возврата / документов" : "Фото к проблеме"
+        text: "Фото к проблеме"
       });
     }
     closeProblemDialog();
     await refreshRouteIncidents(routeId);
     if (created.kind === "return") {
-      syncMessage.value = "Возврат создан. Пройдите этапы возврата на карточке рейса.";
+      syncMessage.value = "Возврат отправлен в чат рейса";
     } else {
       syncMessage.value = "Проблема отправлена в чат рейса";
     }
@@ -5500,19 +5512,32 @@ async function submitIncidentFollowUp(incident: RouteIncident): Promise<void> {
   }
 }
 
-async function finishReturnStage(incident: RouteIncident, authorizedBy: string, files: File[] = []): Promise<void> {
+async function finishReturnStage(incident: RouteIncident, authorizedBy: string, _files: File[] = []): Promise<void> {
   const routeId = selectedDriverRoute.value?.id;
   if (!authToken.value || !routeId) {
     return;
   }
   problemBusy.value = true;
   try {
-    await advanceReturnStage(authToken.value, routeId, incident.id, { authorized_by: authorizedBy });
-    if (files.length) {
-      await uploadRouteChatAttachments(authToken.value, routeId, files, {
-        text: incident.next_return_stage_label || "Фото этапа возврата"
-      });
+    const coords = await readDeviceCoordinates();
+    let odometer = "";
+    let odometerSource = "";
+    if (incident.point_id) {
+      try {
+        const tel = await getPointTelemetry(authToken.value, incident.point_id, { timeoutMs: 4000, skipSlot: true });
+        odometer = tel.odometer || "";
+        odometerSource = tel.odometer_source || "";
+      } catch {
+        // driver can still mark the stage without Wialon
+      }
     }
+    await advanceReturnStage(authToken.value, routeId, incident.id, {
+      authorized_by: authorizedBy,
+      lat: coords?.lat ?? null,
+      lng: coords?.lng ?? null,
+      odometer,
+      odometer_source: odometerSource
+    });
     await refreshRouteIncidents(routeId);
     syncMessage.value = incident.next_return_stage_label || "Этап возврата отмечен";
   } catch (error) {
@@ -6339,7 +6364,6 @@ onUnmounted(() => {
         @accept-route="() => doAcceptRoute(selectedDriverRoute.id)"
         @open-chat="openChatForRoute"
         @report-problem="openProblemDialog()"
-        @start-return="openProblemDialog('return')"
         @follow-up="submitIncidentFollowUp"
         @return-stage="startReturnStage"
       />
@@ -6559,6 +6583,7 @@ onUnmounted(() => {
       :busy="problemBusy"
       :can-return="canProblemReturn"
       :initial-kind="problemInitialKind"
+      :unloading-points="problemUnloadingPoints"
       @cancel="closeProblemDialog"
       @submit="submitRouteProblem"
     />

@@ -23,8 +23,11 @@ from mobile_api.route_incidents import (
     RETURN_STAGES,
     RETURN_STAGE_LABELS,
     RETURN_WARNING,
+    dump_return_stages,
     format_incident_chat,
     next_return_stage,
+    parse_return_stages,
+    return_stages_out,
 )
 from mobile_api.time_formatting import format_dt_for_app
 
@@ -47,6 +50,10 @@ class IncidentFollowUpIn(BaseModel):
 class ReturnStageIn(BaseModel):
     authorized_by: str = Field(default="", max_length=255)
     comment: str = Field(default="", max_length=2000)
+    lat: float | None = Field(default=None, ge=-90, le=90)
+    lng: float | None = Field(default=None, ge=-180, le=180)
+    odometer: str = Field(default="", max_length=64)
+    odometer_source: str = Field(default="", max_length=16)
 
 
 def _now() -> datetime:
@@ -89,6 +96,8 @@ def _incident_out(row: RouteIncident) -> dict:
         "resolved_at": format_dt_for_app(row.resolved_at),
         "created_at": format_dt_for_app(row.created_at),
         "chat_message_id": row.chat_message_id,
+        "stages": return_stages_out(row.stages_json, format_time=format_dt_for_app) if row.kind == "return" else [],
+        "chat_text": "",
     }
 
 
@@ -140,13 +149,14 @@ def create_incident(
     comment = (payload.comment or "").strip()
     if kind in NEEDS_REASON and not comment:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Укажите причину")
-    unloading = None
+    unloading_ids = list(
+        db.scalars(select(Point.id).where(Point.route_id == route.id, Point.type_point == "unloading")).all()
+    )
     if kind == "return":
         if route.status == "cancelled":
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Возврат недоступен по отменённому рейсу")
-        unloading = db.scalars(
-            select(Point.id).where(Point.route_id == route.id, Point.type_point == "unloading")
-        ).first()
+        if not unloading_ids:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Возврат доступен на точках выгрузки")
         if not (payload.cargo_name or "").strip() or not (payload.quantity or "").strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
@@ -162,8 +172,13 @@ def create_incident(
         if open_return:
             raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Возврат по этому рейсу уже открыт")
     point_id = payload.point_id
-    if point_id is None and kind == "return":
-        point_id = int(unloading) if unloading is not None else None
+    if kind == "return":
+        if point_id is None and len(unloading_ids) == 1:
+            point_id = int(unloading_ids[0])
+        if point_id is None:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Выберите точку выгрузки")
+        if int(point_id) not in {int(x) for x in unloading_ids}:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Возврат только для точки выгрузки")
     if point_id is not None:
         point = db.get(Point, int(point_id))
         if point is None or point.route_id != route.id:
@@ -189,16 +204,19 @@ def create_incident(
     msg = post_route_chat_and_notify(db, route, current_user, text)
     row.chat_message_id = int(msg.id)
     db.add(row)
-    _notify_problem(
-        db,
-        route,
-        current_user,
-        f"Проблема в рейсе {route.id}",
-        f"{KIND_LABELS.get(kind, kind)}: {comment or KIND_LABELS.get(kind, kind)}",
-    )
+    if kind != "return":
+        _notify_problem(
+            db,
+            route,
+            current_user,
+            f"Проблема в рейсе {route.id}",
+            f"{KIND_LABELS.get(kind, kind)}: {comment or KIND_LABELS.get(kind, kind)}",
+        )
     db.commit()
     db.refresh(row)
-    return _incident_out(row)
+    out = _incident_out(row)
+    out["chat_text"] = text
+    return out
 
 
 @router.post("/v1/mobile/routes/{route_id:path}/incidents/{incident_id}/follow-up")
@@ -259,28 +277,20 @@ def advance_return_stage(
         row.authorized_by = who
     extra = (payload.comment or "").strip()
     row.return_stage = nxt
+    stamp = _now()
+    stages = parse_return_stages(row.stages_json)
+    stages[nxt] = {
+        "time": stamp.isoformat(),
+        "lat": payload.lat,
+        "lng": payload.lng,
+        "odometer": (payload.odometer or "").strip(),
+        "odometer_source": (payload.odometer_source or "").strip(),
+    }
+    row.stages_json = dump_return_stages(stages)
     if nxt == RETURN_STAGES[-1]:
         row.status = "resolved"
-        row.resolved_at = _now()
+        row.resolved_at = stamp
     db.add(row)
-    text = format_incident_chat(
-        kind="return",
-        comment=extra,
-        cargo_name=row.cargo_name,
-        quantity=row.quantity,
-        authorized_by=row.authorized_by,
-        return_stage=nxt,
-    )
-    if nxt == "issued":
-        text = f"{text}\n{RETURN_WARNING}"
-    post_route_chat_and_notify(db, route, current_user, text)
-    _notify_problem(
-        db,
-        route,
-        current_user,
-        f"Возврат {route.id}: {RETURN_STAGE_LABELS[nxt]}",
-        extra or RETURN_STAGE_LABELS[nxt],
-    )
     db.commit()
     db.refresh(row)
     return _incident_out(row)
