@@ -4,6 +4,7 @@ import { clientsClaim } from "workbox-core";
 import { precacheAndRoute } from "workbox-precaching";
 
 import { deliverChatFromPush } from "./chatDeliveryBg";
+import { DRIVER_PRESENCE_SYNC_TAG, reportPresenceFromSession } from "./driverPresence";
 import { DRIVER_PREFETCH_SYNC_TAG, prefetchAssignedRoutesFromSession } from "./offlinePrefetch";
 
 declare const self: ServiceWorkerGlobalScope & { __WB_MANIFEST: string[] };
@@ -37,6 +38,7 @@ self.addEventListener("push", (event: PushEvent) => {
   let body = "";
   let badgeCount: number | null = null;
   let deliveryHint: Record<string, unknown> | null = null;
+  let silentPresence = false;
   try {
     if (event.data) {
       const parsed = event.data.json() as {
@@ -45,6 +47,7 @@ self.addEventListener("push", (event: PushEvent) => {
         badge?: number;
         badgeCount?: number;
         sync?: string;
+        silent?: boolean;
         event_type?: string;
         route_id?: string | null;
         room_id?: number | string | null;
@@ -57,6 +60,7 @@ self.addEventListener("push", (event: PushEvent) => {
       const rawBadge = typeof parsed.badgeCount === "number" ? parsed.badgeCount : parsed.badge;
       badgeCount = typeof rawBadge === "number" && Number.isFinite(rawBadge) ? rawBadge : null;
       deliveryHint = parsed;
+      silentPresence = parsed.event_type === "presence_ping" || parsed.silent === true || parsed.sync === "presence";
     }
   } catch {
     try {
@@ -66,7 +70,7 @@ self.addEventListener("push", (event: PushEvent) => {
     }
   }
 
-  const tasks: Array<Promise<unknown>> = [];
+  const tasks: Array<Promise<unknown>> = [reportPresenceFromSession()];
   if (deliveryHint) {
     tasks.push(
       deliverChatFromPush(deliveryHint).then(async (ok) => {
@@ -99,14 +103,16 @@ self.addEventListener("push", (event: PushEvent) => {
     }
   }
 
-  tasks.push(
-    self.registration.showNotification(title, {
-      body,
-      icon: "/pwa-192.png",
-      badge: "/pwa-192.png"
-    })
-  );
-  tasks.push(prefetchDriverRoutesInBackground());
+  if (!silentPresence) {
+    tasks.push(
+      self.registration.showNotification(title, {
+        body,
+        icon: "/pwa-192.png",
+        badge: "/pwa-192.png"
+      })
+    );
+    tasks.push(prefetchDriverRoutesInBackground());
+  }
 
   event.waitUntil(Promise.all(tasks));
 });
@@ -125,18 +131,26 @@ self.addEventListener("notificationclick", (event: NotificationEvent) => {
 
 self.addEventListener("sync", (event) => {
   const syncEvent = event as ExtendableEvent & { tag?: string };
+  if (syncEvent.tag === DRIVER_PRESENCE_SYNC_TAG) {
+    syncEvent.waitUntil(reportPresenceFromSession());
+    return;
+  }
   if (syncEvent.tag !== DRIVER_PREFETCH_SYNC_TAG) {
     return;
   }
-  syncEvent.waitUntil(prefetchDriverRoutesInBackground());
+  syncEvent.waitUntil(Promise.all([prefetchDriverRoutesInBackground(), reportPresenceFromSession()]));
 });
 
 self.addEventListener("periodicsync", (event) => {
   const periodicEvent = event as ExtendableEvent & { tag?: string };
+  if (periodicEvent.tag === DRIVER_PRESENCE_SYNC_TAG) {
+    periodicEvent.waitUntil(reportPresenceFromSession());
+    return;
+  }
   if (periodicEvent.tag !== DRIVER_PREFETCH_SYNC_TAG) {
     return;
   }
-  periodicEvent.waitUntil(prefetchDriverRoutesInBackground());
+  periodicEvent.waitUntil(Promise.all([prefetchDriverRoutesInBackground(), reportPresenceFromSession()]));
 });
 
 self.addEventListener("message", (event: ExtendableMessageEvent) => {
@@ -146,7 +160,10 @@ self.addEventListener("message", (event: ExtendableMessageEvent) => {
     return;
   }
   if (type === "DMK_PREFETCH") {
-    event.waitUntil(prefetchDriverRoutesInBackground());
+    event.waitUntil(Promise.all([prefetchDriverRoutesInBackground(), reportPresenceFromSession()]));
+  }
+  if (type === "DMK_PRESENCE") {
+    event.waitUntil(reportPresenceFromSession());
   }
   if (type === "DMK_SET_BADGE") {
     const count = Number((event.data as { count?: number } | null)?.count);

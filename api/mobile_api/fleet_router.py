@@ -11,7 +11,7 @@ from mobile_api.auth import get_current_fleet_editor, get_current_route_manager
 from mobile_api.db import get_db
 from mobile_api.driver_trip_rules import DriverRouteState, pick_active_route
 from mobile_api.models import FleetTrailer, FleetVehicle, Route, User
-from mobile_api.presence import presence_fields
+from mobile_api.presence import presence_fields, queue_presence_probes
 from mobile_api.roles import RoleCode
 from mobile_api.time_formatting import format_dt_for_app
 from utils.vehicle_plate import require_plate
@@ -233,4 +233,5 @@ def list_live_drivers(
                 **presence,
             }
         )
+    queue_presence_probes(db, list(drivers))
     return {"items": items}

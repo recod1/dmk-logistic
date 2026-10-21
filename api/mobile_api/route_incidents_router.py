@@ -142,11 +142,11 @@ def create_incident(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Укажите причину")
     unloading = None
     if kind == "return":
+        if route.status == "cancelled":
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Возврат недоступен по отменённому рейсу")
         unloading = db.scalars(
             select(Point.id).where(Point.route_id == route.id, Point.type_point == "unloading")
         ).first()
-        if unloading is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Возврат доступен на точках выгрузки")
         if not (payload.cargo_name or "").strip() or not (payload.quantity or "").strip():
             raise HTTPException(
                 status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,

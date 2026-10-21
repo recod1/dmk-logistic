@@ -156,7 +156,10 @@ function remove(item: FleetItem): void {
     </div>
     <div v-if="tab === 'drivers'" class="card">
       <h2>Водители</h2>
-      <p class="hint">Статус соединения и координаты обновляются, пока открыта эта вкладка.</p>
+      <p class="hint">
+        «Есть интернет» значит, что устройство водителя сейчас на связи — даже если приложение свёрнуто. «Нет интернета»
+        — телефон не отвечает серверу.
+      </p>
       <p v-if="!(drivers || []).length && !loading" class="empty">Нет активных водителей</p>
       <ul class="list">
         <li v-for="driver in drivers || []" :key="driver.id" class="driver-card">

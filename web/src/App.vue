@@ -166,6 +166,7 @@ import {
   clearLocalUserData,
   type ActionQueueItem
 } from "./db";
+import { DRIVER_PRESENCE_SYNC_TAG, reportPresenceFromSession } from "./driverPresence";
 import { DRIVER_PREFETCH_SYNC_TAG, persistPrefetchPayload, prefetchAssignedRoutesFromSession, routeToListItem } from "./offlinePrefetch";
 import { applyLatestAppVersion } from "./appUpdate";
 import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
@@ -736,8 +737,7 @@ const canProblemReturn = computed(() => {
   if (!selected) {
     return false;
   }
-  const hasUnloading = (selected.points || []).some((point) => point.type_point === "unloading");
-  return hasUnloading && (selected.status === "process" || selected.status === "success");
+  return selected.status !== "cancelled";
 });
 
 const currentPageTitle = computed(() => {
@@ -1029,8 +1029,10 @@ async function registerDriverBackgroundSync(): Promise<void> {
     const registration = await navigator.serviceWorker.ready;
     registration.active?.postMessage({ type: "DMK_PREFETCH" });
     const syncManager = (registration as ServiceWorkerRegistration & { sync?: { register: (tag: string) => Promise<void> } }).sync;
+    registration.active?.postMessage({ type: "DMK_PRESENCE" });
     if (syncManager) {
       await syncManager.register(DRIVER_PREFETCH_SYNC_TAG);
+      await syncManager.register(DRIVER_PRESENCE_SYNC_TAG);
     }
     const periodic = (
       registration as ServiceWorkerRegistration & {
@@ -1042,9 +1044,11 @@ async function registerDriverBackgroundSync(): Promise<void> {
         const status = await navigator.permissions.query({ name: "periodic-background-sync" as PermissionName });
         if (status.state === "granted") {
           await periodic.register(DRIVER_PREFETCH_SYNC_TAG, { minInterval: 15 * 60 * 1000 });
+          await periodic.register(DRIVER_PRESENCE_SYNC_TAG, { minInterval: 60 * 1000 });
         }
       } catch {
         await periodic.register(DRIVER_PREFETCH_SYNC_TAG, { minInterval: 15 * 60 * 1000 });
+        await periodic.register(DRIVER_PRESENCE_SYNC_TAG, { minInterval: 60 * 1000 });
       }
     }
   } catch {
@@ -1811,6 +1815,9 @@ function connectNotificationsSocket(): void {
       }
       notificationsPingInterval = window.setInterval(() => {
         try {
+          if (isPageHidden() && !isDriver.value) {
+            return;
+          }
           ws.send("ping");
         } catch {
           // noop
@@ -2444,6 +2451,7 @@ function onVisibilityChange(): void {
   }
   if (document.visibilityState === "hidden") {
     if (isDriver.value) {
+      beaconDriverPresence();
       void prefetchAssignedRoutesFromSession();
       void registerDriverBackgroundSync();
     }
@@ -2664,6 +2672,7 @@ function onPageHide(): void {
   if (!authToken.value || !isDriver.value) {
     return;
   }
+  beaconDriverPresence();
   void prefetchAssignedRoutesFromSession();
   void registerDriverBackgroundSync();
 }
@@ -3808,6 +3817,7 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
       await syncOutboxInBackground();
       startBackgroundSyncLoop();
       startPresenceTimer();
+      void ensureDriverPushForPresence();
     }
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       void ensureWebPushSubscription();
@@ -5553,6 +5563,24 @@ function stopPresenceTimer(): void {
   }
 }
 
+function beaconDriverPresence(): void {
+  if (!authToken.value || !isDriver.value) {
+    return;
+  }
+  void reportPresenceFromSession();
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) {
+    return;
+  }
+  void navigator.serviceWorker.ready
+    .then((registration) => {
+      registration.active?.postMessage({ type: "DMK_PRESENCE" });
+      const syncManager = (registration as ServiceWorkerRegistration & { sync?: { register: (tag: string) => Promise<void> } })
+        .sync;
+      return syncManager?.register(DRIVER_PRESENCE_SYNC_TAG);
+    })
+    .catch(() => undefined);
+}
+
 function startPresenceTimer(): void {
   stopPresenceTimer();
   if (!isDriver.value) {
@@ -5562,7 +5590,13 @@ function startPresenceTimer(): void {
     if (!authToken.value || !isDriver.value || !hasNetwork()) {
       return;
     }
-    if (readGeoSharingEnabled() && typeof navigator !== "undefined" && navigator.geolocation) {
+    const hidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+    if (
+      !hidden &&
+      readGeoSharingEnabled() &&
+      typeof navigator !== "undefined" &&
+      navigator.geolocation
+    ) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
           void reportPresence(authToken.value as string, { lat: pos.coords.latitude, lng: pos.coords.longitude }).catch(
@@ -5579,7 +5613,21 @@ function startPresenceTimer(): void {
     void reportPresence(authToken.value).catch(() => undefined);
   };
   tick();
-  presenceTimer = window.setInterval(tick, 40000);
+  presenceTimer = window.setInterval(tick, 20000);
+}
+
+async function ensureDriverPushForPresence(): Promise<void> {
+  if (!isDriver.value || typeof window === "undefined" || typeof Notification === "undefined") {
+    return;
+  }
+  if (Notification.permission === "default") {
+    try {
+      await Notification.requestPermission();
+    } catch {
+      // ignore
+    }
+  }
+  void ensureWebPushSubscription();
 }
 
 async function refreshChatRoom(options?: { silent?: boolean }): Promise<void> {
@@ -5970,6 +6018,7 @@ onMounted(async () => {
   window.addEventListener("mousedown", onDocumentClick);
   window.addEventListener("pagehide", onPageHide);
   window.addEventListener("pageshow", onPageShow);
+  document.addEventListener("freeze", onPageHide as EventListener);
   window.addEventListener("resize", onViewportChange);
   window.visualViewport?.addEventListener("resize", onViewportChange);
   window.visualViewport?.addEventListener("scroll", onViewportChange);
@@ -6011,6 +6060,7 @@ onUnmounted(() => {
   window.removeEventListener("mousedown", onDocumentClick);
   window.removeEventListener("pagehide", onPageHide);
   window.removeEventListener("pageshow", onPageShow);
+  document.removeEventListener("freeze", onPageHide as EventListener);
   window.removeEventListener("resize", onViewportChange);
   window.visualViewport?.removeEventListener("resize", onViewportChange);
   window.visualViewport?.removeEventListener("scroll", onViewportChange);

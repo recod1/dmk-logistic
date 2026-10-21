@@ -59,10 +59,7 @@ const isAcceptedCurrentRoute = computed(
   () => props.route.status === "process" && props.route.id === props.activeRouteId
 );
 
-const hasUnloading = computed(() => (props.route.points || []).some((point) => point.type_point === "unloading"));
-const canStartReturn = computed(
-  () => hasUnloading.value && (props.route.status === "process" || props.route.status === "success")
-);
+const canStartReturn = computed(() => props.route.status !== "cancelled");
 const openIncidents = computed(() => (props.incidents || []).filter((item) => item.status === "open"));
 const openReturn = computed(() => openIncidents.value.find((item) => item.kind === "return") || null);
 

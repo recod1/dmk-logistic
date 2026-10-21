@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
-import { PROBLEM_CHOICES, type IncidentKind } from "../routeIncidents";
+import { PROBLEM_CHOICES, RETURN_WARNING, type IncidentKind } from "../routeIncidents";
 
 const props = defineProps<{
   open: boolean;
@@ -34,15 +34,13 @@ const localError = ref("");
 
 const choice = computed(() => PROBLEM_CHOICES.find((item) => item.kind === kind.value) || null);
 const isReturn = computed(() => kind.value === "return");
-const visibleChoices = computed(() =>
-  PROBLEM_CHOICES.filter((item) => item.kind !== "return" || props.canReturn)
-);
+const visibleChoices = computed(() => PROBLEM_CHOICES);
 
 watch(
   () => props.open,
   (isOpen) => {
     if (isOpen) {
-      kind.value = props.initialKind === "return" && !props.canReturn ? "" : props.initialKind || "";
+      kind.value = props.initialKind || "";
       comment.value = "";
       cargoName.value = "";
       quantity.value = "";
@@ -96,7 +94,7 @@ function submit(): void {
   <div v-if="open" class="overlay" @click.self="emit('cancel')">
     <section class="sheet">
       <h2>Проблемы в рейсе</h2>
-      <p class="hint">Сообщение уйдёт в чат рейса и уведомления логистам и администраторам.</p>
+      <p class="hint">Сообщение уйдёт в чат рейса и уведомления логистам, администраторам и диспетчеру.</p>
       <div class="kinds">
         <button
           v-for="item in visibleChoices"
@@ -122,6 +120,11 @@ function submit(): void {
           {{ isReturn ? "Причина возврата и комментарий" : "Причина / комментарий" }}
           <textarea v-model="comment" rows="3" :placeholder="choice.needsReason ? 'Обязательно' : 'По желанию'" />
         </label>
+        <p v-if="isReturn" class="warn">{{ RETURN_WARNING }}</p>
+        <p v-if="isReturn" class="hint">
+          После отправки на карточке рейса появятся этапы: оформил возврат, загрузил, выехал на точку, регистрация,
+          ворота, возврат сдан.
+        </p>
         <div v-if="isReturn" class="photos">
           <p class="hint">Фото возврата и документов, если они уже есть.</p>
           <div class="row">
@@ -175,6 +178,12 @@ h2 {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.85rem;
+}
+.warn {
+  margin: 0;
+  color: #fecaca;
+  font-weight: 650;
+  line-height: 1.35;
 }
 .kinds {
   display: grid;

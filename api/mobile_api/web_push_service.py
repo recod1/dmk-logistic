@@ -114,6 +114,7 @@ def send_web_push_to_users(
     body: str,
     notification_id: int | None = None,
     extra: dict[str, Any] | None = None,
+    ttl: int = 86400,
 ) -> None:
     """
     subscriptions: list of (subscription_id, endpoint, p256dh, auth)
@@ -155,7 +156,7 @@ def send_web_push_to_users(
                     data=data,
                     vapid_private_key=tmp_path,
                     vapid_claims=vapid_claims,
-                    ttl=86400,
+                    ttl=int(ttl),
                 )
             except WebPushException as exc:
                 if exc.response is not None and exc.response.status_code in {404, 410}:

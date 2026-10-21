@@ -10,8 +10,10 @@ from mobile_api.db import SessionLocal
 from mobile_api.models import User
 from mobile_api.time_formatting import format_dt_for_app
 
-ONLINE_AFTER = timedelta(seconds=45)
-RECENT_AFTER = timedelta(minutes=5)
+ONLINE_AFTER = timedelta(seconds=90)
+RECENT_AFTER = timedelta(minutes=3)
+_last_presence_ping_at: dict[int, datetime] = {}
+PRESENCE_PING_COOLDOWN = timedelta(seconds=20)
 
 
 def now_utc() -> datetime:
@@ -62,10 +64,39 @@ def connection_status(last_seen_at: datetime | None, *, now: datetime | None = N
 
 def connection_label(status: str) -> str:
     if status == "online":
-        return "В сети"
+        return "Есть интернет"
     if status == "recent":
-        return "Недавно"
-    return "Не в сети"
+        return "Проверяем…"
+    return "Нет интернета"
+
+
+def queue_presence_probes(db: Session, drivers: list[User]) -> None:
+    """Wake driver apps (even minimized) so last_seen reflects real internet, not UI activity."""
+    now = now_utc()
+    stale_ids: list[int] = []
+    for driver in drivers:
+        if connection_status(driver.last_seen_at, now=now) == "online":
+            continue
+        prev = _last_presence_ping_at.get(int(driver.id))
+        if prev and now - prev < PRESENCE_PING_COOLDOWN:
+            continue
+        _last_presence_ping_at[int(driver.id)] = now
+        stale_ids.append(int(driver.id))
+    if not stale_ids:
+        return
+    from mobile_api.web_push_service import collect_subscriptions_for_users, send_web_push_to_users
+
+    rows = collect_subscriptions_for_users(db, stale_ids)
+    subs = [(sub_id, endpoint, p256dh, auth) for sub_id, _user_id, endpoint, p256dh, auth in rows]
+    if not subs:
+        return
+    send_web_push_to_users(
+        subscriptions=subs,
+        title="",
+        body="",
+        extra={"event_type": "presence_ping", "silent": True, "sync": "presence"},
+        ttl=45,
+    )
 
 
 def presence_fields(user: User) -> dict:
