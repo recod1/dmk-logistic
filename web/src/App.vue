@@ -6376,15 +6376,16 @@ onUnmounted(() => {
       </div>
 
       <div class="topbar-side right">
-        <HeaderNav
-          v-if="showHeaderNav"
-          :items="headerNavItems"
-          :active-id="activeBottomNavId"
-          :chats-unread="hasUnreadChatsNav"
-          :routes-unread="hasUnreadRouteChats"
-          :salary-unread="hasUnreadSalary"
-          @select="selectBottomNav"
-        />
+        <div v-if="showHeaderNav" class="header-nav-slot">
+          <HeaderNav
+            :items="headerNavItems"
+            :active-id="activeBottomNavId"
+            :chats-unread="hasUnreadChatsNav"
+            :routes-unread="hasUnreadRouteChats"
+            :salary-unread="hasUnreadSalary"
+            @select="selectBottomNav"
+          />
+        </div>
         <div v-if="isAuthed" class="profile-wrap">
           <button class="profile-btn" type="button" @click="toggleProfileMenu">
             <span class="avatar">{{ profileInitials }}</span>
@@ -6980,7 +6981,13 @@ onUnmounted(() => {
   flex-wrap: nowrap;
   gap: 0.4rem;
   min-width: 0;
-  overflow: hidden;
+  overflow: visible;
+}
+.header-nav-slot {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
 }
 .topbar-center {
   display: grid;
@@ -7027,6 +7034,9 @@ onUnmounted(() => {
 }
 .profile-wrap {
   position: relative;
+  flex: 0 0 auto;
+  overflow: visible;
+  z-index: 50;
 }
 .profile-btn {
   border: 1px solid var(--border-strong);
