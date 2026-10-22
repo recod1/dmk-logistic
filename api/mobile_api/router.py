@@ -25,6 +25,7 @@ from mobile_api.route_notification_logic import (
     point_fact_datetime,
 )
 from mobile_api.point_event_meta import load_point_event_meta, stage_meta_fields
+from mobile_api.point_status import effective_point_status, point_is_completed
 from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.roles import role_label_ru
 from utils.onec_datetime import normalize_planned_time, planned_wall_fields
@@ -181,7 +182,9 @@ def _load_manual_edits(point: Point) -> dict:
 
 def _get_ordered_points(db: Session, route_id: str) -> list[Point]:
     ordered_ids = db.scalars(
-        select(RoutePoint.point_id).where(RoutePoint.route_id == route_id).order_by(RoutePoint.order_index)
+        select(RoutePoint.point_id)
+        .where(RoutePoint.route_id == route_id)
+        .order_by(RoutePoint.order_index.asc(), RoutePoint.id.asc())
     ).all()
     if ordered_ids:
         points = db.scalars(select(Point).where(Point.id.in_(ordered_ids))).all()
@@ -290,10 +293,11 @@ def _driver_routes_for_user(db: Session, user_id: int) -> list[Route]:
 def _route_summary(db: Session, route: Route) -> dict:
     points = _get_ordered_points(db, route.id)
     active_point = next(
-        (point for point in points if point.status not in COMPLETED_POINT_STATUSES),
+        (point for point in points if not point_is_completed(point)),
         points[-1] if points else None,
     )
     planned = planned_wall_fields(active_point.date_point, active_point.point_time) if active_point else ("", "")
+    active_status = effective_point_status(active_point) if active_point else None
     return {
         "id": route.id,
         "status": route.status,
@@ -307,13 +311,15 @@ def _route_summary(db: Session, route: Route) -> dict:
         "accepted_at": route.accepted_at.isoformat() if route.accepted_at else None,
         "points_count": len(points),
         "active_point_id": active_point.id if active_point else None,
-        "active_point_status": active_point.status if active_point else None,
+        "active_point_status": active_status,
         "active_point_place": ((active_point.place_point or "").strip() or None) if active_point else None,
         "active_point_name": ((active_point.point_name or "").strip() or None) if active_point else None,
         "active_point_type": active_point.type_point if active_point else None,
         "active_point_date": planned[0] or None,
         "active_point_time": planned[1] or None,
-        "active_point_fact_time": _format_datetime_ru(point_fact_datetime(active_point)) if active_point else None,
+        "active_point_fact_time": (
+            _format_datetime_ru(point_fact_datetime(active_point, active_status)) if active_point else None
+        ),
     }
 
 

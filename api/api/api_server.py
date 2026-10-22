@@ -18,12 +18,9 @@ for _path in (_API_ROOT, _REPO_ROOT / "shared", _REPO_ROOT / "bot"):
 from fastapi import FastAPI, HTTPException, Depends, Header
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Any, Optional, List
 from database.repositories.user_repository import UserRepository
 from database.repositories.salary_repository import SalaryRepository
-from database.repositories.route_repository import RouteRepository
-from config.settings import UserRole
-from services.notification_service import NotificationService
 from mobile_api.router import router as mobile_router
 from mobile_api.admin_router import router as admin_users_router
 from mobile_api.admin_routes_router import router as admin_mobile_routes_router
@@ -152,15 +149,14 @@ class SalaryCreate(BaseModel):
 
 user_repo = UserRepository()
 salary_repo = SalaryRepository()
-route_repo = RouteRepository()
 
 
 class RoutePointCreate(BaseModel):
     """Точка маршрута (загрузка/выгрузка)."""
     type_point: str  # "loading" или "unloading"
     place_point: str
-    date_point: str  # дата или дата+время как в 1С, настенные часы без сдвига TZ
-    point_time: Optional[str] = ""
+    date_point: Any  # дата/дата-время как в 1С: строка, /Date(ms)/, число
+    point_time: Optional[Any] = ""
 
 
 class RouteCreate(BaseModel):
@@ -176,67 +172,29 @@ class RouteCreate(BaseModel):
     points: Optional[List[RoutePointCreate]] = None
 
 
-@app.post("/api/route", dependencies=[Depends(verify_api_key)])
-async def create_route(route_data: RouteCreate):
-    """Создать рейс. Водитель задаётся driver_name (ФИО) или driver_tg_id (Telegram ID)."""
-    if route_repo.route_id_exists(route_data.route_id):
-        raise HTTPException(status_code=409, detail=f"Route with id '{route_data.route_id}' already exists")
-    tg_id = None
-    if route_data.driver_tg_id is not None:
-        user = user_repo.get_by_tg_id(route_data.driver_tg_id)
-        if not user:
-            raise HTTPException(status_code=404, detail=f"Driver with tg_id {route_data.driver_tg_id} not found")
-        tg_id = int(user.tg_id)
-    elif route_data.driver_name and route_data.driver_name.strip():
-        user = user_repo.get_by_name(route_data.driver_name.strip())
-        if not user:
-            raise HTTPException(status_code=404, detail=f"Driver with name '{route_data.driver_name}' not found")
-        if user.role != UserRole.DRIVER:
-            raise HTTPException(status_code=400, detail="User must be a driver")
-        tg_id = int(user.tg_id)
-    else:
-        raise HTTPException(status_code=400, detail="Provide driver_name or driver_tg_id")
-    route = route_repo.create(
-        route_id=route_data.route_id,
-        tg_id=tg_id,
-        number_auto=(route_data.number_auto or "").strip(),
-        temperature=(route_data.temperature or "").strip(),
-        dispatcher_contacts=(route_data.dispatcher_contacts or "").strip(),
-        registration_number=(route_data.registration_number or "").strip(),
-        trailer_number=(route_data.trailer_number or "").strip().upper(),
-    )
-    if not route:
-        raise HTTPException(status_code=500, detail="Failed to create route")
-    point_ids = []
-    if route_data.points:
-        from utils.onec_datetime import planned_wall_fields
+def _create_route_from_1c(route_data: RouteCreate):
+    """Пишет рейс в Postgres (PWA). Nginx снимает /api, поэтому есть алиас /route."""
+    from mobile_api.legacy_route_api import create_route_from_integration
 
-        for p in route_data.points:
-            type_point = (p.type_point or "").strip().lower()
-            if type_point not in ("loading", "unloading"):
-                type_point = "loading"
-            date_point, point_time = planned_wall_fields(p.date_point or "", p.point_time or "")
-            last_id = route_repo.get_last_point_id()
-            point_id = last_id + 1 if last_id else 1
-            route_repo.create_point(
-                point_id=point_id,
-                route_id=route_data.route_id,
-                type_point=type_point,
-                place_point=(p.place_point or "").strip(),
-                date_point=date_point,
-                point_time=point_time,
-            )
-            point_ids.append(str(point_id))
-        if point_ids:
-            route_repo.add_point_to_route(route_data.route_id, ",".join(point_ids))
-    route = route_repo.get_by_id_str(route_data.route_id)
-    if route and route.tg_id:
+    with SessionLocal() as db:
         try:
-            notification = NotificationService(user_repo)
-            await notification.notify_driver_new_route(route, route_repo)
-        except Exception as e:
-            pass
-    return {"id": route_data.route_id, "message": "Route created successfully", "points_count": len(point_ids) if route_data.points else 0}
+            result = create_route_from_integration(db, route_data)
+            db.commit()
+            return result
+        except HTTPException:
+            db.rollback()
+            raise
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to create route %s from 1C/legacy API", route_data.route_id)
+            raise HTTPException(status_code=500, detail="Failed to create route")
+
+
+@app.post("/api/route", dependencies=[Depends(verify_api_key)])
+@app.post("/route", dependencies=[Depends(verify_api_key)])
+async def create_route(route_data: RouteCreate):
+    """Создать рейс из 1С. Водитель: driver_name (ФИО) или driver_tg_id."""
+    return _create_route_from_1c(route_data)
 
 
 @app.post("/api/salary", dependencies=[Depends(verify_api_key)])

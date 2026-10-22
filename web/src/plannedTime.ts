@@ -2,6 +2,7 @@ const DATE_ISO = /(\d{4})-(\d{2})-(\d{2})/;
 const DATE_DMY = /(\d{1,2})[./](\d{1,2})[./](\d{2,4})/;
 const TIME = /(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\s*([AaPp][Mm])(?![A-Za-z]))?/;
 const TIME_FLEX = /(\d{1,2})[.\-](\d{2})(?:[.\-](\d{2}))?/;
+const MS_DATE = /\/Date\((-?\d+)(?:[+-]\d{4})?\)\//;
 
 function pad2(n: number): string {
   return String(n).padStart(2, "0");
@@ -25,6 +26,14 @@ export function splitPlannedDateTime(raw?: string | null): { date: string; time:
   const text = (raw || "").trim();
   if (!text) {
     return { date: "", time: "" };
+  }
+  const msDate = MS_DATE.exec(text);
+  if (msDate && !text.includes(":") && !/\d{4}-\d{2}-\d{2}/.test(text)) {
+    const moscow = new Date(Number(msDate[1]) + 3 * 60 * 60 * 1000);
+    return {
+      date: `${pad2(moscow.getUTCDate())}.${pad2(moscow.getUTCMonth() + 1)}.${moscow.getUTCFullYear()}`,
+      time: `${pad2(moscow.getUTCHours())}:${pad2(moscow.getUTCMinutes())}`
+    };
   }
   let date = "";
   let rest = text;
@@ -56,6 +65,14 @@ export function splitPlannedDateTime(raw?: string | null): { date: string; time:
   return { date, time: pickWallClockTime(search) };
 }
 
+function isDateFragment(text: string, start: number, end: number): boolean {
+  const rest = text.slice(end);
+  if (/^[./-]\d{2,4}(?!\d)/.test(rest)) {
+    return true;
+  }
+  return /\d{4}[./-]$/.test(text.slice(0, start));
+}
+
 function pickWallClockTime(search: string): string {
   const candidates: Array<{ hour: number; minute: number; afternoon: boolean }> = [];
   const timeRe = new RegExp(TIME.source, "g");
@@ -71,6 +88,12 @@ function pickWallClockTime(search: string): string {
     const flexRe = new RegExp(TIME_FLEX.source, "g");
     let flex: RegExpExecArray | null;
     while ((flex = flexRe.exec(search))) {
+      if (flex[3] && /^\d/.test(search.slice(flex.index + flex[0].length))) {
+        continue;
+      }
+      if (isDateFragment(search, flex.index, flex.index + flex[0].length)) {
+        continue;
+      }
       const hour = Number(flex[1]);
       const minute = Number(flex[2]);
       if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {

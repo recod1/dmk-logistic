@@ -71,7 +71,9 @@ def _ordered_points(db: "Session", route_id: str) -> "list[Point]":
 
 def _active_point_for_route(db: "Session", route_id: str) -> "Point | None":
     points = _ordered_points(db, route_id)
-    active = next((point for point in points if point.status not in COMPLETED_POINT_STATUSES), None)
+    from mobile_api.point_status import point_is_completed
+
+    active = next((point for point in points if not point_is_completed(point)), None)
     return active or (points[-1] if points else None)
 
 

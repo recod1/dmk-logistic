@@ -74,6 +74,29 @@ class OnecDatetimeTests(TestCase):
         self.assertEqual(planned_wall_fields("2026-10-16T00:00:00", "1899-12-30T14:00:00"), ("16.10.2026", "14:00"))
         self.assertEqual(planned_wall_fields("16.10.2026 14:00 (02:00)", ""), ("16.10.2026", "14:00"))
 
+    def test_date_only_is_not_read_as_time(self) -> None:
+        self.assertEqual(split_onec_wall_datetime("22.10.2026"), ("22.10.2026", ""))
+        self.assertEqual(planned_wall_fields("22.10.2026", ""), ("22.10.2026", ""))
+        self.assertNotEqual(planned_wall_fields("22.10.2026", "")[1], "22:10")
+
+    def test_keeps_1830_from_common_1c_shapes(self) -> None:
+        self.assertEqual(planned_wall_fields("22.10.2026 18:30", ""), ("22.10.2026", "18:30"))
+        self.assertEqual(planned_wall_fields("22.10.2026", "18:30"), ("22.10.2026", "18:30"))
+        self.assertEqual(planned_wall_fields("2026-10-22T18:30:00", ""), ("22.10.2026", "18:30"))
+        self.assertEqual(planned_wall_fields("2026-10-22T00:00:00", "0001-01-01T18:30:00"), ("22.10.2026", "18:30"))
+        self.assertEqual(planned_wall_fields("22.10.2026 18:30", "6:30"), ("22.10.2026", "18:30"))
+        self.assertNotEqual(planned_wall_fields("22.10.2026", "18:30")[1], "06:30")
+
+    def test_ms_date_converts_to_moscow_wall(self) -> None:
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+
+        ms = int(datetime(2026, 10, 22, 18, 30, tzinfo=ZoneInfo("Europe/Moscow")).timestamp() * 1000)
+        self.assertEqual(split_onec_wall_datetime(f"/Date({ms})/"), ("22.10.2026", "18:30"))
+
+    def test_decimal_hours_1830(self) -> None:
+        self.assertEqual(normalize_planned_time(18.5), "18:30")
+
 
 class OnecParseTests(TestCase):
     def test_parse_loading_keeps_1630(self) -> None:

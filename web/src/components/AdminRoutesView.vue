@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 
-import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel } from "../status";
+import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel, pointTypeLabel } from "../status";
 import { normalizePlannedTimeInput, plannedDateDisplay, plannedTimeDisplay } from "../plannedTime";
 import { normalizePlate } from "../vehiclePlate";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, RouteWorkflowStatus } from "../types";
@@ -196,8 +196,11 @@ function currentListPoint(route: AdminRoute): {
 
 function routeListStatus(route: AdminRoute): string {
   if (route.status === "process") {
-    const stage = listPointStatusLabel(currentListPoint(route)?.status);
-    return formatListStatusWithFact(stage || STATUS_LABELS.process, route.active_point_fact_time);
+    const current = currentListPoint(route);
+    const kind = pointTypeLabel(current?.type);
+    const stage = listPointStatusLabel(current?.status);
+    const text = [kind, stage].filter(Boolean).join(" · ") || STATUS_LABELS.process;
+    return formatListStatusWithFact(text, route.active_point_fact_time);
   }
   return STATUS_LABELS[route.status] ?? route.status;
 }

@@ -44,6 +44,7 @@ from mobile_api.point_event_meta import load_point_event_meta, stage_meta_fields
 from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.logistics_contacts_router import logistics_contacts_payload
 from mobile_api.fleet_router import ensure_fleet_trailer, ensure_fleet_vehicle
+from mobile_api.point_status import effective_point_status, point_is_completed
 from utils.onec_datetime import planned_wall_fields, split_onec_wall_datetime, normalize_planned_time
 from utils.vehicle_plate import normalize_plate, require_plate
 from utils.route_point_changes import changed_text as _changed_text, diff_route_points
@@ -266,7 +267,9 @@ COMPLETED_POINT_STATUSES = {"docs", "success"}
 
 def _route_points(db: Session, route_id: str) -> list[Point]:
     ordered_ids = db.scalars(
-        select(RoutePoint.point_id).where(RoutePoint.route_id == route_id).order_by(RoutePoint.order_index.asc())
+        select(RoutePoint.point_id)
+        .where(RoutePoint.route_id == route_id)
+        .order_by(RoutePoint.order_index.asc(), RoutePoint.id.asc())
     ).all()
     if not ordered_ids:
         return []
@@ -307,7 +310,7 @@ def _sync_route_status_from_points(db: Session, route: Route) -> None:
 def _pick_active_point(points: list[Point]) -> Point | None:
     if not points:
         return None
-    return next((point for point in points if point.status not in COMPLETED_POINT_STATUSES), points[-1])
+    return next((point for point in points if not point_is_completed(point)), points[-1])
 
 
 def _active_points_by_route_id(db: Session, route_ids: list[str]) -> dict[str, Point]:
@@ -317,13 +320,13 @@ def _active_points_by_route_id(db: Session, route_ids: list[str]) -> dict[str, P
         select(RoutePoint.route_id, Point)
         .join(Point, Point.id == RoutePoint.point_id)
         .where(RoutePoint.route_id.in_(route_ids))
-        .order_by(RoutePoint.route_id.asc(), RoutePoint.order_index.asc())
+        .order_by(RoutePoint.route_id.asc(), RoutePoint.order_index.asc(), Point.id.asc())
     ).all()
     first_open: dict[str, Point] = {}
     last_by_route: dict[str, Point] = {}
     for route_id, point in rows:
         last_by_route[route_id] = point
-        if route_id not in first_open and point.status not in COMPLETED_POINT_STATUSES:
+        if route_id not in first_open and not point_is_completed(point):
             first_open[route_id] = point
     return {route_id: first_open.get(route_id) or last_by_route[route_id] for route_id in last_by_route}
 
@@ -557,14 +560,16 @@ def _route_out(
         "driver": _driver_out(driver),
         "created_by": _driver_out(creator),
         "points_count": points_count,
-        "active_point_status": current_point.status if current_point else None,
+        "active_point_status": effective_point_status(current_point) if current_point else None,
         "active_point_place": place or None,
         "active_point_name": name or None,
         "active_point_type": current_point.type_point if current_point else None,
         "active_point_date": (active_date or None) if current_point else None,
         "active_point_time": (active_time or None) if current_point else None,
         "active_point_fact_time": (
-            _format_datetime_ru(point_fact_datetime(current_point)) if current_point else None
+            _format_datetime_ru(point_fact_datetime(current_point, effective_point_status(current_point)))
+            if current_point
+            else None
         ),
         "last_loading_point_name": last_loading_name,
         "last_loading_date": last_loading_date,

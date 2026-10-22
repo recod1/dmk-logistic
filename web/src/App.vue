@@ -1702,6 +1702,12 @@ function handleIncomingNotification(
   if (syncDriverState && item.event_type === "route_updated" && isDriver.value) {
     void refreshDriverData();
   }
+  if (
+    isRouteManager.value &&
+    (item.event_type === "point_status_changed" || item.event_type === "point_status_stale" || item.event_type === "route_updated")
+  ) {
+    void refreshAdminRoutes();
+  }
   if (isDriver.value && item.event_type === "driver_location_request") {
     void sendDriverLocationIfPossible(item.route_id);
   }

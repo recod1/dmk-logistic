@@ -79,7 +79,9 @@ def _ordered_points(db: Session, route_id: str) -> list[Point]:
 
 
 def _active_open_point(points: list[Point]) -> Point | None:
-    return next((point for point in points if (point.status or "") not in COMPLETED_POINT_STATUSES), None)
+    from mobile_api.point_status import point_is_completed
+
+    return next((point for point in points if not point_is_completed(point)), None)
 
 
 def scan_stale_points(db: Session, *, now: datetime | None = None) -> int:
