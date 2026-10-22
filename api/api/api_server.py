@@ -37,6 +37,7 @@ from mobile_api.shifts_router import router as shifts_router
 from mobile_api.bootstrap import ensure_demo_user
 from mobile_api.db import SessionLocal
 from mobile_api.stale_point_job import run_stale_point_loop
+from mobile_api.presence import run_presence_history_loop
 
 app = FastAPI(
     title="DMK API Server",
@@ -83,6 +84,10 @@ def bootstrap_mobile_user():
         asyncio.get_event_loop().create_task(run_stale_point_loop())
     except Exception as exc:
         logger.warning("point_status_stale loop not started: %s", exc)
+    try:
+        asyncio.get_event_loop().create_task(run_presence_history_loop())
+    except Exception as extra:
+        logger.warning("driver presence history loop not started: %s", extra)
 
 
 @app.get("/")

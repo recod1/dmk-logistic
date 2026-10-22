@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
+import SuggestField from "./SuggestField.vue";
+import type { DriverOption } from "../types";
 import type { DriverShiftListItem } from "../types";
 
 const props = defineProps<{
@@ -9,24 +11,35 @@ const props = defineProps<{
   error: string;
   statusFilter: "" | "active" | "ended";
   query: string;
+  driverUserId?: number | null;
   dateFrom: string;
   dateTo: string;
+  drivers?: DriverOption[];
 }>();
 
 const emit = defineEmits<{
-  refresh: [];
-  updateFilters: [payload: { status: "" | "active" | "ended"; query: string; dateFrom: string; dateTo: string }];
+  updateFilters: [
+    payload: {
+      status: "" | "active" | "ended";
+      query: string;
+      driverUserId: number | null;
+      dateFrom: string;
+      dateTo: string;
+    }
+  ];
   openShift: [shiftId: number];
 }>();
 
 const localQuery = ref(props.query);
+const localDriverId = ref<number | null>(props.driverUserId ?? null);
 const localFrom = ref(props.dateFrom);
 const localTo = ref(props.dateTo);
 
 watch(
-  () => [props.query, props.dateFrom, props.dateTo],
+  () => [props.query, props.driverUserId, props.dateFrom, props.dateTo] as const,
   () => {
     localQuery.value = props.query;
+    localDriverId.value = props.driverUserId ?? null;
     localFrom.value = props.dateFrom;
     localTo.value = props.dateTo;
   }
@@ -38,6 +51,20 @@ const tabs: Array<{ label: string; value: "" | "active" | "ended" }> = [
   { label: "Законченные", value: "ended" }
 ];
 
+const driverSuggest = computed(() =>
+  (props.drivers || []).map((item) => ({
+    id: item.id,
+    label: `${item.full_name || item.login}`.trim()
+  }))
+);
+
+watch(localQuery, (value) => {
+  const picked = driverSuggest.value.find((item) => item.id === localDriverId.value);
+  if (picked && picked.label !== value) {
+    localDriverId.value = null;
+  }
+});
+
 const emptyText = computed(() => {
   if (props.loading) {
     return "Загрузка…";
@@ -45,31 +72,40 @@ const emptyText = computed(() => {
   return "Вахты не найдены";
 });
 
-function applySearch(): void {
+function emitFilters(status: "" | "active" | "ended"): void {
   emit("updateFilters", {
-    status: props.statusFilter,
+    status,
     query: localQuery.value.trim(),
+    driverUserId: localDriverId.value,
     dateFrom: localFrom.value.trim(),
     dateTo: localTo.value.trim()
   });
 }
 
+function applySearch(): void {
+  emitFilters(props.statusFilter);
+}
+
 function setStatus(status: "" | "active" | "ended"): void {
-  emit("updateFilters", {
-    status,
-    query: localQuery.value.trim(),
-    dateFrom: localFrom.value.trim(),
-    dateTo: localTo.value.trim()
-  });
+  emitFilters(status);
+}
+
+function pickDriver(item: { id: number; label: string }): void {
+  localDriverId.value = item.id;
+  localQuery.value = item.label;
+  emitFilters(props.statusFilter);
+}
+
+function clearDriver(): void {
+  localDriverId.value = null;
+  localQuery.value = "";
+  emitFilters(props.statusFilter);
 }
 </script>
 
 <template>
   <section class="shifts-wrap">
-    <div class="head">
-      <h2>Вахты</h2>
-      <button class="secondary" type="button" :disabled="loading" @click="emit('refresh')">Обновить</button>
-    </div>
+    <h2>Вахты</h2>
     <div class="tabs">
       <button
         v-for="tab in tabs"
@@ -83,10 +119,17 @@ function setStatus(status: "" | "active" | "ended"): void {
       </button>
     </div>
     <form class="filters" @submit.prevent="applySearch">
-      <label>
-        ФИО водителя
-        <input v-model="localQuery" type="search" placeholder="Поиск по ФИО" />
-      </label>
+      <SuggestField
+        v-model="localQuery"
+        :items="driverSuggest"
+        :picked="Boolean(localDriverId)"
+        empty-label="Все водители"
+        placeholder="Начните вводить ФИО"
+        @pick="pickDriver"
+        @clear="clearDriver"
+      >
+        <template #label>ФИО водителя</template>
+      </SuggestField>
       <label>
         Дата начала
         <input v-model="localFrom" type="date" />
@@ -115,12 +158,6 @@ function setStatus(status: "" | "active" | "ended"): void {
   width: 100%;
   max-width: 720px;
   margin: 0 auto;
-}
-.head {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 0.5rem;
 }
 h2 {
   margin: 0;

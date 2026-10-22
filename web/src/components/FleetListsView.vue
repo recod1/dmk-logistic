@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 
 import MapsCoordsLink from "./MapsCoordsLink.vue";
+import { getLiveDriver, type DriverPresenceSample } from "../api";
 import { isValidPlate, normalizePlate, PLATE_HINT } from "../vehiclePlate";
 
 export type FleetItem = { id: number; plate: string };
@@ -28,6 +29,7 @@ const props = defineProps<{
   loading: boolean;
   saving: boolean;
   error: string;
+  authToken?: string;
 }>();
 
 const emit = defineEmits<{
@@ -43,6 +45,10 @@ const emit = defineEmits<{
 
 const tab = ref<"vehicles" | "trailers" | "drivers">("vehicles");
 let driversTimer: number | null = null;
+const selectedDriverId = ref<number | null>(null);
+const driverHistory = ref<DriverPresenceSample[]>([]);
+const driverHistoryLoading = ref(false);
+const driverHistoryError = ref("");
 const draft = ref("");
 const editId = ref<number | null>(null);
 const editPlate = ref("");
@@ -60,7 +66,7 @@ function stopDriversPoll(): void {
 function startDriversPoll(): void {
   stopDriversPoll();
   emit("refreshDrivers");
-  driversTimer = window.setInterval(() => emit("refreshDrivers"), 15000);
+  driversTimer = window.setInterval(() => emit("refreshDrivers"), 5 * 60 * 1000);
 }
 
 function switchTab(next: "vehicles" | "trailers" | "drivers"): void {
@@ -72,6 +78,7 @@ function switchTab(next: "vehicles" | "trailers" | "drivers"): void {
     startDriversPoll();
   } else {
     stopDriversPoll();
+    closeDriver();
   }
 }
 
@@ -84,9 +91,47 @@ watch(tab, (value) => {
 onUnmounted(() => stopDriversPoll());
 
 function connectionClass(status: string): string {
-  if (status === "online") return "ok";
-  if (status === "recent") return "warn";
-  return "off";
+  return status === "online" || status === "recent" ? "ok" : "off";
+}
+
+const selectedDriver = computed(
+  () => (props.drivers || []).find((item) => item.id === selectedDriverId.value) || null
+);
+
+watch(
+  () => [selectedDriverId.value, props.drivers] as const,
+  () => {
+    if (selectedDriverId.value) {
+      void loadDriverHistory(selectedDriverId.value);
+    }
+  }
+);
+
+async function loadDriverHistory(userId: number): Promise<void> {
+  if (!props.authToken) {
+    return;
+  }
+  driverHistoryLoading.value = true;
+  driverHistoryError.value = "";
+  try {
+    const details = await getLiveDriver(props.authToken, userId);
+    driverHistory.value = details.history || [];
+  } catch (error) {
+    driverHistoryError.value = (error as Error).message;
+    driverHistory.value = [];
+  } finally {
+    driverHistoryLoading.value = false;
+  }
+}
+
+function openDriver(driver: LiveDriver): void {
+  selectedDriverId.value = driver.id;
+}
+
+function closeDriver(): void {
+  selectedDriverId.value = null;
+  driverHistory.value = [];
+  driverHistoryError.value = "";
 }
 
 function submitNew(): void {
@@ -155,28 +200,69 @@ function remove(item: FleetItem): void {
       </button>
     </div>
     <div v-if="tab === 'drivers'" class="card">
-      <h2>Водители</h2>
-      <p class="hint">
-        «Есть интернет» значит, что устройство водителя сейчас на связи — даже если приложение свёрнуто. «Нет интернета»
-        — телефон не отвечает серверу.
-      </p>
-      <p v-if="!(drivers || []).length && !loading" class="empty">Нет активных водителей</p>
-      <ul class="list">
-        <li v-for="driver in drivers || []" :key="driver.id" class="driver-card">
-          <div class="driver-head">
-            <strong>{{ driver.full_name || driver.login }}</strong>
-            <span class="conn" :class="connectionClass(driver.connection_status)">{{ driver.connection_label }}</span>
-          </div>
-          <p v-if="driver.phone" class="meta">{{ driver.phone }}</p>
-          <p class="meta">Рейс: {{ driver.route_id || "нет активного" }}{{ driver.number_auto ? ` · ТС ${driver.number_auto}` : "" }}</p>
-          <p class="meta">Связь: {{ driver.last_seen_at || "ещё не было" }}</p>
-          <p class="meta">
-            Место:
-            <MapsCoordsLink :lat="driver.lat" :lng="driver.lng" />
-            <span v-if="driver.location_at"> · {{ driver.location_at }}</span>
-          </p>
-        </li>
-      </ul>
+      <template v-if="selectedDriver">
+        <button class="ghost back" type="button" @click="closeDriver">← К списку</button>
+        <h2>{{ selectedDriver.full_name || selectedDriver.login }}</h2>
+        <p class="hint">Опрос всех водителей — раз в 5 минут. Здесь история доступности и координат.</p>
+        <div class="driver-head">
+          <span class="conn" :class="connectionClass(selectedDriver.connection_status)">{{ selectedDriver.connection_label }}</span>
+        </div>
+        <p v-if="selectedDriver.phone" class="meta">{{ selectedDriver.phone }}</p>
+        <p class="meta">Рейс: {{ selectedDriver.route_id || "нет активного" }}{{ selectedDriver.number_auto ? ` · ТС ${selectedDriver.number_auto}` : "" }}</p>
+        <p class="meta">Последняя связь: {{ selectedDriver.last_seen_at || "ещё не было" }}</p>
+        <p class="meta">
+          Сейчас:
+          <MapsCoordsLink :lat="selectedDriver.lat" :lng="selectedDriver.lng" />
+          <span v-if="selectedDriver.location_at"> · {{ selectedDriver.location_at }}</span>
+        </p>
+        <h3 class="history-title">История</h3>
+        <p v-if="driverHistoryLoading" class="meta">Загрузка…</p>
+        <p v-if="driverHistoryError" class="error">{{ driverHistoryError }}</p>
+        <ul v-if="driverHistory.length" class="history">
+          <li v-for="row in driverHistory" :key="row.id" class="history-row">
+            <div class="history-head">
+              <strong>{{ row.recorded_at || "—" }}</strong>
+              <span class="conn" :class="connectionClass(row.connection_status)">{{ row.connection_label }}</span>
+            </div>
+            <p class="meta">Связь: {{ row.last_seen_at || "—" }}</p>
+            <p class="meta">
+              Координаты:
+              <MapsCoordsLink :lat="row.lat" :lng="row.lng" />
+              <span v-if="row.location_at"> · {{ row.location_at }}</span>
+            </p>
+          </li>
+        </ul>
+        <p v-else-if="!driverHistoryLoading" class="empty">История пока пустая — первая запись появится после опроса.</p>
+      </template>
+      <template v-else>
+        <h2>Водители</h2>
+        <p class="hint">«Доступен» — устройство на связи, даже если приложение свёрнуто. «Недоступен» — телефон не отвечает серверу. Нажмите на водителя, чтобы открыть историю.</p>
+        <p v-if="!(drivers || []).length && !loading" class="empty">Нет активных водителей</p>
+        <ul class="list">
+          <li v-for="driver in drivers || []" :key="driver.id">
+            <article
+              class="driver-card clickable"
+              role="button"
+              tabindex="0"
+              @click="openDriver(driver)"
+              @keydown.enter.prevent="openDriver(driver)"
+            >
+              <div class="driver-head">
+                <strong>{{ driver.full_name || driver.login }}</strong>
+                <span class="conn" :class="connectionClass(driver.connection_status)">{{ driver.connection_label }}</span>
+              </div>
+              <p v-if="driver.phone" class="meta">{{ driver.phone }}</p>
+              <p class="meta">Рейс: {{ driver.route_id || "нет активного" }}{{ driver.number_auto ? ` · ТС ${driver.number_auto}` : "" }}</p>
+              <p class="meta">Связь: {{ driver.last_seen_at || "ещё не было" }}</p>
+              <p class="meta">
+                Место:
+                <MapsCoordsLink :lat="driver.lat" :lng="driver.lng" />
+                <span v-if="driver.location_at"> · {{ driver.location_at }}</span>
+              </p>
+            </article>
+          </li>
+        </ul>
+      </template>
     </div>
     <div v-else class="card">
       <h2>{{ tab === "vehicles" ? "Транспорт" : "Прицепы" }}</h2>
@@ -319,6 +405,52 @@ input {
   gap: 0.2rem;
   padding: 0.65rem 0.15rem;
   border-bottom: 1px solid var(--border);
+}
+.driver-card.clickable {
+  width: 100%;
+  margin: 0;
+  text-align: left;
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: inherit;
+  cursor: pointer;
+  padding: 0.75rem 0.8rem;
+}
+.driver-card.clickable:hover {
+  border-color: rgba(96, 165, 250, 0.45);
+}
+.back {
+  width: auto;
+  justify-self: start;
+  margin-bottom: 0.4rem;
+}
+.history-title {
+  margin: 0.85rem 0 0.35rem;
+  font-size: 0.78rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.history {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+.history-row {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.65rem 0.75rem;
+  display: grid;
+  gap: 0.18rem;
+}
+.history-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.5rem;
+  align-items: center;
 }
 .driver-head {
   display: flex;

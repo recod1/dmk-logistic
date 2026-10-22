@@ -607,6 +607,19 @@ class FleetVehicle(Base):
     )
 
 
+class DriverPresenceSample(Base):
+    __tablename__ = "driver_presence_samples"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    connection_status: Mapped[str] = mapped_column(String(16), nullable=False, default="offline", server_default="offline")
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    lat: Mapped[float | None] = mapped_column(Float, nullable=True)
+    lng: Mapped[float | None] = mapped_column(Float, nullable=True)
+    location_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class FleetTrailer(Base):
     __tablename__ = "fleet_trailers"
 

@@ -357,6 +357,7 @@ const shiftsLoading = ref(false);
 const shiftsError = ref("");
 const shiftsStatusFilter = ref<"" | "active" | "ended">("");
 const shiftsQuery = ref("");
+const shiftsDriverUserId = ref<number | null>(null);
 const shiftsDateFrom = ref("");
 const shiftsDateTo = ref("");
 const selectedShift = ref<DriverShiftDetails | null>(null);
@@ -909,7 +910,7 @@ const profileMenuItems = computed<Array<{ section: AppSection; label: string; ta
       { section: "admin_fleet_lists", label: "Списки", tabBar: true, headerNav: true },
       { section: "shifts", label: "Вахты", headerNav: true },
       { section: "salary_accounting", label: "Зарплата", tabBar: true, headerNav: true },
-      { section: "admin_users", label: "Пользователи", headerNav: true },
+      { section: "admin_users", label: "Пользователи" },
       { section: "admin_logistics_contacts", label: "Настройки", headerNav: true }
     ];
   }
@@ -3964,6 +3965,7 @@ function openRoleMainSection(section: AppSection): void {
   }
   if (section === "shifts" && canViewShifts.value) {
     resetToSection("shifts");
+    void refreshRouteDrivers();
     void refreshShiftsList();
     return;
   }
@@ -4597,6 +4599,7 @@ async function refreshShiftsList(): Promise<void> {
     shiftsList.value = await listDriverShifts(authToken.value, {
       status: shiftsStatusFilter.value,
       q: shiftsQuery.value,
+      driverUserId: shiftsDriverUserId.value || undefined,
       dateFrom: shiftsDateFrom.value,
       dateTo: shiftsDateTo.value
     });
@@ -4610,11 +4613,13 @@ async function refreshShiftsList(): Promise<void> {
 function applyShiftsFilters(payload: {
   status: "" | "active" | "ended";
   query: string;
+  driverUserId: number | null;
   dateFrom: string;
   dateTo: string;
 }): void {
   shiftsStatusFilter.value = payload.status;
   shiftsQuery.value = payload.query;
+  shiftsDriverUserId.value = payload.driverUserId;
   shiftsDateFrom.value = payload.dateFrom;
   shiftsDateTo.value = payload.dateTo;
   void refreshShiftsList();
@@ -6537,6 +6542,7 @@ onUnmounted(() => {
         :vehicles="fleetVehicles"
         :trailers="fleetTrailers"
         :drivers="fleetDrivers"
+        :auth-token="authToken"
         :loading="fleetLoading"
         :saving="fleetSaving"
         :error="fleetError"
@@ -6576,9 +6582,10 @@ onUnmounted(() => {
         :error="shiftsError"
         :status-filter="shiftsStatusFilter"
         :query="shiftsQuery"
+        :driver-user-id="shiftsDriverUserId"
         :date-from="shiftsDateFrom"
         :date-to="shiftsDateTo"
-        @refresh="refreshShiftsList"
+        :drivers="routeDrivers"
         @update-filters="applyShiftsFilters"
         @open-shift="openShiftDetails"
       />
@@ -6970,7 +6977,10 @@ onUnmounted(() => {
 }
 .topbar-side.right {
   justify-content: flex-end;
-  gap: 0.55rem;
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  min-width: 0;
+  overflow: hidden;
 }
 .topbar-center {
   display: grid;

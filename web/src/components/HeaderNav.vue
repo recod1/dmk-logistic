@@ -42,9 +42,11 @@ const emit = defineEmits<{
   .header-nav {
     display: flex;
     align-items: center;
-    flex-wrap: wrap;
+    flex-wrap: nowrap;
     justify-content: flex-end;
-    gap: 0.2rem;
+    gap: 0.12rem;
+    min-width: 0;
+    overflow-x: auto;
   }
 }
 .tab {
@@ -52,7 +54,9 @@ const emit = defineEmits<{
   align-items: center;
   gap: 0.35rem;
   min-height: 42px;
-  padding: 0.28rem 0.7rem;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  padding: 0.28rem 0.55rem;
   border: 1px solid transparent;
   border-radius: 12px;
   background: transparent;
@@ -71,12 +75,12 @@ const emit = defineEmits<{
   line-height: 1;
   white-space: nowrap;
 }
-@media (min-width: 761px) and (max-width: 1280px) {
+@media (min-width: 761px) and (max-width: 1500px) {
   .label {
     display: none;
   }
   .tab {
-    padding: 0.28rem 0.55rem;
+    padding: 0.28rem 0.45rem;
   }
 }
 </style>

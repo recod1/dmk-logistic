@@ -24,6 +24,8 @@ const SLOT_LABELS: Record<string, string> = {
 };
 
 const thumbs = ref<Record<number, string>>({});
+const viewer = ref<{ id: number; url: string; title: string; kind: string; slot: string } | null>(null);
+const busyId = ref<number | null>(null);
 
 function kindLabel(kind: string, slot: string): string {
   const side = SLOT_LABELS[slot] || "";
@@ -42,6 +44,53 @@ function kindLabel(kind: string, slot: string): string {
 function revokeThumbs(): void {
   Object.values(thumbs.value).forEach((url) => URL.revokeObjectURL(url));
   thumbs.value = {};
+}
+
+function closeViewer(): void {
+  if (viewer.value?.url) {
+    URL.revokeObjectURL(viewer.value.url);
+  }
+  viewer.value = null;
+}
+
+function fileName(kind: string, slot: string): string {
+  return `${kindLabel(kind, slot).replace(/\s+/g, "_")}.jpg`;
+}
+
+async function openImage(id: number, kind: string, slot: string): Promise<void> {
+  if (!props.authToken) {
+    return;
+  }
+  busyId.value = id;
+  try {
+    const blob = await fetchShiftImageBlob(props.authToken, id, { thumbnail: false });
+    closeViewer();
+    viewer.value = { id, url: URL.createObjectURL(blob), title: kindLabel(kind, slot), kind, slot };
+  } catch {
+    // ignore
+  } finally {
+    busyId.value = null;
+  }
+}
+
+async function downloadImage(id: number, kind: string, slot: string): Promise<void> {
+  if (!props.authToken) {
+    return;
+  }
+  busyId.value = id;
+  try {
+    const blob = await fetchShiftImageBlob(props.authToken, id, { thumbnail: false });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName(kind, slot);
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  } catch {
+    // ignore
+  } finally {
+    busyId.value = null;
+  }
 }
 
 watch(
@@ -68,6 +117,7 @@ watch(
 
 onUnmounted(() => {
   revokeThumbs();
+  closeViewer();
 });
 
 const title = computed(() => props.shift?.title || "Вахта");
@@ -82,8 +132,18 @@ const title = computed(() => props.shift?.title || "Вахта");
       <h3>Фото</h3>
       <div class="photos">
         <div v-for="img in shift.images" :key="img.id" class="photo">
-          <img v-if="thumbs[img.id]" :src="thumbs[img.id]" :alt="kindLabel(img.kind, img.slot)" />
+          <button type="button" class="thumb" :disabled="busyId === img.id" @click="openImage(img.id, img.kind, img.slot)">
+            <img v-if="thumbs[img.id]" :src="thumbs[img.id]" :alt="kindLabel(img.kind, img.slot)" />
+          </button>
           <small>{{ kindLabel(img.kind, img.slot) }}</small>
+          <div class="photo-actions">
+            <button type="button" class="link" :disabled="busyId === img.id" @click="openImage(img.id, img.kind, img.slot)">
+              Открыть
+            </button>
+            <button type="button" class="link" :disabled="busyId === img.id" @click="downloadImage(img.id, img.kind, img.slot)">
+              Скачать
+            </button>
+          </div>
         </div>
         <p v-if="!shift.images.length" class="empty">Нет фото</p>
       </div>
@@ -104,6 +164,18 @@ const title = computed(() => props.shift?.title || "Вахта");
     </article>
     <p v-else-if="loading">Загрузка…</p>
     <p v-if="error" class="error">{{ error }}</p>
+    <div v-if="viewer" class="lightbox" @click.self="closeViewer">
+      <article class="lightbox-card">
+        <h3>{{ viewer.title }}</h3>
+        <img :src="viewer.url" :alt="viewer.title" />
+        <div class="lightbox-actions">
+          <button type="button" class="ghost" @click="downloadImage(viewer.id, viewer.kind, viewer.slot)">
+            Скачать
+          </button>
+          <button type="button" class="ghost" @click="closeViewer">Закрыть</button>
+        </div>
+      </article>
+    </div>
   </section>
 </template>
 
@@ -143,12 +215,59 @@ h3 {
   display: grid;
   gap: 0.28rem;
 }
+.thumb {
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+}
 .photo img {
   width: 100%;
   height: 110px;
   object-fit: cover;
   border-radius: 10px;
   border: 1px solid var(--border);
+  display: block;
+}
+.photo-actions {
+  display: flex;
+  gap: 0.45rem;
+}
+.link {
+  background: transparent;
+  color: #93c5fd;
+  border: none;
+  padding: 0;
+  font-size: 0.82rem;
+}
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  background: rgba(2, 6, 23, 0.78);
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+}
+.lightbox-card {
+  width: min(720px, 100%);
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: #0f172a;
+}
+.lightbox-card img {
+  width: 100%;
+  max-height: 70vh;
+  object-fit: contain;
+  border-radius: 10px;
+}
+.lightbox-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
 }
 .route-card {
   text-align: left;

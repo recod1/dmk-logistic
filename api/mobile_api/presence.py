@@ -2,18 +2,25 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from mobile_api.db import SessionLocal
-from mobile_api.models import User
+from mobile_api.models import DriverPresenceSample, User
+from mobile_api.roles import RoleCode
 from mobile_api.time_formatting import format_dt_for_app
 
 ONLINE_AFTER = timedelta(seconds=90)
 RECENT_AFTER = timedelta(minutes=3)
 _last_presence_ping_at: dict[int, datetime] = {}
 PRESENCE_PING_COOLDOWN = timedelta(seconds=20)
+HISTORY_KEEP = timedelta(days=14)
+SAMPLE_INTERVAL_SEC = 300
+logger = logging.getLogger(__name__)
 
 
 def now_utc() -> datetime:
@@ -62,12 +69,16 @@ def connection_status(last_seen_at: datetime | None, *, now: datetime | None = N
     return "offline"
 
 
+def availability_status(status: str) -> str:
+    if status in {"online", "recent"}:
+        return "online"
+    return "offline"
+
+
 def connection_label(status: str) -> str:
-    if status == "online":
-        return "Есть интернет"
-    if status == "recent":
-        return "Проверяем…"
-    return "Нет интернета"
+    if availability_status(status) == "online":
+        return "Доступен"
+    return "Недоступен"
 
 
 def queue_presence_probes(db: Session, drivers: list[User]) -> None:
@@ -100,7 +111,7 @@ def queue_presence_probes(db: Session, drivers: list[User]) -> None:
 
 
 def presence_fields(user: User) -> dict:
-    status = connection_status(user.last_seen_at)
+    status = availability_status(connection_status(user.last_seen_at))
     return {
         "last_seen_at": format_dt_for_app(user.last_seen_at),
         "connection_status": status,
@@ -109,3 +120,63 @@ def presence_fields(user: User) -> dict:
         "last_lng": user.last_lng,
         "last_location_at": format_dt_for_app(user.last_location_at),
     }
+
+
+def _sample_out(row: DriverPresenceSample) -> dict:
+    status = availability_status(row.connection_status)
+    return {
+        "id": int(row.id),
+        "recorded_at": format_dt_for_app(row.recorded_at),
+        "connection_status": status,
+        "connection_label": connection_label(status),
+        "last_seen_at": format_dt_for_app(row.last_seen_at),
+        "lat": row.lat,
+        "lng": row.lng,
+        "location_at": format_dt_for_app(row.location_at),
+    }
+
+
+def list_presence_history(db: Session, user_id: int, *, limit: int = 500) -> list[dict]:
+    rows = db.scalars(
+        select(DriverPresenceSample)
+        .where(DriverPresenceSample.user_id == int(user_id))
+        .order_by(DriverPresenceSample.recorded_at.desc(), DriverPresenceSample.id.desc())
+        .limit(limit)
+    ).all()
+    return [_sample_out(row) for row in rows]
+
+
+def snapshot_all_drivers(db: Session) -> int:
+    drivers = db.scalars(
+        select(User).where(User.role_code == RoleCode.DRIVER.value, User.is_active.is_(True))
+    ).all()
+    now = now_utc()
+    db.execute(delete(DriverPresenceSample).where(DriverPresenceSample.recorded_at < now - HISTORY_KEEP))
+    for driver in drivers:
+        status = availability_status(connection_status(driver.last_seen_at, now=now))
+        db.add(
+            DriverPresenceSample(
+                user_id=int(driver.id),
+                recorded_at=now,
+                connection_status=status,
+                last_seen_at=driver.last_seen_at,
+                lat=driver.last_lat,
+                lng=driver.last_lng,
+                location_at=driver.last_location_at,
+            )
+        )
+    queue_presence_probes(db, list(drivers))
+    db.commit()
+    return len(drivers)
+
+
+async def run_presence_history_loop() -> None:
+    await asyncio.sleep(25)
+    while True:
+        try:
+            with SessionLocal() as db:
+                count = snapshot_all_drivers(db)
+                logger.info("driver presence snapshot count=%s", count)
+        except Exception:
+            logger.exception("driver presence snapshot failed")
+        await asyncio.sleep(SAMPLE_INTERVAL_SEC)

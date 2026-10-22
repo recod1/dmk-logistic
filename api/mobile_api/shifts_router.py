@@ -244,6 +244,7 @@ def get_my_active_shift(
 def list_shifts(
     status_filter: str = Query(default="", alias="status"),
     q: str = Query(default=""),
+    driver_user_id: int | None = Query(default=None),
     date_from: str = Query(default=""),
     date_to: str = Query(default=""),
     db: Session = Depends(get_db),
@@ -259,17 +260,20 @@ def list_shifts(
         stmt = stmt.where(DriverShift.ended_at.is_(None))
     elif kind in {"ended", "finished", "done"}:
         stmt = stmt.where(DriverShift.ended_at.is_not(None))
-    query = (q or "").strip()
-    if query:
-        driver_ids = db.scalars(
-            select(User.id).where(
-                or_(
-                    User.full_name.ilike(f"%{query}%"),
-                    User.login.ilike(f"%{query}%"),
+    if driver_user_id:
+        stmt = stmt.where(DriverShift.driver_user_id == int(driver_user_id))
+    else:
+        query = (q or "").strip()
+        if query:
+            driver_ids = db.scalars(
+                select(User.id).where(
+                    or_(
+                        User.full_name.ilike(f"%{query}%"),
+                        User.login.ilike(f"%{query}%"),
+                    )
                 )
-            )
-        ).all()
-        stmt = stmt.where(DriverShift.driver_user_id.in_(list(driver_ids) or [-1]))
+            ).all()
+            stmt = stmt.where(DriverShift.driver_user_id.in_(list(driver_ids) or [-1]))
     start_bound = _parse_day_bound(date_from, end=False)
     end_bound = _parse_day_bound(date_to, end=True)
     if start_bound is not None:

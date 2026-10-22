@@ -1568,12 +1568,33 @@ export type LiveDriverCard = {
   connection_label: string;
 };
 
+export type DriverPresenceSample = {
+  id: number;
+  recorded_at: string | null;
+  connection_status: string;
+  connection_label: string;
+  last_seen_at: string | null;
+  lat: number | null;
+  lng: number | null;
+  location_at: string | null;
+};
+
 export async function listLiveDrivers(token: string): Promise<LiveDriverCard[]> {
   const data = await requestJson<{ items: LiveDriverCard[] }>(`${API_BASE}/v1/fleet/drivers`, {
     cache: "no-store",
     headers: { Authorization: `Bearer ${token}` }
   });
   return data.items ?? [];
+}
+
+export async function getLiveDriver(
+  token: string,
+  userId: number
+): Promise<LiveDriverCard & { history: DriverPresenceSample[] }> {
+  return requestJson<LiveDriverCard & { history: DriverPresenceSample[] }>(`${API_BASE}/v1/fleet/drivers/${userId}`, {
+    cache: "no-store",
+    headers: { Authorization: `Bearer ${token}` }
+  });
 }
 
 export async function reportPresence(
@@ -1860,11 +1881,12 @@ export async function getMyChatUnreadSummary(token: string): Promise<ChatUnreadR
 
 export async function listDriverShifts(
   token: string,
-  params?: { status?: string; q?: string; dateFrom?: string; dateTo?: string }
+  params?: { status?: string; q?: string; driverUserId?: number; dateFrom?: string; dateTo?: string }
 ): Promise<DriverShiftListItem[]> {
   const qs = new URLSearchParams();
   if (params?.status) qs.set("status", params.status);
-  if (params?.q) qs.set("q", params.q);
+  if (params?.driverUserId) qs.set("driver_user_id", String(params.driverUserId));
+  else if (params?.q) qs.set("q", params.q);
   if (params?.dateFrom) qs.set("date_from", params.dateFrom);
   if (params?.dateTo) qs.set("date_to", params.dateTo);
   const suffix = qs.toString() ? `?${qs.toString()}` : "";
