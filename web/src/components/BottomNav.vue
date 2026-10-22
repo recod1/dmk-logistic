@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import NavIcon from "./NavIcon.vue";
 
-export type BottomNavId = "home" | "routes" | "chats" | "salary" | "users" | "settings" | "lists";
+export type BottomNavId = "home" | "routes" | "chats" | "salary" | "users" | "settings" | "lists" | "shifts";
 
 export interface BottomNavItem {
   id: BottomNavId;

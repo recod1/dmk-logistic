@@ -34,6 +34,8 @@ export interface PointDto {
   point_time: string;
   point_note: string;
   estimated_arrival?: string;
+  late_reason?: string;
+  late_kind?: "" | "risk" | "fact";
   status: PointStatus;
   time_accepted: string | null;
   time_registration: string | null;
@@ -122,6 +124,7 @@ export interface EventPayload {
     lng?: number | null;
   } | null;
   estimated_arrival?: string | null;
+  late_reason?: string | null;
   document_file_ids?: number[];
   document_local_keys?: string[];
 }
@@ -250,6 +253,7 @@ export interface AdminRoute {
   active_point_date?: string | null;
   active_point_time?: string | null;
   active_point_fact_time?: string | null;
+  active_point_late_kind?: "" | "risk" | "fact" | string | null;
   last_loading_point_name?: string | null;
   last_loading_date?: string | null;
   last_loading_time?: string | null;
@@ -272,6 +276,8 @@ export interface AdminRoute {
       point_time: string;
       point_note: string;
       estimated_arrival?: string;
+      late_reason?: string;
+      late_kind?: "" | "risk" | "fact";
       status: string;
       time_accepted: string | null;
       time_registration: string | null;
@@ -383,5 +389,38 @@ export interface DriverRouteListItem {
   active_point_date?: string | null;
   active_point_time?: string | null;
   active_point_fact_time?: string | null;
+  active_point_late_kind?: "" | "risk" | "fact" | string | null;
+}
+
+export interface DriverShiftListItem {
+  id: number;
+  title: string;
+  driver_user_id: number;
+  driver_full_name: string;
+  started_at: string | null;
+  ended_at: string | null;
+  status: "active" | "ended";
+}
+
+export interface DriverShiftImageMeta {
+  id: number;
+  kind: string;
+  slot: string;
+  content_type: string;
+}
+
+export interface DriverShiftRouteItem {
+  id: string;
+  status: string;
+  number_auto: string;
+  trailer_number?: string;
+  accepted_at: string | null;
+  created_at: string | null;
+  points_count: number;
+}
+
+export interface DriverShiftDetails extends DriverShiftListItem {
+  images: DriverShiftImageMeta[];
+  routes: DriverShiftRouteItem[];
 }
 

@@ -164,6 +164,7 @@ class Point(Base):
     point_time: Mapped[str] = mapped_column(String(128), nullable=False, default="", server_default="")
     point_note: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
     estimated_arrival: Mapped[str] = mapped_column(String(32), nullable=False, default="", server_default="")
+    late_reason: Mapped[str] = mapped_column(Text, nullable=False, default="", server_default="")
 
     time_accepted: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     time_departure: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
@@ -627,6 +628,40 @@ class LogisticsContact(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
     )
+
+
+class DriverShift(Base):
+    __tablename__ = "driver_shifts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    driver_user_id: Mapped[int] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    images: Mapped[list["DriverShiftImage"]] = relationship(
+        back_populates="shift",
+        cascade="all, delete-orphan",
+    )
+
+
+class DriverShiftImage(Base):
+    __tablename__ = "driver_shift_images"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    shift_id: Mapped[int] = mapped_column(ForeignKey("driver_shifts.id", ondelete="CASCADE"), nullable=False, index=True)
+    kind: Mapped[str] = mapped_column(String(32), nullable=False)
+    slot: Mapped[str] = mapped_column(String(16), nullable=False, default="", server_default="")
+    storage_path: Mapped[str] = mapped_column(String(512), nullable=False)
+    content_type: Mapped[str] = mapped_column(String(128), nullable=False)
+    file_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    uploaded_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    shift: Mapped[DriverShift] = relationship(back_populates="images")
 
 
 class Repair(Base):

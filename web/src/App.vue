@@ -26,6 +26,10 @@ import LoginView from "./components/LoginView.vue";
 import MapsChooser from "./components/MapsChooser.vue";
 import NotificationsView from "./components/NotificationsView.vue";
 import StatusConfirmDialog from "./components/StatusConfirmDialog.vue";
+import LateReasonDialog from "./components/LateReasonDialog.vue";
+import ShiftPhotosDialog from "./components/ShiftPhotosDialog.vue";
+import ShiftsView from "./components/ShiftsView.vue";
+import ShiftDetailsView from "./components/ShiftDetailsView.vue";
 import { RETURN_WARNING, type IncidentKind, type RouteIncident } from "./routeIncidents";
 import {
   ApiError,
@@ -133,7 +137,12 @@ import {
   updateAdminRoute,
   updateAdminRoutePoint,
   updateAdminUser,
-  uploadPointDocuments
+  uploadPointDocuments,
+  listDriverShifts,
+  getDriverShift,
+  getMyActiveShift,
+  startDriverShift,
+  finishDriverShift
 } from "./api";
 import {
   addAction,
@@ -173,6 +182,7 @@ import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
 import { datetimeLocalKey } from "./factTime";
 import { readDeviceCoordinates } from "./deviceLocation";
 import { plannedTimeInputValue } from "./plannedTime";
+import { etaIsLate, registrationIsLate } from "./lateArrival";
 import { prepareDocumentImageBlobs } from "./imageUploadPrep";
 import { parseChatDeliveryHint } from "./chatDeliveryBg";
 import { notificationKind } from "./notificationKinds";
@@ -200,6 +210,8 @@ import type {
   AuthUser,
   DriverOption,
   DriverRouteListItem,
+  DriverShiftDetails,
+  DriverShiftListItem,
   EventPayload,
   NotificationDto,
   PointStatus,
@@ -230,7 +242,9 @@ type AppSection =
   | "driver_salary"
   | "salary_accounting"
   | "salary_detail"
-  | "salary_chat";
+  | "salary_chat"
+  | "shifts"
+  | "shift_details";
 type RouteFilters = {
   status?: string;
   route_id?: string;
@@ -326,6 +340,27 @@ const docsUpload = ref<{
   odometer_source: "manual" | "wialon" | null;
 } | null>(null);
 const docsUploading = ref(false);
+const lateReasonPending = ref<{
+  pointId: number;
+  iso: string;
+  timeSource: "device" | "manual";
+  pressedAt: string;
+  odometer: string;
+  odometer_source: "manual" | "wialon" | null;
+  estimatedArrival?: string;
+} | null>(null);
+const activeDriverShift = ref<DriverShiftListItem | null>(null);
+const shiftPhotos = ref<{ mode: "start" | "finish" } | null>(null);
+const shiftUploading = ref(false);
+const shiftsList = ref<DriverShiftListItem[]>([]);
+const shiftsLoading = ref(false);
+const shiftsError = ref("");
+const shiftsStatusFilter = ref<"" | "active" | "ended">("");
+const shiftsQuery = ref("");
+const shiftsDateFrom = ref("");
+const shiftsDateTo = ref("");
+const selectedShift = ref<DriverShiftDetails | null>(null);
+const shiftDetailsLoading = ref(false);
 const adminDebugOpen = ref(false);
 let docsUploadAbort: AbortController | null = null;
 let syncGeneration = 0;
@@ -446,6 +481,7 @@ const isDriver = computed(() => authUser.value?.role_code === "driver");
 const isLogistic = computed(() => isLogisticRole(authUser.value?.role_code || ""));
 const isFleetEditor = computed(() => isFleetEditorRole(authUser.value?.role_code || ""));
 const isAccountant = computed(() => isAccountantRole(authUser.value?.role_code || ""));
+const canViewShifts = computed(() => isDriver.value || isLogistic.value || isAdmin.value);
 const showNotificationKindTabs = computed(
   () => isAdmin.value || isLogistic.value || isDriver.value || isAccountant.value
 );
@@ -774,6 +810,9 @@ const currentPageTitle = computed(() => {
   if (currentSection.value === "admin_fleet_lists") {
     return "Списки";
   }
+  if (currentSection.value === "shifts" || currentSection.value === "shift_details") {
+    return "Вахты";
+  }
   if (currentSection.value === "notifications") {
     return "Уведомления";
   }
@@ -868,6 +907,7 @@ const profileMenuItems = computed<Array<{ section: AppSection; label: string; ta
       { section: "admin_routes", label: "Рейсы", tabBar: true, headerNav: true },
       { section: "chats", label: "Чаты", tabBar: true, headerNav: true },
       { section: "admin_fleet_lists", label: "Списки", tabBar: true, headerNav: true },
+      { section: "shifts", label: "Вахты", headerNav: true },
       { section: "salary_accounting", label: "Зарплата", tabBar: true, headerNav: true },
       { section: "admin_users", label: "Пользователи", headerNav: true },
       { section: "admin_logistics_contacts", label: "Настройки", headerNav: true }
@@ -880,6 +920,7 @@ const profileMenuItems = computed<Array<{ section: AppSection; label: string; ta
     ];
     if (isLogisticRole(authUser.value.role_code)) {
       items.push({ section: "admin_fleet_lists", label: "Списки", tabBar: true, headerNav: true });
+      items.push({ section: "shifts", label: "Вахты", headerNav: true });
     }
     if (isAccountantRole(authUser.value.role_code)) {
       items.push({ section: "salary_accounting", label: "Зарплата", tabBar: true, headerNav: true });
@@ -889,6 +930,7 @@ const profileMenuItems = computed<Array<{ section: AppSection; label: string; ta
   return [
     { section: "driver_home", label: "Главная", tabBar: true, headerNav: true },
     { section: "driver_routes", label: "Рейсы", tabBar: true, headerNav: true },
+    { section: "shifts", label: "Вахты", headerNav: true },
     { section: "chats", label: "Чаты", tabBar: true, headerNav: true },
     { section: "driver_salary", label: "Зарплата", tabBar: true, headerNav: true }
   ];
@@ -946,6 +988,8 @@ const headerNavItems = computed<BottomNavItem[]>(() =>
         id = "settings";
       } else if (item.section === "admin_fleet_lists") {
         id = "lists";
+      } else if (item.section === "shifts") {
+        id = "shifts";
       }
       return { id, label: item.label, section: item.section };
     })
@@ -974,6 +1018,9 @@ const activeBottomNavId = computed(() => {
   }
   if (section === "admin_fleet_lists") {
     return "lists";
+  }
+  if (section === "shifts" || section === "shift_details") {
+    return "shifts";
   }
   if (section === "chats" || section === "chat" || section === "chat_room") {
     return "chats";
@@ -1710,6 +1757,15 @@ function handleIncomingNotification(
   }
   if (isDriver.value && item.event_type === "driver_location_request") {
     void sendDriverLocationIfPossible(item.route_id);
+  }
+  if (
+    (item.event_type === "shift_started" || item.event_type === "shift_ended") &&
+    (currentSection.value === "shifts" || currentSection.value === "shift_details")
+  ) {
+    void refreshShiftsList();
+  }
+  if (isDriver.value && (item.event_type === "shift_started" || item.event_type === "shift_ended")) {
+    void refreshActiveDriverShift();
   }
 
   if (syncDriverState && item.event_type === "route_deleted" && isDriver.value) {
@@ -3650,8 +3706,9 @@ async function openNotificationFromItem(item: NotificationDto): Promise<void> {
   const p = notificationPayloadRecord(item);
   const salaryId = p ? notificationPayloadNumber(p, "salary_id") : null;
   const roomId = p ? notificationPayloadNumber(p, "room_id") : null;
+  const shiftId = p ? notificationPayloadNumber(p, "shift_id") : null;
   const navigable =
-    Boolean(item.route_id) || salaryId != null || roomId != null;
+    Boolean(item.route_id) || salaryId != null || roomId != null || shiftId != null;
   if (!navigable) {
     return;
   }
@@ -3689,6 +3746,11 @@ async function openNotificationFromItem(item: NotificationDto): Promise<void> {
       await openChatForRoute(rid);
       return;
     }
+  }
+
+  if (shiftId != null && canViewShifts.value) {
+    await openShiftDetails(shiftId);
+    return;
   }
 
   if (salaryId != null) {
@@ -3898,6 +3960,11 @@ function openRoleMainSection(section: AppSection): void {
   if (section === "admin_fleet_lists" && isFleetEditorRole(authUser.value.role_code)) {
     resetToSection(section);
     void refreshFleetLists();
+    return;
+  }
+  if (section === "shifts" && canViewShifts.value) {
+    resetToSection("shifts");
+    void refreshShiftsList();
     return;
   }
   if ((section === "admin_routes" || section === "admin_route_details") && isRouteManagerRole(authUser.value.role_code)) {
@@ -4177,12 +4244,28 @@ async function applyStatusConfirm(payload: {
       };
       return;
     }
+    const eta = to === "process" ? payload.etaTime : undefined;
+    const needsLateReason =
+      (to === "process" && etaIsLate(current.date_point, current.point_time, eta)) ||
+      (to === "registration" && registrationIsLate(iso, current.date_point, current.point_time));
+    if (needsLateReason) {
+      lateReasonPending.value = {
+        pointId: pending.pointId,
+        iso,
+        timeSource,
+        pressedAt: pending.pressedAtIso,
+        odometer: payload.odometer,
+        odometer_source: payload.odometer_source,
+        estimatedArrival: eta
+      };
+      return;
+    }
     await markPointNext(pending.pointId, iso, undefined, {
       timeSource,
       pressedAt: pending.pressedAtIso,
       odometer: payload.odometer,
       odometer_source: payload.odometer_source,
-      estimatedArrival: to === "process" ? payload.etaTime : undefined
+      estimatedArrival: eta
     });
   } catch (error) {
     syncMessage.value = (error as Error).message;
@@ -4268,6 +4351,7 @@ async function markPointNext(
     odometer?: string;
     odometer_source?: "manual" | "wialon" | null;
     estimatedArrival?: string;
+    lateReason?: string;
   }
 ): Promise<void> {
   if (!route.value || !isDriver.value) {
@@ -4310,7 +4394,8 @@ async function markPointNext(
     odometer: (options?.odometer || "").trim() || null,
     odometer_source: options?.odometer_source ?? null,
     coordinates: coords ? { lat: coords.lat, lng: coords.lng } : null,
-    estimated_arrival: toStatus === "process" ? eta || null : null
+    estimated_arrival: toStatus === "process" ? eta || null : null,
+    late_reason: (options?.lateReason || "").trim() || null
   };
   if (toStatus === "docs" && docsAttach) {
     if ("fileIds" in docsAttach) {
@@ -4329,11 +4414,21 @@ async function markPointNext(
     estimated_arrival: toStatus === "process" ? eta : null
   };
   const nextPoint = applyStageOverlayToPoint(current, toStatus, overlayFields);
+  const lateReason = (options?.lateReason || "").trim();
+  if (lateReason) {
+    nextPoint.late_reason = lateReason;
+    nextPoint.late_kind = toStatus === "registration" ? "fact" : "risk";
+  }
   Object.assign(current, nextPoint);
   if (selectedDriverRoute.value?.id === route.value.id) {
     const selectedPoint = selectedDriverRoute.value.points.find((point) => point.id === pointId);
     if (selectedPoint) {
-      Object.assign(selectedPoint, applyStageOverlayToPoint(selectedPoint, toStatus, overlayFields));
+      const overlaid = applyStageOverlayToPoint(selectedPoint, toStatus, overlayFields);
+      if (lateReason) {
+        overlaid.late_reason = lateReason;
+        overlaid.late_kind = toStatus === "registration" ? "fact" : "risk";
+      }
+      Object.assign(selectedPoint, overlaid);
     }
   }
   await savePointOverlay(route.value.id, pointId, toStatus, occurredAt, {
@@ -4477,6 +4572,135 @@ async function openDriverRouteDetails(routeId: string): Promise<void> {
 async function refreshDriverData(): Promise<void> {
   await refreshDriverRoutes();
   await refreshRoute();
+  await refreshActiveDriverShift();
+}
+
+async function refreshActiveDriverShift(): Promise<void> {
+  if (!authToken.value || !isDriver.value) {
+    activeDriverShift.value = null;
+    return;
+  }
+  try {
+    activeDriverShift.value = await getMyActiveShift(authToken.value);
+  } catch {
+    // keep last known
+  }
+}
+
+async function refreshShiftsList(): Promise<void> {
+  if (!authToken.value || !canViewShifts.value) {
+    return;
+  }
+  shiftsLoading.value = true;
+  shiftsError.value = "";
+  try {
+    shiftsList.value = await listDriverShifts(authToken.value, {
+      status: shiftsStatusFilter.value,
+      q: shiftsQuery.value,
+      dateFrom: shiftsDateFrom.value,
+      dateTo: shiftsDateTo.value
+    });
+  } catch (error) {
+    shiftsError.value = (error as Error).message;
+  } finally {
+    shiftsLoading.value = false;
+  }
+}
+
+function applyShiftsFilters(payload: {
+  status: "" | "active" | "ended";
+  query: string;
+  dateFrom: string;
+  dateTo: string;
+}): void {
+  shiftsStatusFilter.value = payload.status;
+  shiftsQuery.value = payload.query;
+  shiftsDateFrom.value = payload.dateFrom;
+  shiftsDateTo.value = payload.dateTo;
+  void refreshShiftsList();
+}
+
+async function openShiftDetails(shiftId: number): Promise<void> {
+  if (!authToken.value) {
+    return;
+  }
+  shiftDetailsLoading.value = true;
+  shiftsError.value = "";
+  try {
+    selectedShift.value = await getDriverShift(authToken.value, shiftId);
+    if (currentSection.value !== "shift_details") {
+      pushSection("shift_details");
+    }
+  } catch (error) {
+    shiftsError.value = (error as Error).message;
+  } finally {
+    shiftDetailsLoading.value = false;
+  }
+}
+
+function openShiftToggle(): void {
+  if (shiftUploading.value) {
+    return;
+  }
+  shiftPhotos.value = { mode: activeDriverShift.value ? "finish" : "start" };
+}
+
+async function submitShiftPhotos(payload: {
+  vehicle: Record<"front" | "rear" | "left" | "right", File>;
+  waybill: File[];
+}): Promise<void> {
+  if (!authToken.value || !shiftPhotos.value) {
+    return;
+  }
+  const mode = shiftPhotos.value.mode;
+  shiftUploading.value = true;
+  try {
+    if (mode === "start") {
+      const created = await startDriverShift(authToken.value, {
+        vehicle: payload.vehicle,
+        waybill: payload.waybill
+      });
+      activeDriverShift.value = created;
+      syncMessage.value = "Вахта начата";
+    } else if (activeDriverShift.value) {
+      const finished = await finishDriverShift(authToken.value, activeDriverShift.value.id, {
+        vehicle: payload.vehicle
+      });
+      activeDriverShift.value = null;
+      if (selectedShift.value?.id === finished.id) {
+        selectedShift.value = finished;
+      }
+      syncMessage.value = "Вахта закончена";
+    }
+    shiftPhotos.value = null;
+    if (currentSection.value === "shifts" || currentSection.value === "shift_details") {
+      void refreshShiftsList();
+    }
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    shiftUploading.value = false;
+  }
+}
+
+async function applyLateReason(reason: string): Promise<void> {
+  const pending = lateReasonPending.value;
+  lateReasonPending.value = null;
+  if (!pending) {
+    return;
+  }
+  try {
+    await markPointNext(pending.pointId, pending.iso, undefined, {
+      timeSource: pending.timeSource,
+      pressedAt: pending.pressedAt,
+      odometer: pending.odometer,
+      odometer_source: pending.odometer_source,
+      estimatedArrival: pending.estimatedArrival,
+      lateReason: reason
+    });
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  }
 }
 
 function onDocumentClick(event: MouseEvent): void {
@@ -6334,11 +6558,40 @@ onUnmounted(() => {
         :has-assigned-routes="hasAssignedRoutes"
         :sync-message="syncMessage"
         :syncing="syncing"
+        :active-shift="activeDriverShift"
+        :shift-busy="shiftUploading"
         @open-routes="openDriverRoutes"
         @open-active-route="openActiveRouteFromHome"
         @accept-active-route="doAcceptRoute"
         @advance-active-point="advanceActivePointFromHome"
         @revert-active-point="doRevertPoint"
+        @toggle-shift="openShiftToggle"
+      />
+    </section>
+
+    <section v-else-if="canViewShifts && currentSection === 'shifts'">
+      <ShiftsView
+        :items="shiftsList"
+        :loading="shiftsLoading"
+        :error="shiftsError"
+        :status-filter="shiftsStatusFilter"
+        :query="shiftsQuery"
+        :date-from="shiftsDateFrom"
+        :date-to="shiftsDateTo"
+        @refresh="refreshShiftsList"
+        @update-filters="applyShiftsFilters"
+        @open-shift="openShiftDetails"
+      />
+    </section>
+
+    <section v-else-if="canViewShifts && currentSection === 'shift_details'">
+      <ShiftDetailsView
+        :shift="selectedShift"
+        :loading="shiftDetailsLoading"
+        :error="shiftsError"
+        :auth-token="authToken"
+        @back="goBack"
+        @open-route="openRouteDetailsForRole"
       />
     </section>
 
@@ -6568,6 +6821,19 @@ onUnmounted(() => {
       "
       @cancel="cancelStatusConfirm"
       @confirm="applyStatusConfirm($event)"
+    />
+    <LateReasonDialog
+      :open="Boolean(lateReasonPending)"
+      @cancel="lateReasonPending = null"
+      @confirm="applyLateReason"
+    />
+    <ShiftPhotosDialog
+      v-if="shiftPhotos"
+      :open="true"
+      :mode="shiftPhotos.mode"
+      :uploading="shiftUploading"
+      @cancel="shiftPhotos = null"
+      @confirm="submitShiftPhotos"
     />
     <DocsUploadDialog
       v-if="isDriver && docsUpload"

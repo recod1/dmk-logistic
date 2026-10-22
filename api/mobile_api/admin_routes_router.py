@@ -45,6 +45,7 @@ from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.logistics_contacts_router import logistics_contacts_payload
 from mobile_api.fleet_router import ensure_fleet_trailer, ensure_fleet_vehicle
 from mobile_api.point_status import effective_point_status, point_is_completed
+from utils.late_arrival import point_late_kind
 from utils.onec_datetime import planned_wall_fields, split_onec_wall_datetime, normalize_planned_time
 from utils.vehicle_plate import normalize_plate, require_plate
 from utils.route_point_changes import changed_text as _changed_text, diff_route_points
@@ -385,6 +386,8 @@ def _point_out(
         "point_time": point_time,
         "point_note": point.point_note,
         "estimated_arrival": (getattr(point, "estimated_arrival", None) or "").strip(),
+        "late_reason": (getattr(point, "late_reason", None) or "").strip(),
+        "late_kind": point_late_kind(point),
         "status": point.status,
         "time_accepted": _format_datetime_ru(point.time_accepted),
         "time_registration": _format_datetime_ru(point.time_registration),
@@ -571,6 +574,7 @@ def _route_out(
             if current_point
             else None
         ),
+        "active_point_late_kind": point_late_kind(current_point) if current_point else "",
         "last_loading_point_name": last_loading_name,
         "last_loading_date": last_loading_date,
         "last_loading_time": last_loading_time,

@@ -10,6 +10,7 @@ import { useLiveNow } from "../liveNow";
 import { stageDeltasForPoint } from "../stageDeltas";
 import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
 import { normalizePlannedTimeInput, plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
+import { lateKindClass, pointLateKind } from "../lateArrival";
 import { listPointStatusLabel, nextStatus } from "../status";
 import type { RouteIncident } from "../routeIncidents";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, ManualEditMeta, PointStatus, RouteWorkflowStatus } from "../types";
@@ -904,7 +905,7 @@ function removeRoute(): void {
 
       <section class="points-wrap">
         <h3>Этапы по точкам</h3>
-        <article v-for="point in route.points || []" :key="point.id" class="point-card">
+        <article v-for="point in route.points || []" :key="point.id" class="point-card" :class="lateKindClass(pointLateKind(point))">
           <div class="point-top">
             <strong>
               {{ pointTypeLabel(point.type_point) }}
@@ -1274,6 +1275,7 @@ function removeRoute(): void {
 </template>
 
 <style scoped>
+@import "../lateHighlight.css";
 .details-page {
   display: grid;
   gap: 0.9rem;

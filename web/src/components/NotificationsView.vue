@@ -4,6 +4,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { NotificationPrefs } from "../api";
 import { formatNotificationReceivedAt } from "../factTime";
 import { NOTIFICATION_KIND_LABELS, notificationKind, visibleNotificationKindTabs, type NotificationKind } from "../notificationKinds";
+import { lateKindClass } from "../lateArrival";
 import type { NotificationDto } from "../types";
 
 const props = defineProps<{
@@ -110,8 +111,27 @@ function notificationIsNavigable(item: NotificationDto): boolean {
   if (p && typeof p === "object" && !Array.isArray(p)) {
     if (payloadNumber(p as Record<string, unknown>, "room_id") != null) return true;
     if (payloadNumber(p as Record<string, unknown>, "salary_id") != null) return true;
+    if (payloadNumber(p as Record<string, unknown>, "shift_id") != null) return true;
   }
   return false;
+}
+
+function notificationLateKind(item: NotificationDto): "" | "risk" | "fact" {
+  const kind = (item.payload?.late_kind || "").toString().trim();
+  if (kind === "risk" || kind === "fact") {
+    return kind;
+  }
+  return "";
+}
+
+function notificationCardClass(item: NotificationDto): Record<string, boolean> {
+  const late = notificationLateKind(item);
+  return {
+    unread: !item.is_read && !late,
+    clickable: notificationIsNavigable(item),
+    stale: item.event_type === "point_status_stale",
+    ...lateKindClass(late)
+  };
 }
 
 function onNotificationCardClick(item: NotificationDto): void {
@@ -178,6 +198,11 @@ function formatExtra(item: NotificationDto): string {
   if (ovp && item.event_type === "point_status_changed") {
     parts.push(`ОВП: ${ovp}`);
   }
+  const lateKind = notificationLateKind(item);
+  if (lateKind === "risk") parts.push("Риск опоздания");
+  if (lateKind === "fact") parts.push("Опоздание");
+  const lateReason = (item.payload?.late_reason || "").toString().trim();
+  if (lateReason) parts.push(`Причина: ${lateReason}`);
   const cancelReason = (item.payload?.cancel_reason || "").toString().trim();
   if (cancelReason && item.event_type === "route_cancelled") {
     parts.push(`Причина: ${cancelReason}`);
@@ -235,7 +260,7 @@ function formatExtra(item: NotificationDto): string {
         v-for="item in visibleItems"
         :key="item.id"
         class="card item-card"
-        :class="{ unread: !item.is_read, clickable: notificationIsNavigable(item), stale: item.event_type === 'point_status_stale' }"
+        :class="notificationCardClass(item)"
         @click="onNotificationCardClick(item)"
       >
         <div class="row-top">
@@ -255,6 +280,7 @@ function formatExtra(item: NotificationDto): string {
 </template>
 
 <style scoped>
+@import "../lateHighlight.css";
 .notifications-wrap {
   display: grid;
   gap: 0.45rem;

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import { lateKindClass } from "../lateArrival";
 import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel } from "../status";
 import type { DriverRouteListItem } from "../types";
 
@@ -74,6 +75,10 @@ function isActiveRoute(routeId: string): boolean {
 function unreadCount(routeId: string): number {
   return props.unreadByRoute?.[routeId] ?? 0;
 }
+
+function routeLateKind(item: DriverRouteListItem): string {
+  return (item.active_point_late_kind || "").trim();
+}
 </script>
 
 <template>
@@ -95,7 +100,13 @@ function unreadCount(routeId: string): number {
         <span v-if="assignedHasUnread" class="chat-dot" aria-label="Есть непрочитанные сообщения" />
       </h2>
       <div class="list">
-        <button v-for="item in assignedSorted" :key="item.id" class="route-card" @click="emit('openRoute', item.id)">
+        <button
+          v-for="item in assignedSorted"
+          :key="item.id"
+          class="route-card"
+          :class="lateKindClass(routeLateKind(item))"
+          @click="emit('openRoute', item.id)"
+        >
           <div class="row">
             <div class="row-left">
               <strong>#{{ item.id }}</strong>
@@ -124,7 +135,13 @@ function unreadCount(routeId: string): number {
         <span v-if="historyHasUnread" class="chat-dot" aria-label="Есть непрочитанные сообщения" />
       </h2>
       <div class="list">
-        <button v-for="item in historySorted" :key="item.id" class="route-card" @click="emit('openRoute', item.id)">
+        <button
+          v-for="item in historySorted"
+          :key="item.id"
+          class="route-card"
+          :class="lateKindClass(routeLateKind(item))"
+          @click="emit('openRoute', item.id)"
+        >
           <div class="row">
             <div class="row-left">
               <strong>#{{ item.id }}</strong>
@@ -144,6 +161,7 @@ function unreadCount(routeId: string): number {
 </template>
 
 <style scoped>
+@import "../lateHighlight.css";
 .routes-wrap {
   display: grid;
   gap: 0.85rem;

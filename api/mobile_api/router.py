@@ -28,6 +28,7 @@ from mobile_api.point_event_meta import load_point_event_meta, stage_meta_fields
 from mobile_api.point_status import effective_point_status, point_is_completed
 from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.roles import role_label_ru
+from utils.late_arrival import apply_late_reason, late_reason_required, point_late_kind
 from utils.onec_datetime import normalize_planned_time, planned_wall_fields
 from services.wialon_service import (
     WIALON_ENABLED,
@@ -94,6 +95,7 @@ class BatchEventPayload(BaseModel):
     odometer_source: Literal["manual", "wialon"] | None = None
     coordinates: dict | None = None
     estimated_arrival: str | None = Field(default=None, max_length=32)
+    late_reason: str | None = Field(default=None, max_length=1000)
     document_file_ids: list[int] | None = Field(default=None, max_length=32)
 
 
@@ -139,6 +141,8 @@ def _point_to_dict(
         "point_time": point_time,
         "point_note": point.point_note,
         "estimated_arrival": (getattr(point, "estimated_arrival", None) or "").strip(),
+        "late_reason": (getattr(point, "late_reason", None) or "").strip(),
+        "late_kind": point_late_kind(point),
         "status": point.status,
         "time_accepted": _format_datetime_ru(point.time_accepted),
         "time_registration": _format_datetime_ru(point.time_registration),
@@ -320,6 +324,7 @@ def _route_summary(db: Session, route: Route) -> dict:
         "active_point_fact_time": (
             _format_datetime_ru(point_fact_datetime(active_point, active_status)) if active_point else None
         ),
+        "active_point_late_kind": point_late_kind(active_point) if active_point else "",
     }
 
 
@@ -837,8 +842,18 @@ def batch_events(
                 user_id=current_user.id,
                 file_ids=event.document_file_ids,
             )
+        late_err: str | None = None
+        if late_reason_required(
+            to_status=target_status,
+            date_point=point.date_point,
+            point_time=point.point_time,
+            eta_raw=event.estimated_arrival,
+            occurred_at=_as_utc(event.occurred_at_client),
+        ) and not (event.late_reason or "").strip():
+            late_err = "Укажите причину опоздания"
+        apply_err = doc_err or late_err
 
-        if doc_err:
+        if apply_err:
             stored_event = RouteEvent(
                 route_id=route.id,
                 point_id=event.point_id,
@@ -850,7 +865,7 @@ def batch_events(
                 to_status=target_status,
                 time_source=event.time_source,
                 applied=False,
-                error=doc_err,
+                error=apply_err,
                 server_received_at=server_received_at,
             )
             db.add(stored_event)
@@ -861,7 +876,7 @@ def batch_events(
                     "to_status": target_status,
                     "applied": False,
                     "duplicate": False,
-                    "error": doc_err,
+                    "error": apply_err,
                     "server_received_at": server_received_at.isoformat(),
                 }
             )
@@ -871,6 +886,23 @@ def batch_events(
         if applied and target_status == "process":
             eta = normalize_planned_time(event.estimated_arrival or "")
             point.estimated_arrival = eta
+            if late_reason_required(
+                to_status="process",
+                date_point=point.date_point,
+                point_time=point.point_time,
+                eta_raw=eta,
+                occurred_at=None,
+            ):
+                apply_late_reason(point, event.late_reason or "", "Причина опоздания (ОВП)")
+        if applied and target_status == "registration":
+            if late_reason_required(
+                to_status="registration",
+                date_point=point.date_point,
+                point_time=point.point_time,
+                eta_raw=None,
+                occurred_at=_as_utc(event.occurred_at_client),
+            ):
+                apply_late_reason(point, event.late_reason or "", "Причина опоздания (регистрация)")
         stored_event = RouteEvent(
             route_id=route.id,
             point_id=event.point_id,

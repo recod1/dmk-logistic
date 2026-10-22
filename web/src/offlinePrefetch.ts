@@ -46,7 +46,8 @@ export function routeToListItem(route: RouteDto): DriverRouteListItem {
     active_point_name: (active?.point_name || "").trim() || null,
     active_point_type: active?.type_point || null,
     active_point_date: (active?.date_point || "").trim() || null,
-    active_point_time: (active?.point_time || "").trim() || null
+    active_point_time: (active?.point_time || "").trim() || null,
+    active_point_late_kind: (active as { late_kind?: string } | null)?.late_kind || ""
   };
 }
 

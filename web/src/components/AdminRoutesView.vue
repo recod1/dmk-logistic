@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, reactive, ref, watch } from "vue";
 
+import { lateKindClass } from "../lateArrival";
 import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel, pointTypeLabel } from "../status";
 import { normalizePlannedTimeInput, plannedDateDisplay, plannedTimeDisplay } from "../plannedTime";
 import { normalizePlate } from "../vehiclePlate";
@@ -210,6 +211,10 @@ function routeListPointName(route: AdminRoute): string {
   const place = (current?.place || "").trim();
   const name = (current?.name || "").trim();
   return place || name || "—";
+}
+
+function routeLateKind(route: AdminRoute): string {
+  return (route.active_point_late_kind || "").trim();
 }
 
 function routeListPointSchedule(route: AdminRoute): string {
@@ -655,6 +660,7 @@ onMounted(() => {
           :key="r.id"
           type="button"
           class="route-card-mobile"
+          :class="lateKindClass(routeLateKind(r))"
           role="listitem"
           @click="emit('selectRoute', r.id)"
         >
@@ -703,7 +709,12 @@ onMounted(() => {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="route in routes" :key="route.id" @click="emit('selectRoute', route.id)">
+            <tr
+              v-for="route in routes"
+              :key="route.id"
+              :class="lateKindClass(routeLateKind(route))"
+              @click="emit('selectRoute', route.id)"
+            >
               <td>
                 <span class="route-id">
                   {{ route.id }}
@@ -884,6 +895,7 @@ onMounted(() => {
 </template>
 
 <style scoped>
+@import "../lateHighlight.css";
 .admin-routes-page {
   display: grid;
   gap: 0.9rem;
@@ -1124,6 +1136,12 @@ tbody tr {
 }
 tbody tr:hover {
   background: rgba(79, 70, 229, 0.12);
+}
+tbody tr.late-risk td {
+  background: rgba(249, 115, 22, 0.14);
+}
+tbody tr.late-fact td {
+  background: rgba(192, 38, 211, 0.14);
 }
 .empty {
   text-align: center;

@@ -14,6 +14,7 @@ import {
   routeStatusLabel,
   statusLabel
 } from "../status";
+import { lateKindClass, pointLateKind } from "../lateArrival";
 import { plannedScheduleDisplay } from "../plannedTime";
 import { RETURN_WARNING, type RouteIncident } from "../routeIncidents";
 import type { RouteDto } from "../types";
@@ -293,7 +294,7 @@ function showRevert(pointId: number): boolean {
       <article class="card">
         <h2>Точки</h2>
         <div class="points">
-          <div v-for="point in route.points" :key="point.id" class="point-card">
+          <div v-for="point in route.points" :key="point.id" class="point-card" :class="lateKindClass(pointLateKind(point))">
             <div class="row">
               <strong>{{ point.type_point === "unloading" ? "Выгрузка" : "Загрузка" }}</strong>
               <span class="chip">{{ statusLabel(point.status) }}</span>
@@ -457,6 +458,7 @@ function showRevert(pointId: number): boolean {
 </template>
 
 <style scoped>
+@import "../lateHighlight.css";
 .details-wrap {
   display: flex;
   flex-direction: column;

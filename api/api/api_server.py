@@ -33,6 +33,7 @@ from mobile_api.salary_router import router as salary_router
 from mobile_api.logistics_contacts_router import router as logistics_contacts_router
 from mobile_api.fleet_router import router as fleet_router
 from mobile_api.route_incidents_router import router as route_incidents_router
+from mobile_api.shifts_router import router as shifts_router
 from mobile_api.bootstrap import ensure_demo_user
 from mobile_api.db import SessionLocal
 from mobile_api.stale_point_job import run_stale_point_loop
@@ -271,6 +272,7 @@ app.include_router(salary_router)
 app.include_router(logistics_contacts_router)
 app.include_router(fleet_router)
 app.include_router(route_incidents_router)
+app.include_router(shifts_router)
 
 if __name__ == "__main__":
     import uvicorn

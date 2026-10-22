@@ -2,9 +2,10 @@
 import { computed } from "vue";
 
 import MapsAddressLink from "./MapsAddressLink.vue";
+import { lateKindClass, pointLateKind } from "../lateArrival";
 import { isPointDone, routeStatusLabel, statusLabel } from "../status";
 import { plannedScheduleDisplay } from "../plannedTime";
-import type { DriverRouteListItem, RouteDto } from "../types";
+import type { DriverRouteListItem, DriverShiftListItem, RouteDto } from "../types";
 
 const props = defineProps<{
   activeRoute: RouteDto | null;
@@ -12,6 +13,8 @@ const props = defineProps<{
   hasAssignedRoutes: boolean;
   syncMessage: string;
   syncing: boolean;
+  activeShift?: DriverShiftListItem | null;
+  shiftBusy?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -19,6 +22,7 @@ const emit = defineEmits<{
   openActiveRoute: [];
   acceptActiveRoute: [];
   advanceActivePoint: [];
+  toggleShift: [];
 }>();
 
 const activePoint = computed(
@@ -45,6 +49,8 @@ const actionLabel = computed(() => {
   return "Все точки завершены";
 });
 
+const homeLateKind = computed(() => (activePoint.value ? pointLateKind(activePoint.value) : ""));
+
 const canAdvance = computed(() => {
   if (!props.activeRoute || props.activeRoute.status !== "process") {
     return false;
@@ -55,7 +61,15 @@ const canAdvance = computed(() => {
 
 <template>
   <section class="driver-shell">
-    <article v-if="activeRoute" class="card main-card clickable-card" @click="emit('openActiveRoute')">
+    <button class="shift-btn" type="button" :disabled="shiftBusy" @click="emit('toggleShift')">
+      {{ activeShift ? "Закончить Вахту" : "Начать Вахту" }}
+    </button>
+    <article
+      v-if="activeRoute"
+      class="card main-card clickable-card"
+      :class="lateKindClass(homeLateKind)"
+      @click="emit('openActiveRoute')"
+    >
       <div class="title-row">
         <h2>Рейс #{{ activeRoute.id }}</h2>
         <span class="status-chip">{{ routeStatusLabel(activeRoute.status) }}</span>
@@ -68,7 +82,7 @@ const canAdvance = computed(() => {
       </p>
       <p class="points-count">Точек: {{ activeRoute.points.length }}</p>
 
-      <div v-if="activePoint" class="point-pill">
+      <div v-if="activePoint" class="point-pill" :class="lateKindClass(homeLateKind)">
         <span class="pill-k">Текущая точка</span>
         <strong>{{ statusLabel(activePoint.status) }}</strong>
         <span class="pill-type">{{ activePoint.type_point === "unloading" ? "Выгрузка" : "Загрузка" }}</span>
@@ -105,6 +119,7 @@ const canAdvance = computed(() => {
 </template>
 
 <style scoped>
+@import "../lateHighlight.css";
 .driver-shell {
   display: grid;
   gap: 0.85rem;
@@ -205,6 +220,17 @@ const canAdvance = computed(() => {
   margin: 0;
   color: var(--text-muted);
   font-size: 0.84rem;
+}
+.shift-btn {
+  min-height: 46px;
+  border: none;
+  border-radius: 12px;
+  font-weight: 700;
+  background: linear-gradient(180deg, #0ea5e9, #0284c7);
+  color: #fff;
+}
+.shift-btn:disabled {
+  opacity: 0.55;
 }
 .primary,
 .secondary {

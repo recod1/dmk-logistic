@@ -18,7 +18,9 @@ import type {
   LoginResponse,
   NotificationDto,
   PointDto,
-  RouteDto
+  RouteDto,
+  DriverShiftDetails,
+  DriverShiftListItem
 } from "./types";
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
@@ -1854,4 +1856,115 @@ export async function getMyChatUnreadSummary(token: string): Promise<ChatUnreadR
     }
   });
   return data.items;
+}
+
+export async function listDriverShifts(
+  token: string,
+  params?: { status?: string; q?: string; dateFrom?: string; dateTo?: string }
+): Promise<DriverShiftListItem[]> {
+  const qs = new URLSearchParams();
+  if (params?.status) qs.set("status", params.status);
+  if (params?.q) qs.set("q", params.q);
+  if (params?.dateFrom) qs.set("date_from", params.dateFrom);
+  if (params?.dateTo) qs.set("date_to", params.dateTo);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  const data = await requestJson<{ items: DriverShiftListItem[] }>(`${API_BASE}/v1/shifts${suffix}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.items || [];
+}
+
+export async function getDriverShift(token: string, shiftId: number): Promise<DriverShiftDetails> {
+  return requestJson<DriverShiftDetails>(`${API_BASE}/v1/shifts/${shiftId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+}
+
+export async function getMyActiveShift(token: string): Promise<DriverShiftListItem | null> {
+  const data = await requestJson<{ shift: DriverShiftListItem | null }>(`${API_BASE}/v1/shifts/me/active`, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    }
+  });
+  return data.shift;
+}
+
+async function postShiftMultipart(
+  url: string,
+  token: string,
+  payload: { vehicle: Record<"front" | "rear" | "left" | "right", Blob>; waybill?: Blob[] }
+): Promise<DriverShiftDetails> {
+  const fd = new FormData();
+  fd.append("front", payload.vehicle.front, "front.jpg");
+  fd.append("rear", payload.vehicle.rear, "rear.jpg");
+  fd.append("left", payload.vehicle.left, "left.jpg");
+  fd.append("right", payload.vehicle.right, "right.jpg");
+  (payload.waybill || []).forEach((blob, index) => {
+    fd.append("waybill", blob, `waybill-${index}.jpg`);
+  });
+  const response = await fetch(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    body: fd
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text) as { detail?: string };
+      if (parsed.detail) detail = parsed.detail;
+    } catch {
+      // keep text
+    }
+    throw new ApiError(detail || `HTTP ${response.status}`, {
+      status: response.status,
+      bodyText: text,
+      detail,
+      url,
+      method: "POST"
+    });
+  }
+  return JSON.parse(text) as DriverShiftDetails;
+}
+
+export async function startDriverShift(
+  token: string,
+  payload: { vehicle: Record<"front" | "rear" | "left" | "right", Blob>; waybill: Blob[] }
+): Promise<DriverShiftDetails> {
+  return postShiftMultipart(`${API_BASE}/v1/shifts/start`, token, payload);
+}
+
+export async function finishDriverShift(
+  token: string,
+  shiftId: number,
+  payload: { vehicle: Record<"front" | "rear" | "left" | "right", Blob> }
+): Promise<DriverShiftDetails> {
+  return postShiftMultipart(`${API_BASE}/v1/shifts/${shiftId}/finish`, token, payload);
+}
+
+export async function fetchShiftImageBlob(
+  token: string,
+  imageId: number,
+  opts?: { thumbnail?: boolean; signal?: AbortSignal }
+): Promise<Blob> {
+  const qs = opts?.thumbnail ? "?thumb=1" : "";
+  const url = `${API_BASE}/v1/shift-images/${imageId}/file${qs}`;
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${token}`
+    },
+    signal: opts?.signal,
+    cache: "default"
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `HTTP ${response.status}`);
+  }
+  return response.blob();
 }
