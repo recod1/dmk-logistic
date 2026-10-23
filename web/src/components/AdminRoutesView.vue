@@ -6,6 +6,7 @@ import { formatListStatusWithFact, formatPointSchedule, listPointStatusLabel, po
 import { normalizePlannedTimeInput, plannedDateDisplay, plannedTimeDisplay } from "../plannedTime";
 import { normalizePlate } from "../vehiclePlate";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, RouteWorkflowStatus } from "../types";
+import { PROBLEM_CHOICES } from "../routeIncidents";
 import SuggestField from "./SuggestField.vue";
 
 type RouteSearchFilters = {
@@ -14,6 +15,8 @@ type RouteSearchFilters = {
   number_auto?: string;
   driver_query?: string;
   unread_chat?: boolean;
+  has_problem?: boolean;
+  problem_kinds?: string;
 };
 
 type PointForm = {
@@ -116,7 +119,12 @@ const filters = reactive({
   number_auto: props.initialFilters?.number_auto || "",
   driver_query: props.initialFilters?.driver_query || "",
   status: props.initialFilters?.status || "process",
-  unread_chat: Boolean(props.initialFilters?.unread_chat)
+  unread_chat: Boolean(props.initialFilters?.unread_chat),
+  has_problem: Boolean(props.initialFilters?.has_problem),
+  problem_kinds: (props.initialFilters?.problem_kinds || PROBLEM_CHOICES.map((item) => item.kind).join(","))
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean)
 });
 
 const selectedTabLabel = computed(() => {
@@ -384,12 +392,45 @@ function doSearch(): void {
   if (filters.unread_chat) {
     payload.unread_chat = true;
   }
+  if (filters.has_problem) {
+    payload.has_problem = true;
+    const kinds = filters.problem_kinds.length ? filters.problem_kinds : PROBLEM_CHOICES.map((item) => item.kind);
+    payload.problem_kinds = kinds.join(",");
+  }
   emit("refresh", payload);
 }
 
 function toggleUnreadFilter(): void {
   filters.unread_chat = !filters.unread_chat;
   doSearch();
+}
+
+function toggleProblemFilter(): void {
+  filters.has_problem = !filters.has_problem;
+  if (filters.has_problem && !filters.problem_kinds.length) {
+    filters.problem_kinds = PROBLEM_CHOICES.map((item) => item.kind);
+  }
+  doSearch();
+}
+
+function toggleProblemKind(kind: string): void {
+  const selected = new Set(filters.problem_kinds);
+  if (selected.has(kind)) {
+    selected.delete(kind);
+  } else {
+    selected.add(kind);
+  }
+  filters.problem_kinds = PROBLEM_CHOICES.map((item) => item.kind).filter((item) => selected.has(item));
+  if (!filters.problem_kinds.length) {
+    filters.problem_kinds = PROBLEM_CHOICES.map((item) => item.kind);
+  }
+  if (filters.has_problem) {
+    doSearch();
+  }
+}
+
+function routeHasProblem(route: AdminRoute): boolean {
+  return Boolean(route.open_problem_kinds?.length);
 }
 
 function scrollCreateCardIntoView(): void {
@@ -614,16 +655,38 @@ onMounted(() => {
             {{ searchOpen ? "Скрыть поиск" : "Поиск" }}
           </button>
         </div>
-        <button
-          class="unread-toggle"
-          type="button"
-          :class="{ active: filters.unread_chat }"
-          :aria-pressed="filters.unread_chat"
-          @click="toggleUnreadFilter"
-        >
-          <span class="unread-toggle-box" aria-hidden="true" />
-          Непрочитанные
-        </button>
+        <div class="list-toggles">
+          <button
+            class="unread-toggle"
+            type="button"
+            :class="{ active: filters.unread_chat }"
+            :aria-pressed="filters.unread_chat"
+            @click="toggleUnreadFilter"
+          >
+            <span class="unread-toggle-box" aria-hidden="true" />
+            Непрочитанные
+          </button>
+          <button
+            class="unread-toggle problem-toggle"
+            type="button"
+            :class="{ active: filters.has_problem }"
+            :aria-pressed="filters.has_problem"
+            @click="toggleProblemFilter"
+          >
+            <span class="unread-toggle-box" aria-hidden="true" />
+            С проблемами
+          </button>
+        </div>
+        <div v-if="filters.has_problem" class="problem-kinds">
+          <label v-for="item in PROBLEM_CHOICES" :key="item.kind" class="kind-check">
+            <input
+              type="checkbox"
+              :checked="filters.problem_kinds.includes(item.kind)"
+              @change="toggleProblemKind(item.kind)"
+            />
+            {{ item.label }}
+          </label>
+        </div>
         <div class="filters-head">
           <h2>{{ filteredTitle }}</h2>
         </div>
@@ -660,7 +723,7 @@ onMounted(() => {
           :key="r.id"
           type="button"
           class="route-card-mobile"
-          :class="lateKindClass(routeLateKind(r))"
+          :class="[lateKindClass(routeLateKind(r)), { 'has-problem': routeHasProblem(r) }]"
           role="listitem"
           @click="emit('selectRoute', r.id)"
         >
@@ -712,7 +775,7 @@ onMounted(() => {
             <tr
               v-for="route in routes"
               :key="route.id"
-              :class="lateKindClass(routeLateKind(route))"
+              :class="[lateKindClass(routeLateKind(route)), { 'has-problem': routeHasProblem(route) }]"
               @click="emit('selectRoute', route.id)"
             >
               <td>
@@ -875,11 +938,9 @@ onMounted(() => {
             Время
             <input
               v-model="point.point_time"
-              type="text"
-              inputmode="numeric"
-              placeholder="18:00"
-              maxlength="8"
-              autocomplete="off"
+              type="time"
+              step="60"
+              lang="ru"
               @blur="point.point_time = normalizePlannedTimeInput(point.point_time)"
             />
           </label>
@@ -1012,6 +1073,42 @@ onMounted(() => {
   background-size: 0.7rem 0.58rem;
   border-color: #86efac;
 }
+.list-toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+  margin-top: 0.65rem;
+}
+.list-toggles .unread-toggle {
+  margin-top: 0;
+}
+.problem-toggle {
+  border-color: rgba(248, 113, 113, 0.55);
+  background: rgba(220, 38, 38, 0.08);
+  color: #fecaca;
+}
+.problem-toggle.active {
+  border-color: #ef4444;
+  background: rgba(220, 38, 38, 0.22);
+  color: #fee2e2;
+}
+.problem-toggle.active .unread-toggle-box {
+  background: #ef4444;
+  border-color: #fecaca;
+}
+.problem-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.75rem;
+  margin-top: 0.45rem;
+}
+.kind-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: #fecaca;
+  font-size: 0.8rem;
+}
 .mobile-status-label {
   display: inline-flex;
   align-items: center;
@@ -1140,8 +1237,9 @@ tbody tr:hover {
 tbody tr.late-risk td {
   background: rgba(249, 115, 22, 0.14);
 }
-tbody tr.late-fact td {
-  background: rgba(192, 38, 211, 0.14);
+tbody tr.late-fact td,
+tbody tr.has-problem td {
+  background: rgba(220, 38, 38, 0.14);
 }
 .empty {
   text-align: center;

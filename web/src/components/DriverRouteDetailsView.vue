@@ -4,6 +4,7 @@ import { computed } from "vue";
 import FactTimeCell from "./FactTimeCell.vue";
 import MapsAddressLink from "./MapsAddressLink.vue";
 import MapsCoordsLink from "./MapsCoordsLink.vue";
+import PointDocLinks from "./PointDocLinks.vue";
 import { liveRouteElapsedLabel, routeAnalyticsView } from "../routeAnalytics";
 import { useLiveNow } from "../liveNow";
 import { stageDeltasForPoint } from "../stageDeltas";
@@ -27,6 +28,7 @@ const props = defineProps<{
   unreadChatCount?: number;
   logisticsContacts?: Array<{ name: string; phone: string }>;
   incidents?: RouteIncident[];
+  authToken?: string;
 }>();
 
 const emit = defineEmits<{
@@ -60,6 +62,10 @@ const isAcceptedCurrentRoute = computed(
 );
 
 const openIncidents = computed(() => (props.incidents || []).filter((item) => item.status === "open"));
+
+function pointHasProblem(pointId: number): boolean {
+  return (props.incidents || []).some((item) => item.status === "open" && item.point_id === pointId);
+}
 
 async function copyToClipboard(value: string): Promise<void> {
   const text = value.trim();
@@ -284,7 +290,6 @@ function showRevert(pointId: number): boolean {
           Открыть чат рейса
           <span v-if="(unreadChatCount ?? 0) > 0" class="chat-badge" aria-label="Новые сообщения" />
         </button>
-        <button class="secondary wide" type="button" @click="emit('reportProblem')">Проблемы в рейсе</button>
         <p v-if="route.driver_lat != null && route.driver_lng != null" class="loc">
           Моя точка:
           <MapsCoordsLink :lat="route.driver_lat" :lng="route.driver_lng" />
@@ -294,7 +299,7 @@ function showRevert(pointId: number): boolean {
       <article class="card">
         <h2>Точки</h2>
         <div class="points">
-          <div v-for="point in route.points" :key="point.id" class="point-card" :class="lateKindClass(pointLateKind(point))">
+          <div v-for="point in route.points" :key="point.id" class="point-card" :class="[lateKindClass(pointLateKind(point)), { 'has-problem': pointHasProblem(point.id) }]">
             <div class="row">
               <strong>{{ point.type_point === "unloading" ? "Выгрузка" : "Загрузка" }}</strong>
               <span class="chip">{{ statusLabel(point.status) }}</span>
@@ -306,6 +311,18 @@ function showRevert(pointId: number): boolean {
             </p>
             <small>{{ plannedScheduleDisplay(point.date_point, point.point_time) }}</small>
             <p v-if="point.estimated_arrival" class="eta">Ориентировочное прибытие: {{ point.estimated_arrival }}</p>
+            <p v-if="point.late_reason" class="late-reason">Опоздание: {{ point.late_reason }}</p>
+            <PointDocLinks
+              v-if="authToken && point.docs_images?.length"
+              :token="authToken"
+              :images="point.docs_images"
+            />
+            <PointDocLinks
+              v-if="authToken && point.return_images?.length"
+              :token="authToken"
+              :images="point.return_images"
+              label="Фото возврата"
+            />
             <div class="stage-scroll">
               <table class="stage-table">
                 <thead>
@@ -400,6 +417,12 @@ function showRevert(pointId: number): boolean {
           <p v-if="item.authorized_by" class="note">Разрешил: {{ item.authorized_by }}</p>
           <p v-if="item.kind === 'return' && item.return_warning" class="warn">{{ RETURN_WARNING }}</p>
           <p v-if="item.return_stage_label" class="note">Этап: {{ item.return_stage_label }}</p>
+          <PointDocLinks
+            v-if="authToken && item.images?.length"
+            :token="authToken"
+            :images="item.images"
+            label="Фото возврата"
+          />
           <button
             v-if="item.follow_up_label"
             class="secondary"
@@ -435,14 +458,17 @@ function showRevert(pointId: number): boolean {
           Текущая точка: этап «{{ statusLabel(firstIncompletePoint.status) }}»
         </p>
         <div class="dock-actions">
-          <button
-            v-if="canAdvancePoint(firstIncompletePoint.id)"
-            type="button"
-            class="primary wide"
-            @click="emit('advancePoint', firstIncompletePoint.id)"
-          >
-            {{ actionLabel(firstIncompletePoint.status) }}
-          </button>
+          <div class="status-row">
+            <button
+              v-if="canAdvancePoint(firstIncompletePoint.id)"
+              type="button"
+              class="primary grow"
+              @click="emit('advancePoint', firstIncompletePoint.id)"
+            >
+              {{ actionLabel(firstIncompletePoint.status) }}
+            </button>
+            <button class="problem-mini" type="button" @click="emit('reportProblem')">Проблема</button>
+          </div>
           <button
             v-if="showRevert(firstIncompletePoint.id)"
             type="button"
@@ -464,9 +490,11 @@ function showRevert(pointId: number): boolean {
   flex-direction: column;
   gap: 0.7rem;
   min-height: 0;
+  min-width: 0;
   width: 100%;
-  max-width: 800px;
+  max-width: min(800px, 100%);
   margin: 0 auto;
+  overflow-x: hidden;
 }
 .route-title {
   margin: 0;
@@ -521,6 +549,14 @@ function showRevert(pointId: number): boolean {
   padding: 0.7rem;
   display: grid;
   gap: 0.35rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+.late-reason {
+  margin: 0.2rem 0 0;
+  color: #fecaca;
+  font-size: 0.86rem;
 }
 .manager-note {
   margin: 0;
@@ -543,10 +579,11 @@ function showRevert(pointId: number): boolean {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
   margin-top: 0.2rem;
+  max-width: 100%;
 }
 .stage-table {
   width: 100%;
-  min-width: 420px;
+  min-width: 0;
   border-collapse: collapse;
 }
 .stage-table th,
@@ -622,10 +659,33 @@ small {
   display: grid;
   gap: 0.4rem;
 }
+.status-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+.primary.grow {
+  flex: 1 1 auto;
+}
+.problem-mini {
+  flex: 0 0 auto;
+  min-width: 4.4rem;
+  padding: 0 0.55rem;
+  border: none;
+  border-radius: 12px;
+  background: #b91c1c;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+.primary.wide,
+.ghost.wide,
+.primary.grow {
+  min-height: 46px;
+}
 .primary.wide,
 .ghost.wide {
   width: 100%;
-  min-height: 46px;
 }
 .chat-btn {
   position: relative;

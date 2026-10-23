@@ -128,9 +128,7 @@ const needsLateReason = computed(() => {
   return false;
 });
 
-const formReady = computed(
-  () => odometerReady.value && etaReady.value && (!needsLateReason.value || Boolean(lateReason.value.trim()))
-);
+const formReady = computed(() => odometerReady.value && etaReady.value);
 
 function acceptWialon(): void {
   odometerMode.value = "ask";
@@ -214,7 +212,7 @@ function skip(): void {
       <label v-if="needsLateReason" class="field">
         Причина опоздания
         <textarea v-model="lateReason" rows="3" maxlength="1000" placeholder="Например: пробка на МКАД" />
-        <small class="hint">Обязательно, потому что время позже плана точки.</small>
+        <small class="hint">Если есть причина — укажите. Этап сохранится в любом случае.</small>
       </label>
       <div class="actions">
         <button type="button" class="secondary" @click="emit('cancel')">Отмена</button>

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from urllib.parse import unquote
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -11,7 +11,8 @@ from sqlalchemy.orm import Session
 from mobile_api.auth import get_current_user
 from mobile_api.chat_router import _assert_can_access_route, post_route_chat_and_notify
 from mobile_api.db import get_db
-from mobile_api.models import Point, Route, RouteIncident, User
+from mobile_api.models import Point, PointDocumentImage, Route, RouteIncident, User
+from mobile_api.point_documents_router import MAX_FILES_PER_UPLOAD, store_point_image_bytes
 from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.roles import RoleCode
 from mobile_api.route_incidents import (
@@ -67,7 +68,16 @@ def _assert_driver_assigned(user: User, route: Route) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not your route")
 
 
-def _incident_out(row: RouteIncident) -> dict:
+def _incident_images(db: Session, incident_id: int) -> list[dict]:
+    rows = db.scalars(
+        select(PointDocumentImage)
+        .where(PointDocumentImage.incident_id == incident_id)
+        .order_by(PointDocumentImage.id.asc())
+    ).all()
+    return [{"id": int(row.id), "content_type": row.content_type} for row in rows]
+
+
+def _incident_out(row: RouteIncident, db: Session | None = None) -> dict:
     follow = FOLLOW_UP.get(row.kind)
     return {
         "id": int(row.id),
@@ -97,6 +107,7 @@ def _incident_out(row: RouteIncident) -> dict:
         "created_at": format_dt_for_app(row.created_at),
         "chat_message_id": row.chat_message_id,
         "stages": return_stages_out(row.stages_json, format_time=format_dt_for_app) if row.kind == "return" else [],
+        "images": _incident_images(db, int(row.id)) if db is not None else [],
         "chat_text": "",
     }
 
@@ -131,7 +142,7 @@ def list_incidents(
     current_user: User = Depends(get_current_user),
 ) -> dict:
     route = _assert_can_access_route(db, current_user, route_id)
-    return {"items": [_incident_out(row) for row in _list_incidents(db, route.id)]}
+    return {"items": [_incident_out(row, db) for row in _list_incidents(db, route.id)]}
 
 
 @router.post("/v1/mobile/routes/{route_id:path}/incidents", status_code=status.HTTP_201_CREATED)
@@ -214,7 +225,7 @@ def create_incident(
         )
     db.commit()
     db.refresh(row)
-    out = _incident_out(row)
+    out = _incident_out(row, db)
     out["chat_text"] = text
     return out
 
@@ -246,7 +257,7 @@ def follow_up_incident(
     _notify_problem(db, route, current_user, f"Рейс {route.id}: {follow[1]}", note)
     db.commit()
     db.refresh(row)
-    return _incident_out(row)
+    return _incident_out(row, db)
 
 
 @router.post("/v1/mobile/routes/{route_id:path}/incidents/{incident_id}/return-stage")
@@ -293,4 +304,43 @@ def advance_return_stage(
     db.add(row)
     db.commit()
     db.refresh(row)
-    return _incident_out(row)
+    return _incident_out(row, db)
+
+
+@router.post("/v1/mobile/routes/{route_id:path}/incidents/{incident_id}/photos")
+async def upload_return_photos(
+    route_id: str,
+    incident_id: int,
+    files: list[UploadFile] = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> dict:
+    route = _assert_can_access_route(db, current_user, unquote(route_id))
+    _assert_driver_assigned(current_user, route)
+    row = db.get(RouteIncident, incident_id)
+    if row is None or row.route_id != route.id or row.kind != "return":
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Return not found")
+    if row.point_id is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Return has no point")
+    point = db.get(Point, int(row.point_id))
+    if point is None or point.route_id != route.id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Point not found")
+    if not files:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files")
+    if len(files) > MAX_FILES_PER_UPLOAD:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Too many files")
+    created_ids: list[int] = []
+    for upload in files:
+        body = await upload.read()
+        stored = store_point_image_bytes(
+            db,
+            point=point,
+            user_id=current_user.id,
+            body=body,
+            content_type=upload.content_type or "image/jpeg",
+            kind="return",
+            incident_id=int(row.id),
+        )
+        created_ids.append(int(stored.id))
+    db.commit()
+    return {"file_ids": created_ids, "incident": _incident_out(row, db)}

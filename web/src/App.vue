@@ -81,6 +81,7 @@ import {
   createRouteIncident,
   followUpRouteIncident,
   advanceReturnStage,
+  uploadReturnPhotos,
   reportPresence,
   type LiveDriverCard,
   createFleetVehicle,
@@ -251,6 +252,8 @@ type RouteFilters = {
   number_auto?: string;
   driver_query?: string;
   unread_chat?: boolean;
+  has_problem?: boolean;
+  problem_kinds?: string;
 };
 
 const authToken = ref<string>("");
@@ -2951,12 +2954,7 @@ async function syncOutboxInBackground(): Promise<void> {
           return false;
         }
         const err = item.error.toLowerCase();
-        return (
-          err.includes("invalid transition") ||
-          err.includes("unauthorized") ||
-          err.includes("forbidden") ||
-          err.includes("причину опоздания")
-        );
+        return err.includes("invalid transition") || err.includes("unauthorized") || err.includes("forbidden");
       });
       if (fatal.length) {
         removable.push(...fatal.map((item) => item.client_event_id));
@@ -3136,7 +3134,9 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
         routeFilters.value.route_id !== effectiveFilters.route_id ||
         routeFilters.value.number_auto !== effectiveFilters.number_auto ||
         routeFilters.value.driver_query !== effectiveFilters.driver_query ||
-        Boolean(routeFilters.value.unread_chat) !== Boolean(effectiveFilters.unread_chat);
+        Boolean(routeFilters.value.unread_chat) !== Boolean(effectiveFilters.unread_chat) ||
+        Boolean(routeFilters.value.has_problem) !== Boolean(effectiveFilters.has_problem) ||
+        (routeFilters.value.problem_kinds || "") !== (effectiveFilters.problem_kinds || "");
       routeFilters.value = effectiveFilters;
       if (filtersChanged) {
         adminRoutesOffset.value = 0;
@@ -4224,6 +4224,7 @@ async function applyStatusConfirm(payload: {
   odometer_source: "manual" | "wialon" | null;
   etaTime: string;
   skipped?: boolean;
+  lateReason?: string;
 }): Promise<void> {
   const pending = statusConfirm.value;
   statusConfirm.value = null;
@@ -4261,13 +4262,6 @@ async function applyStatusConfirm(payload: {
     }
     const eta = to === "process" ? payload.etaTime : undefined;
     const lateReason = (payload.lateReason || "").trim();
-    const needsLateReason =
-      (to === "process" && etaIsLate(current.date_point, current.point_time, eta)) ||
-      (to === "registration" && registrationIsLate(iso, current.date_point, current.point_time));
-    if (needsLateReason && !lateReason) {
-      syncMessage.value = "Укажите причину опоздания";
-      return;
-    }
     await markPointNext(pending.pointId, iso, undefined, {
       timeSource,
       pressedAt: pending.pressedAtIso,
@@ -5754,7 +5748,7 @@ async function submitIncidentFollowUp(incident: RouteIncident): Promise<void> {
   }
 }
 
-async function finishReturnStage(incident: RouteIncident, authorizedBy: string, _files: File[] = []): Promise<void> {
+async function finishReturnStage(incident: RouteIncident, authorizedBy: string, files: File[] = []): Promise<void> {
   const routeId = selectedDriverRoute.value?.id;
   if (!authToken.value || !routeId) {
     return;
@@ -5780,7 +5774,21 @@ async function finishReturnStage(incident: RouteIncident, authorizedBy: string, 
       odometer,
       odometer_source: odometerSource
     });
+    if (files.length) {
+      const prepared = await prepareDocumentImageBlobs(files);
+      await uploadReturnPhotos(authToken.value, routeId, incident.id, prepared);
+    }
     await refreshRouteIncidents(routeId);
+    try {
+      const latest = await applyOverlaysToRoute(await getDriverRoute(authToken.value, routeId));
+      selectedDriverRoute.value = latest;
+      if (route.value?.id === routeId) {
+        route.value = latest;
+      }
+      await saveRouteSnapshot(latest);
+    } catch {
+      // photos are already stored; list refresh is enough
+    }
     syncMessage.value = incident.next_return_stage_label || "Этап возврата отмечен";
   } catch (error) {
     syncMessage.value = (error as Error).message;
@@ -6574,11 +6582,13 @@ onUnmounted(() => {
         :syncing="syncing"
         :active-shift="activeDriverShift"
         :shift-busy="shiftUploading"
+        :has-problem="routeIncidents.some((item) => item.status === 'open')"
         @open-routes="openDriverRoutes"
         @open-active-route="openActiveRouteFromHome"
         @accept-active-route="doAcceptRoute"
         @advance-active-point="advanceActivePointFromHome"
         @revert-active-point="doRevertPoint"
+        @report-problem="openProblemDialog()"
         @toggle-shift="openShiftToggle"
       />
     </section>
@@ -6632,6 +6642,7 @@ onUnmounted(() => {
         :unread-chat-count="chatUnreadByRoute[selectedDriverRoute.id] ?? 0"
         :logistics-contacts="logisticsContacts"
         :incidents="routeIncidents"
+        :auth-token="authToken"
         @back="goBack"
         @advance-point="openStatusConfirm"
         @revert-point="doRevertPoint"
@@ -6963,6 +6974,8 @@ onUnmounted(() => {
 .page-stage {
   min-width: 0;
   width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
 }
 .page-stage > section {
   width: 100%;
@@ -6974,7 +6987,7 @@ onUnmounted(() => {
   top: 0;
   z-index: 30;
   display: grid;
-  grid-template-columns: 1fr auto 1fr;
+  grid-template-columns: auto minmax(0, 1fr) max-content;
   align-items: center;
   gap: 0.7rem;
   margin: -0.85rem -1.5rem 0.95rem;
@@ -6992,20 +7005,20 @@ onUnmounted(() => {
   justify-content: flex-end;
   flex-wrap: nowrap;
   gap: 0.4rem;
-  min-width: 0;
+  min-width: max-content;
   overflow: visible;
 }
 .header-nav-slot {
   flex: 1 1 auto;
   min-width: 0;
-  overflow-x: auto;
-  overflow-y: hidden;
+  overflow: visible;
 }
 .topbar-center {
   display: grid;
   justify-items: center;
   gap: 0.12rem;
   min-width: 0;
+  overflow: hidden;
 }
 .brand-mark {
   margin: 0;
@@ -7020,6 +7033,10 @@ onUnmounted(() => {
   font-size: 1.05rem;
   font-weight: 700;
   letter-spacing: -0.02em;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .icon-btn {
   width: 42px;
@@ -7055,11 +7072,11 @@ onUnmounted(() => {
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.9);
   color: #fff;
-  padding: 0.22rem 0.55rem 0.22rem 0.22rem;
+  padding: 0.18rem;
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  max-width: 220px;
+  max-width: none;
 }
 .avatar {
   width: 32px;
@@ -7073,10 +7090,7 @@ onUnmounted(() => {
   flex-shrink: 0;
 }
 .profile-label {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 0.88rem;
+  display: none;
 }
 .caret {
   font-size: 0.8rem;

@@ -184,6 +184,10 @@ function returnsForPoint(pointId: number): RouteIncident[] {
   return (props.incidents || []).filter((item) => item.kind === "return" && item.point_id === pointId);
 }
 
+function pointHasProblem(pointId: number): boolean {
+  return (props.incidents || []).some((item) => item.status === "open" && item.point_id === pointId);
+}
+
 const problemIncidents = computed(() => (props.incidents || []).filter((item) => item.kind !== "return"));
 const orphanReturns = computed(() => (props.incidents || []).filter((item) => item.kind === "return" && !item.point_id));
 
@@ -526,6 +530,15 @@ function toPointPayload(points: PointForm[]): AdminRoutePointPayload[] {
 }
 
 watch(
+  () => props.route.id,
+  () => {
+    showEdit.value = false;
+    showReassign.value = false;
+    editingPointId.value = null;
+  }
+);
+
+watch(
   () => props.route,
   (route) => {
     editForm.number_auto = route.number_auto || "";
@@ -735,13 +748,21 @@ function removeRoute(): void {
             </p>
             <p v-if="item.authorized_by" class="muted">Разрешил: {{ item.authorized_by }}</p>
             <p v-if="item.return_stage_label">Этап возврата: {{ item.return_stage_label }}</p>
+            <PointDocLinks
+              v-if="authToken && item.images?.length"
+              :token="authToken"
+              :images="item.images"
+              label="Фото возврата"
+            />
           </article>
         </section>
         <button class="secondary chat-btn" type="button" @click="emit('openChat', route.id)">
           Открыть чат рейса
           <span v-if="(unreadChatCount ?? 0) > 0" class="chat-badge" aria-label="Новые сообщения" />
         </button>
-        <button class="secondary" v-if="!showEdit" :disabled="loading" type="button" @click="openEdit">Редактировать</button>
+        <button class="secondary" :disabled="loading" type="button" @click="showEdit ? closeEdit() : openEdit()">
+          {{ showEdit ? "Закрыть редактирование" : "Редактировать" }}
+        </button>
         <button class="secondary" v-if="!showReassign" :disabled="loading" type="button" @click="openReassign">
           Переназначить
         </button>
@@ -883,11 +904,9 @@ function removeRoute(): void {
               Время
               <input
                 v-model="point.point_time"
-                type="text"
-                inputmode="numeric"
-                placeholder="18:00"
-                maxlength="8"
-                autocomplete="off"
+                type="time"
+                step="60"
+                lang="ru"
                 @blur="point.point_time = normalizePlannedTimeInput(point.point_time)"
               />
             </label>
@@ -905,7 +924,7 @@ function removeRoute(): void {
 
       <section class="points-wrap">
         <h3>Этапы по точкам</h3>
-        <article v-for="point in route.points || []" :key="point.id" class="point-card" :class="lateKindClass(pointLateKind(point))">
+        <article v-for="point in route.points || []" :key="point.id" class="point-card" :class="[lateKindClass(pointLateKind(point)), { 'has-problem': pointHasProblem(point.id) }]">
           <div class="point-top">
             <strong>
               {{ pointTypeLabel(point.type_point) }}
@@ -935,6 +954,7 @@ function removeRoute(): void {
           </p>
           <p class="meta-line">{{ formatPlannedLine(point.date_point, point.point_time) }}</p>
           <p v-if="point.estimated_arrival" class="meta-line">Ориентировочное прибытие: {{ point.estimated_arrival }}</p>
+          <p v-if="point.late_reason" class="late-reason">Опоздание: {{ point.late_reason }}</p>
           <p v-if="point.point_contacts" class="meta-line">{{ point.point_contacts }}</p>
           <div v-if="editingPointId !== point.id" class="actions">
             <button class="secondary" type="button" :disabled="loading" @click="openPointEdit(point)">
@@ -972,11 +992,9 @@ function removeRoute(): void {
                 Время плана
                 <input
                   v-model="pointEdit.point_time"
-                  type="text"
-                  inputmode="numeric"
-                  placeholder="18:00"
-                  maxlength="8"
-                  autocomplete="off"
+                  type="time"
+                  step="60"
+                  lang="ru"
                   @blur="pointEdit.point_time = normalizePlannedTimeInput(pointEdit.point_time)"
                 />
                 <small v-if="editHint(point.manual_edits, 'point_time')" class="edit-hint">{{ editHint(point.manual_edits, 'point_time') }}</small>
@@ -1205,6 +1223,12 @@ function removeRoute(): void {
             :token="authToken"
             :images="point.docs_images"
           />
+          <PointDocLinks
+            v-if="authToken && point.return_images?.length"
+            :token="authToken"
+            :images="point.return_images"
+            label="Фото возврата"
+          />
           <section v-for="item in returnsForPoint(point.id)" :key="`ret-${item.id}`" class="return-box">
             <h4>Возврат</h4>
             <p v-if="item.comment" class="muted">{{ item.comment }}</p>
@@ -1212,6 +1236,12 @@ function removeRoute(): void {
               {{ [item.cargo_name, item.quantity].filter(Boolean).join(" · ") }}
             </p>
             <p v-if="item.authorized_by" class="muted">Разрешил: {{ item.authorized_by }}</p>
+            <PointDocLinks
+              v-if="authToken && item.images?.length"
+              :token="authToken"
+              :images="item.images"
+              label="Фото возврата"
+            />
             <div class="stage-scroll">
               <table class="stage-table">
                 <thead>
@@ -1238,12 +1268,18 @@ function removeRoute(): void {
             </div>
           </section>
         </article>
-        <article v-for="item in orphanReturns" :key="`ret-orphan-${item.id}`" class="point-card">
+        <article v-for="item in orphanReturns" :key="`ret-orphan-${item.id}`" class="point-card has-problem">
           <div class="point-top">
             <strong>Возврат</strong>
             <span class="status-chip">{{ item.status === "open" ? "открыт" : "сдан" }}</span>
           </div>
           <p v-if="item.comment" class="meta-line">{{ item.comment }}</p>
+          <PointDocLinks
+            v-if="authToken && item.images?.length"
+            :token="authToken"
+            :images="item.images"
+            label="Фото возврата"
+          />
           <div class="stage-scroll">
             <table class="stage-table">
               <thead>
@@ -1277,6 +1313,9 @@ function removeRoute(): void {
 <style scoped>
 @import "../lateHighlight.css";
 .details-page {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: hidden;
   display: grid;
   gap: 0.9rem;
   width: 100%;
@@ -1317,6 +1356,11 @@ function removeRoute(): void {
 }
 .incident p {
   margin: 0.15rem 0 0;
+}
+.late-reason {
+  margin: 0.2rem 0 0;
+  color: #fecaca;
+  font-size: 0.86rem;
 }
 .return-box {
   margin-top: 0.7rem;
@@ -1484,6 +1528,9 @@ function removeRoute(): void {
   padding: 0.7rem;
   display: grid;
   gap: 0.45rem;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
 }
 .point-top {
   display: flex;
@@ -1533,7 +1580,8 @@ function removeRoute(): void {
   max-width: 100%;
 }
 .stage-table {
-  min-width: 520px;
+  width: 100%;
+  min-width: 0;
 }
 .stage-table th,
 .stage-table td {

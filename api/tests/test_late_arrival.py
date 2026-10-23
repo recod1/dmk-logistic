@@ -106,3 +106,21 @@ class LateArrivalTests(TestCase):
         self.assertIn("пробки", point.late_reason)
         self.assertIn("Склад", point.point_note)
         self.assertIn("пробки", point.point_note)
+
+    def test_empty_late_reason_does_not_change_point(self) -> None:
+        point = SimpleNamespace(late_reason="", point_note="Склад")
+        apply_late_reason(point, "  ", "Причина опоздания (регистрация)")
+        self.assertEqual(point.late_reason, "")
+        self.assertEqual(point.point_note, "Склад")
+
+    def test_gates_never_require_late_reason(self) -> None:
+        fact = datetime(2026, 10, 22, 19, 10, tzinfo=MOSCOW)
+        self.assertFalse(
+            late_reason_required(
+                to_status="load",
+                date_point="22.10.2026",
+                point_time="18:30",
+                eta_raw="",
+                occurred_at=fact,
+            )
+        )

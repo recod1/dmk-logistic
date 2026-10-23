@@ -4,8 +4,9 @@
   background: rgba(249, 115, 22, 0.12) !important;
 }
 
-.late-fact {
-  border-color: #e879f9 !important;
-  box-shadow: inset 3px 0 0 #c026d3;
-  background: rgba(192, 38, 211, 0.12) !important;
+.late-fact,
+.has-problem {
+  border-color: #f87171 !important;
+  box-shadow: inset 3px 0 0 #dc2626;
+  background: rgba(220, 38, 38, 0.14) !important;
 }

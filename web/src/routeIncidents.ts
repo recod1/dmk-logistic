@@ -31,6 +31,7 @@ export interface RouteIncident {
   follow_up_label: string | null;
   created_at: string | null;
   stages?: ReturnStageSnap[];
+  images?: Array<{ id: number; content_type: string }>;
   chat_text?: string;
 }
 

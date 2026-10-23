@@ -84,6 +84,7 @@ export interface PointDto {
     lng: number | null;
   } | null;
   docs_images?: Array<{ id: number; content_type: string }>;
+  return_images?: Array<{ id: number; content_type: string }>;
   manual_edits?: Record<string, ManualEditMeta> | null;
 }
 
@@ -257,6 +258,7 @@ export interface AdminRoute {
   last_loading_point_name?: string | null;
   last_loading_date?: string | null;
   last_loading_time?: string | null;
+  open_problem_kinds?: string[];
   cancellations?: RouteCancellationRecord[];
   analytics?: {
     total_minutes?: number | null;
@@ -326,6 +328,7 @@ export interface AdminRoute {
         lng: number | null;
       } | null;
       docs_images?: Array<{ id: number; content_type: string }>;
+      return_images?: Array<{ id: number; content_type: string }>;
       manual_edits?: Record<string, ManualEditMeta> | null;
     }
   > | null;

@@ -15,6 +15,7 @@ const props = defineProps<{
   syncing: boolean;
   activeShift?: DriverShiftListItem | null;
   shiftBusy?: boolean;
+  hasProblem?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -22,6 +23,7 @@ const emit = defineEmits<{
   openActiveRoute: [];
   acceptActiveRoute: [];
   advanceActivePoint: [];
+  reportProblem: [];
   toggleShift: [];
 }>();
 
@@ -67,7 +69,7 @@ const canAdvance = computed(() => {
     <article
       v-if="activeRoute"
       class="card main-card clickable-card"
-      :class="lateKindClass(homeLateKind)"
+      :class="[lateKindClass(homeLateKind), { 'has-problem': hasProblem }]"
       @click="emit('openActiveRoute')"
     >
       <div class="title-row">
@@ -93,14 +95,16 @@ const canAdvance = computed(() => {
         <span v-else class="plan">Адрес не указан</span>
         <span class="plan">План: {{ plannedScheduleDisplay(activePoint.date_point, activePoint.point_time) || "—" }}</span>
         <span v-if="activePoint.estimated_arrival" class="plan">Ориентировочно: {{ activePoint.estimated_arrival }}</span>
+        <span v-if="activePoint.late_reason" class="late-reason">Опоздание: {{ activePoint.late_reason }}</span>
       </div>
 
       <button v-if="activeRoute.status === 'new'" class="primary" @click.stop="emit('acceptActiveRoute')">Принять рейс</button>
-      <template v-else>
+      <div v-else class="status-row">
         <button class="primary" :disabled="!canAdvance" @click.stop="emit('advanceActivePoint')">
           {{ actionLabel }}
         </button>
-      </template>
+        <button class="problem-mini" type="button" @click.stop="emit('reportProblem')">Проблема</button>
+      </div>
       <button class="secondary" @click.stop="emit('openActiveRoute')">Открыть всю информацию о рейсе</button>
     </article>
 
@@ -216,6 +220,10 @@ const canAdvance = computed(() => {
   color: var(--text-muted);
   font-size: 0.84rem;
 }
+.late-reason {
+  color: #fecaca;
+  font-size: 0.84rem;
+}
 .points-count {
   margin: 0;
   color: var(--text-muted);
@@ -237,6 +245,25 @@ const canAdvance = computed(() => {
   min-height: 46px;
   border-radius: 12px;
   font-weight: 650;
+}
+.status-row {
+  display: flex;
+  align-items: stretch;
+  gap: 0.45rem;
+}
+.status-row .primary {
+  flex: 1 1 auto;
+}
+.problem-mini {
+  flex: 0 0 auto;
+  min-width: 4.4rem;
+  padding: 0 0.55rem;
+  border: none;
+  border-radius: 12px;
+  background: #b91c1c;
+  color: #fff;
+  font-size: 0.78rem;
+  font-weight: 700;
 }
 .primary {
   border: none;

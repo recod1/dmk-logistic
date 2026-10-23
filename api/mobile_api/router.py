@@ -128,6 +128,7 @@ def _point_to_dict(
     point: Point,
     docs_meta: list[dict] | None = None,
     event_meta: dict[str, dict[str, str]] | None = None,
+    return_images: list[dict] | None = None,
 ) -> dict:
     date_point, point_time = planned_wall_fields(point.date_point, point.point_time)
     return {
@@ -168,6 +169,7 @@ def _point_to_dict(
         "odometer": point.odometer,
         "coordinates": {"lat": point.lat, "lng": point.lng},
         "docs_images": docs_meta or [],
+        "return_images": return_images or [],
         "manual_edits": _load_manual_edits(point),
         **stage_meta_fields(event_meta),
     }
@@ -255,8 +257,17 @@ def _route_snapshot(db: Session, route: Route) -> dict:
         "points": [
             _point_to_dict(
                 p,
-                [{"id": x.id, "content_type": x.content_type} for x in by_point.get(p.id, [])],
+                [
+                    {"id": x.id, "content_type": x.content_type}
+                    for x in by_point.get(p.id, [])
+                    if (getattr(x, "kind", None) or "docs") != "return"
+                ],
                 event_meta.get(int(p.id)),
+                [
+                    {"id": x.id, "content_type": x.content_type}
+                    for x in by_point.get(p.id, [])
+                    if (getattr(x, "kind", None) or "docs") == "return"
+                ],
             )
             for p in points
         ],
@@ -842,16 +853,7 @@ def batch_events(
                 user_id=current_user.id,
                 file_ids=event.document_file_ids,
             )
-        late_err: str | None = None
-        if late_reason_required(
-            to_status=target_status,
-            date_point=point.date_point,
-            point_time=point.point_time,
-            eta_raw=event.estimated_arrival,
-            occurred_at=_as_utc(event.occurred_at_client),
-        ) and not (event.late_reason or "").strip():
-            late_err = "Укажите причину опоздания"
-        apply_err = doc_err or late_err
+        apply_err = doc_err
 
         if apply_err:
             stored_event = RouteEvent(

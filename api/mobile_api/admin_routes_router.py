@@ -45,6 +45,7 @@ from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.logistics_contacts_router import logistics_contacts_payload
 from mobile_api.fleet_router import ensure_fleet_trailer, ensure_fleet_vehicle
 from mobile_api.point_status import effective_point_status, point_is_completed
+from mobile_api.route_incidents import INCIDENT_KINDS
 from utils.late_arrival import point_late_kind
 from utils.onec_datetime import planned_wall_fields, split_onec_wall_datetime, normalize_planned_time
 from utils.vehicle_plate import normalize_plate, require_plate
@@ -372,7 +373,16 @@ def _point_out(
         .where(PointDocumentImage.point_id == point.id)
         .order_by(PointDocumentImage.id.asc())
     ).all()
-    docs_images = [{"id": row.id, "content_type": row.content_type} for row in docs_rows]
+    docs_images = [
+        {"id": row.id, "content_type": row.content_type}
+        for row in docs_rows
+        if (getattr(row, "kind", None) or "docs") != "return"
+    ]
+    return_images = [
+        {"id": row.id, "content_type": row.content_type}
+        for row in docs_rows
+        if (getattr(row, "kind", None) or "docs") == "return"
+    ]
     date_point, point_time = planned_wall_fields(point.date_point, point.point_time)
     meta = event_meta if event_meta is not None else load_point_event_meta(db, [int(point.id)]).get(int(point.id))
     return {
@@ -413,6 +423,7 @@ def _point_out(
         "odometer": point.odometer,
         "coordinates": {"lat": point.lat, "lng": point.lng},
         "docs_images": docs_images,
+        "return_images": return_images,
         "manual_edits": _load_manual_edits(point),
         **stage_meta_fields(meta),
     }
@@ -506,6 +517,23 @@ def _last_loading_fields(point: Point | None) -> tuple[str | None, str | None, s
     return name, (date_value or None), (time_value or None)
 
 
+def _open_problem_kinds_map(db: Session, route_ids: list[str]) -> dict[str, list[str]]:
+    if not route_ids:
+        return {}
+    rows = db.execute(
+        select(RouteIncident.route_id, RouteIncident.kind).where(
+            RouteIncident.route_id.in_(route_ids),
+            RouteIncident.status == "open",
+        )
+    ).all()
+    out: dict[str, list[str]] = {}
+    for route_id, kind in rows:
+        bucket = out.setdefault(str(route_id), [])
+        if kind not in bucket:
+            bucket.append(str(kind))
+    return out
+
+
 def _route_out(
     db: Session,
     route: Route,
@@ -515,6 +543,7 @@ def _route_out(
     skip_active_point_lookup: bool = False,
     last_loading_point: Point | None = None,
     skip_last_loading_lookup: bool = False,
+    open_problem_kinds: list[str] | None = None,
 ) -> dict:
     driver = db.get(User, route.assigned_user_id) if route.assigned_user_id else None
     creator = db.get(User, route.created_by_user_id) if route.created_by_user_id else None
@@ -535,6 +564,8 @@ def _route_out(
         loading_points = [point for point in ordered if (point.type_point or "") == "loading"]
         current_last_loading = loading_points[-1] if loading_points else None
     last_loading_name, last_loading_date, last_loading_time = _last_loading_fields(current_last_loading)
+    if open_problem_kinds is None:
+        open_problem_kinds = _open_problem_kinds_map(db, [route.id]).get(route.id, [])
     place = (current_point.place_point or "").strip() if current_point else ""
     name = (current_point.point_name or "").strip() if current_point else ""
     active_date, active_time = planned_wall_fields(
@@ -578,6 +609,7 @@ def _route_out(
         "last_loading_point_name": last_loading_name,
         "last_loading_date": last_loading_date,
         "last_loading_time": last_loading_time,
+        "open_problem_kinds": open_problem_kinds or [],
         "analytics": _route_analytics(points) if include_points else None,
         "points": (
             [
@@ -1195,6 +1227,8 @@ def list_routes(
     number_auto: str | None = Query(default=None),
     driver_query: str | None = Query(default=None),
     unread_chat: bool = Query(default=False),
+    has_problem: bool = Query(default=False),
+    problem_kinds: str = Query(default=""),
     limit: int = Query(default=15, ge=1, le=100),
     offset: int = Query(default=0, ge=0),
     db: Session = Depends(get_db),
@@ -1206,6 +1240,16 @@ def list_routes(
         if not unread_ids:
             return {"items": [], "total": 0, "limit": limit, "offset": offset}
         query = query.where(Route.id.in_(unread_ids))
+    if has_problem:
+        kinds = [item.strip() for item in (problem_kinds or "").split(",") if item.strip()] or list(INCIDENT_KINDS)
+        problem_ids = db.scalars(
+            select(RouteIncident.route_id)
+            .where(RouteIncident.status == "open", RouteIncident.kind.in_(kinds))
+            .distinct()
+        ).all()
+        if not problem_ids:
+            return {"items": [], "total": 0, "limit": limit, "offset": offset}
+        query = query.where(Route.id.in_(list(problem_ids)))
     if status_filter:
         statuses = [item.strip() for item in status_filter.split(",") if item.strip()]
         if statuses:
@@ -1233,6 +1277,7 @@ def list_routes(
     route_ids = [route.id for route in routes]
     active_points = _active_points_by_route_id(db, route_ids)
     last_loading_points = _last_loading_by_route_id(db, route_ids)
+    problem_kinds_map = _open_problem_kinds_map(db, route_ids)
     return {
         "items": [
             _route_out(
@@ -1243,6 +1288,7 @@ def list_routes(
                 skip_active_point_lookup=True,
                 last_loading_point=last_loading_points.get(route.id),
                 skip_last_loading_lookup=True,
+                open_problem_kinds=problem_kinds_map.get(route.id, []),
             )
             for route in routes
         ],

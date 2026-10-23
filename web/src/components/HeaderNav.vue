@@ -47,6 +47,7 @@ const emit = defineEmits<{
     gap: 0.12rem;
     min-width: 0;
     overflow: visible;
+    flex-wrap: nowrap;
   }
 }
 .tab {
@@ -75,12 +76,17 @@ const emit = defineEmits<{
   line-height: 1;
   white-space: nowrap;
 }
-@media (min-width: 761px) and (max-width: 1500px) {
+@media (min-width: 761px) and (max-width: 1280px) {
+  .header-nav {
+    flex-wrap: wrap;
+    max-width: min(640px, 62vw);
+  }
   .label {
-    display: none;
+    font-size: 0.72rem;
   }
   .tab {
-    padding: 0.28rem 0.45rem;
+    padding: 0.22rem 0.38rem;
+    gap: 0.22rem;
   }
 }
 </style>

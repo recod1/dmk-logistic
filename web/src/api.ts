@@ -653,6 +653,8 @@ export async function listAdminRoutes(
     number_auto?: string;
     driver_query?: string;
     unread_chat?: boolean;
+    has_problem?: boolean;
+    problem_kinds?: string;
     limit?: number;
     offset?: number;
   }
@@ -675,6 +677,12 @@ export async function listAdminRoutes(
   }
   if (params?.unread_chat) {
     qs.set("unread_chat", "true");
+  }
+  if (params?.has_problem) {
+    qs.set("has_problem", "true");
+    if (params.problem_kinds) {
+      qs.set("problem_kinds", params.problem_kinds);
+    }
   }
   qs.set("limit", String(params?.limit ?? 15));
   qs.set("offset", String(params?.offset ?? 0));
@@ -1639,6 +1647,40 @@ export async function followUpRouteIncident(
     headers: { Authorization: `Bearer ${token}` },
     body: JSON.stringify({ note: note || "" })
   });
+}
+
+export async function uploadReturnPhotos(
+  token: string,
+  routeId: string,
+  incidentId: number,
+  blobs: Blob[],
+  opts?: { signal?: AbortSignal; timeoutMs?: number }
+): Promise<{ file_ids: number[] }> {
+  const fd = new FormData();
+  blobs.forEach((b, i) => {
+    fd.append("files", b, `return-${i}.jpg`);
+  });
+  const url = `${API_BASE}/v1/mobile/routes/${encodeRouteId(routeId)}/incidents/${incidentId}/photos`;
+  const timeoutMs = opts?.timeoutMs ?? 45_000;
+  const timeoutCtrl = new AbortController();
+  const timer = globalThis.setTimeout(() => timeoutCtrl.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`
+      },
+      body: fd,
+      signal: mergeAbortSignals([opts?.signal, timeoutCtrl.signal])
+    });
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(text || `HTTP ${response.status}`);
+    }
+    return (await response.json()) as { file_ids: number[] };
+  } finally {
+    globalThis.clearTimeout(timer);
+  }
 }
 
 export async function advanceReturnStage(

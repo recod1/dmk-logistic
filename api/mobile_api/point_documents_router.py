@@ -114,6 +114,47 @@ def _validate_image_content_type(content_type: str) -> str:
     return ct
 
 
+def store_point_image_bytes(
+    db: Session,
+    *,
+    point: Point,
+    user_id: int,
+    body: bytes,
+    content_type: str,
+    kind: str = "docs",
+    incident_id: int | None = None,
+) -> PointDocumentImage:
+    if len(body) > MAX_FILE_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"File too large (max {MAX_FILE_BYTES} bytes)",
+        )
+    ctype = _validate_image_content_type(content_type)
+    root = _upload_root()
+    sub = root / str(point.id)
+    sub.mkdir(parents=True, exist_ok=True)
+    ext = mimetypes.guess_extension(ctype) or ".jpg"
+    if ext == ".jpe":
+        ext = ".jpg"
+    fname = f"{uuid.uuid4().hex}{ext}"
+    full_path = sub / fname
+    _atomic_write_bytes(full_path, body)
+    _try_write_thumbnail_jpeg(full_path, body)
+    row = PointDocumentImage(
+        point_id=point.id,
+        route_id=point.route_id,
+        uploaded_by_user_id=user_id,
+        storage_path=f"{point.id}/{fname}",
+        content_type=ctype,
+        file_size=len(body),
+        kind=kind or "docs",
+        incident_id=incident_id,
+    )
+    db.add(row)
+    db.flush()
+    return row
+
+
 @router.post("/v1/mobile/points/{point_id}/documents")
 async def upload_point_documents(
     point_id: int,
@@ -150,38 +191,18 @@ async def upload_point_documents(
             detail="Documents can only be uploaded at the gates / documents stage",
         )
 
-    root = _upload_root()
-    sub = root / str(point_id)
-    sub.mkdir(parents=True, exist_ok=True)
-
     created_ids: list[int] = []
     for upload in files:
         ctype = upload.content_type or mimetypes.guess_type(upload.filename or "")[0] or "application/octet-stream"
-        ctype = _validate_image_content_type(ctype)
         body = await upload.read()
-        if len(body) > MAX_FILE_BYTES:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"File too large (max {MAX_FILE_BYTES} bytes)",
-            )
-        ext = mimetypes.guess_extension(ctype) or ".jpg"
-        if ext == ".jpe":
-            ext = ".jpg"
-        fname = f"{uuid.uuid4().hex}{ext}"
-        full_path = sub / fname
-        _atomic_write_bytes(full_path, body)
-        _try_write_thumbnail_jpeg(full_path, body)
-        rel = f"{point_id}/{fname}"
-        row = PointDocumentImage(
-            point_id=point.id,
-            route_id=point.route_id,
-            uploaded_by_user_id=current_user.id,
-            storage_path=rel,
+        row = store_point_image_bytes(
+            db,
+            point=point,
+            user_id=current_user.id,
+            body=body,
             content_type=ctype,
-            file_size=len(body),
+            kind="docs",
         )
-        db.add(row)
-        db.flush()
         created_ids.append(row.id)
 
     db.commit()

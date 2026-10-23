@@ -6,6 +6,7 @@ import { fetchPointDocumentBlob } from "../api";
 const props = defineProps<{
   token: string;
   images: Array<{ id: number; content_type: string }>;
+  label?: string;
 }>();
 
 const openingId = ref<number | null>(null);
@@ -32,7 +33,7 @@ async function openDocument(imageId: number): Promise<void> {
 
 <template>
   <div v-if="images?.length" class="docs-block">
-    <p class="label">Вложения ({{ images.length }}) — открыть по клику</p>
+    <p class="label">{{ label || "Вложения" }} ({{ images.length }}) — открыть по клику</p>
     <ul class="doc-list">
       <li v-for="(img, idx) in images" :key="img.id" class="doc-row">
         <button type="button" class="open-btn" :disabled="openingId === img.id" @click="openDocument(img.id)">
