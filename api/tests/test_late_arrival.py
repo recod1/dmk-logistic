@@ -8,6 +8,8 @@ from zoneinfo import ZoneInfo
 from utils.late_arrival import (
     apply_late_reason,
     eta_is_late,
+    last_late_reason_text,
+    late_reason_lines,
     late_reason_required,
     point_late_kind,
     registration_is_late,
@@ -112,6 +114,23 @@ class LateArrivalTests(TestCase):
         apply_late_reason(point, "  ", "Причина опоздания (регистрация)")
         self.assertEqual(point.late_reason, "")
         self.assertEqual(point.point_note, "Склад")
+
+    def test_late_reason_lines_split_same_line(self) -> None:
+        raw = "Причина опоздания (ОВП): Только что прислали задание Причина опоздания (регистрация): Поздно прислали задание"
+        self.assertEqual(
+            late_reason_lines(raw),
+            [
+                "Причина опоздания (ОВП): Только что прислали задание",
+                "Причина опоздания (регистрация): Поздно прислали задание",
+            ],
+        )
+        self.assertEqual(last_late_reason_text(raw), "Поздно прислали задание")
+
+    def test_apply_late_reason_reuses_existing_text(self) -> None:
+        point = SimpleNamespace(late_reason="Причина опоздания (ОВП): пробки", point_note="")
+        apply_late_reason(point, "", "Причина опоздания (регистрация)")
+        self.assertIn("Причина опоздания (ОВП): пробки", point.late_reason)
+        self.assertIn("Причина опоздания (регистрация): пробки", point.late_reason)
 
     def test_gates_never_require_late_reason(self) -> None:
         fact = datetime(2026, 10, 22, 19, 10, tzinfo=MOSCOW)

@@ -413,20 +413,29 @@ function toggleProblemFilter(): void {
   doSearch();
 }
 
+let problemKindSearchTimer: number | null = null;
+
 function toggleProblemKind(kind: string): void {
   const selected = new Set(filters.problem_kinds);
   if (selected.has(kind)) {
+    if (selected.size === 1) {
+      return;
+    }
     selected.delete(kind);
   } else {
     selected.add(kind);
   }
   filters.problem_kinds = PROBLEM_CHOICES.map((item) => item.kind).filter((item) => selected.has(item));
-  if (!filters.problem_kinds.length) {
-    filters.problem_kinds = PROBLEM_CHOICES.map((item) => item.kind);
+  if (!filters.has_problem) {
+    return;
   }
-  if (filters.has_problem) {
+  if (problemKindSearchTimer !== null) {
+    window.clearTimeout(problemKindSearchTimer);
+  }
+  problemKindSearchTimer = window.setTimeout(() => {
+    problemKindSearchTimer = null;
     doSearch();
-  }
+  }, 280);
 }
 
 function routeHasProblem(route: AdminRoute): boolean {
@@ -677,15 +686,19 @@ onMounted(() => {
             С проблемами
           </button>
         </div>
-        <div v-if="filters.has_problem" class="problem-kinds">
-          <label v-for="item in PROBLEM_CHOICES" :key="item.kind" class="kind-check">
-            <input
-              type="checkbox"
-              :checked="filters.problem_kinds.includes(item.kind)"
-              @change="toggleProblemKind(item.kind)"
-            />
-            {{ item.label }}
-          </label>
+        <div v-if="filters.has_problem" class="problem-kinds" role="group" aria-label="Типы проблем">
+          <button
+            v-for="item in PROBLEM_CHOICES"
+            :key="item.kind"
+            type="button"
+            class="kind-chip"
+            :class="{ active: filters.problem_kinds.includes(item.kind) }"
+            :aria-pressed="filters.problem_kinds.includes(item.kind)"
+            @click="toggleProblemKind(item.kind)"
+          >
+            <span class="kind-box" aria-hidden="true" />
+            <span class="kind-label">{{ item.label }}</span>
+          </button>
         </div>
         <div class="filters-head">
           <h2>{{ filteredTitle }}</h2>
@@ -1097,17 +1110,58 @@ onMounted(() => {
   border-color: #fecaca;
 }
 .problem-kinds {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.4rem 0.75rem;
-  margin-top: 0.45rem;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.4rem;
+  margin-top: 0.55rem;
 }
-.kind-check {
-  display: inline-flex;
+.kind-chip {
+  display: flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.45rem;
+  min-height: 42px;
+  width: 100%;
+  margin: 0;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  border-radius: 10px;
+  background: rgba(127, 29, 29, 0.18);
   color: #fecaca;
-  font-size: 0.8rem;
+  text-align: left;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+.kind-box {
+  width: 1rem;
+  height: 1rem;
+  border-radius: 4px;
+  border: 1.5px solid #f87171;
+  background: transparent;
+  flex: 0 0 auto;
+}
+.kind-label {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.kind-chip.active {
+  border-color: #ef4444;
+  background: rgba(220, 38, 38, 0.28);
+  color: #fee2e2;
+}
+.kind-chip.active .kind-box {
+  background: #ef4444;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 10'%3E%3Cpath fill='none' stroke='%23fff7ed' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round' d='M1.4 5.2 4.4 8.2 10.6 1.6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 0.7rem 0.58rem;
+  border-color: #fecaca;
+}
+@media (min-width: 900px) {
+  .problem-kinds {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
 }
 .mobile-status-label {
   display: inline-flex;
@@ -1323,7 +1377,7 @@ textarea {
 .upper {
   text-transform: uppercase;
 }
-button {
+button:not(.kind-chip):not(.unread-toggle):not(.problem-toggle) {
   border: none;
   border-radius: 10px;
   padding: 0.48rem 0.72rem;

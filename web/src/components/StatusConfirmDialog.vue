@@ -3,7 +3,7 @@ import { computed, ref, watch } from "vue";
 
 import { fromDatetimeLocalToIso } from "../datetimeLocal";
 import { datetimeLocalKey } from "../factTime";
-import { etaIsLate, registrationIsLate } from "../lateArrival";
+import { etaIsLate, lastLateReasonText, registrationIsLate } from "../lateArrival";
 
 const props = defineProps<{
   open: boolean;
@@ -22,6 +22,7 @@ const props = defineProps<{
   lateKind?: "" | "process" | "registration";
   datePoint?: string;
   pointTime?: string;
+  existingLateReason?: string;
 }>();
 
 const emit = defineEmits<{
@@ -115,7 +116,9 @@ const occurredIso = computed(() => {
   }
 });
 
-const needsLateReason = computed(() => {
+const reusedLateReason = computed(() => lastLateReasonText(props.existingLateReason));
+
+const isLateNow = computed(() => {
   if (props.allowSkip || !props.lateKind) {
     return false;
   }
@@ -127,6 +130,8 @@ const needsLateReason = computed(() => {
   }
   return false;
 });
+
+const needsLateReason = computed(() => isLateNow.value && !reusedLateReason.value);
 
 const formReady = computed(() => odometerReady.value && etaReady.value);
 
@@ -159,7 +164,7 @@ function confirm(): void {
     odometer_source: source,
     etaTime: (etaValue.value || "").trim(),
     skipped: false,
-    lateReason: lateReason.value.trim()
+    lateReason: lateReason.value.trim() || reusedLateReason.value
   });
 }
 

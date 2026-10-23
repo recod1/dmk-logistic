@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from typing import Literal
 
@@ -72,8 +73,36 @@ def late_reason_required(
     return False
 
 
+_LATE_LINE_RE = re.compile(r"(?=Причина опоздания\s*\([^)]+\):)")
+_LATE_PREFIX_RE = re.compile(r"^Причина опоздания\s*\([^)]+\):\s*")
+
+
+def late_reason_lines(raw: str | None) -> list[str]:
+    text = (raw or "").strip()
+    if not text:
+        return []
+    lines: list[str] = []
+    for chunk in re.split(r"\n+", text):
+        piece = chunk.strip()
+        if not piece:
+            continue
+        bits = [item.strip() for item in _LATE_LINE_RE.split(piece) if item.strip()]
+        lines.extend(bits or [piece])
+    return lines
+
+
+def last_late_reason_text(raw: str | None) -> str:
+    lines = late_reason_lines(raw)
+    if not lines:
+        return ""
+    cleaned = _LATE_PREFIX_RE.sub("", lines[-1]).strip()
+    return cleaned or lines[-1]
+
+
 def apply_late_reason(point, reason: str, label: str) -> None:
-    text = (reason or "").strip()
+    text = _LATE_PREFIX_RE.sub("", (reason or "").strip()).strip()
+    if not text:
+        text = last_late_reason_text(getattr(point, "late_reason", None))
     if not text:
         return
     line = f"{label}: {text}"

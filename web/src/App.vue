@@ -336,6 +336,7 @@ const statusConfirm = ref<{
   lateKind: "" | "process" | "registration";
   datePoint: string;
   pointTime: string;
+  existingLateReason: string;
 } | null>(null);
 const docsUpload = ref<{
   pointId: number;
@@ -4146,7 +4147,8 @@ function openStatusConfirm(pointId: number, mode: "driver" | "manager" = "driver
     allowSkip: mode === "manager",
     lateKind: mode === "driver" && (to === "process" || to === "registration") ? to : "",
     datePoint: current.date_point || "",
-    pointTime: current.point_time || ""
+    pointTime: current.point_time || "",
+    existingLateReason: (current.late_reason || "").trim()
   };
   if (mode === "driver" && hasNetwork() && authToken.value) {
     void (async () => {
@@ -4419,7 +4421,8 @@ async function markPointNext(
   const nextPoint = applyStageOverlayToPoint(current, toStatus, overlayFields);
   const lateReason = (options?.lateReason || "").trim();
   if (lateReason) {
-    nextPoint.late_reason = lateReason;
+    const existing = (current.late_reason || "").trim();
+    nextPoint.late_reason = existing || lateReason;
     nextPoint.late_kind = toStatus === "registration" ? "fact" : "risk";
   }
   Object.assign(current, nextPoint);
@@ -4428,7 +4431,8 @@ async function markPointNext(
     if (selectedPoint) {
       const overlaid = applyStageOverlayToPoint(selectedPoint, toStatus, overlayFields);
       if (lateReason) {
-        overlaid.late_reason = lateReason;
+        const existing = (selectedPoint.late_reason || "").trim();
+        overlaid.late_reason = existing || lateReason;
         overlaid.late_kind = toStatus === "registration" ? "fact" : "risk";
       }
       Object.assign(selectedPoint, overlaid);
@@ -6835,6 +6839,7 @@ onUnmounted(() => {
       :late-kind="statusConfirm.lateKind"
       :date-point="statusConfirm.datePoint"
       :point-time="statusConfirm.pointTime"
+      :existing-late-reason="statusConfirm.existingLateReason"
       @update:datetime-local="
         (v) => {
           if (statusConfirm) statusConfirm.datetimeLocal = v;

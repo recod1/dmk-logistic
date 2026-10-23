@@ -10,7 +10,7 @@ import { useLiveNow } from "../liveNow";
 import { stageDeltasForPoint } from "../stageDeltas";
 import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
 import { normalizePlannedTimeInput, plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
-import { lateKindClass, pointLateKind } from "../lateArrival";
+import { lateKindClass, lateReasonLines, pointLateKind } from "../lateArrival";
 import { listPointStatusLabel, nextStatus } from "../status";
 import type { RouteIncident } from "../routeIncidents";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, ManualEditMeta, PointStatus, RouteWorkflowStatus } from "../types";
@@ -954,7 +954,9 @@ function removeRoute(): void {
           </p>
           <p class="meta-line">{{ formatPlannedLine(point.date_point, point.point_time) }}</p>
           <p v-if="point.estimated_arrival" class="meta-line">Ориентировочное прибытие: {{ point.estimated_arrival }}</p>
-          <p v-if="point.late_reason" class="late-reason">Опоздание: {{ point.late_reason }}</p>
+          <div v-if="lateReasonLines(point.late_reason).length" class="late-reason">
+            <p v-for="(line, idx) in lateReasonLines(point.late_reason)" :key="idx">{{ line }}</p>
+          </div>
           <p v-if="point.point_contacts" class="meta-line">{{ point.point_contacts }}</p>
           <div v-if="editingPointId !== point.id" class="actions">
             <button class="secondary" type="button" :disabled="loading" @click="openPointEdit(point)">
@@ -1359,8 +1361,14 @@ function removeRoute(): void {
 }
 .late-reason {
   margin: 0.2rem 0 0;
+  display: grid;
+  gap: 0.2rem;
   color: #fecaca;
   font-size: 0.86rem;
+}
+.late-reason p {
+  margin: 0;
+  white-space: pre-wrap;
 }
 .return-box {
   margin-top: 0.7rem;

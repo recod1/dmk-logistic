@@ -92,3 +92,32 @@ export function lateKindClass(kind?: string | null): Record<string, boolean> {
     "late-fact": kind === "fact"
   };
 }
+
+const LATE_LINE_RE = /(?=Причина опоздания\s*\([^)]+\):)/;
+const LATE_PREFIX_RE = /^Причина опоздания\s*\([^)]+\):\s*/;
+
+export function lateReasonLines(raw?: string | null): string[] {
+  const text = (raw || "").trim();
+  if (!text) {
+    return [];
+  }
+  const lines: string[] = [];
+  for (const chunk of text.split(/\n+/)) {
+    const piece = chunk.trim();
+    if (!piece) {
+      continue;
+    }
+    const bits = piece.split(LATE_LINE_RE).map((item) => item.trim()).filter(Boolean);
+    lines.push(...(bits.length ? bits : [piece]));
+  }
+  return lines;
+}
+
+export function lastLateReasonText(raw?: string | null): string {
+  const lines = lateReasonLines(raw);
+  if (!lines.length) {
+    return "";
+  }
+  const cleaned = lines[lines.length - 1].replace(LATE_PREFIX_RE, "").trim();
+  return cleaned || lines[lines.length - 1];
+}

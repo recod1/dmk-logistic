@@ -2,7 +2,7 @@
 import { computed } from "vue";
 
 import MapsAddressLink from "./MapsAddressLink.vue";
-import { lateKindClass, pointLateKind } from "../lateArrival";
+import { lateKindClass, lateReasonLines, pointLateKind } from "../lateArrival";
 import { isPointDone, routeStatusLabel, statusLabel } from "../status";
 import { plannedScheduleDisplay } from "../plannedTime";
 import type { DriverRouteListItem, DriverShiftListItem, RouteDto } from "../types";
@@ -95,7 +95,9 @@ const canAdvance = computed(() => {
         <span v-else class="plan">Адрес не указан</span>
         <span class="plan">План: {{ plannedScheduleDisplay(activePoint.date_point, activePoint.point_time) || "—" }}</span>
         <span v-if="activePoint.estimated_arrival" class="plan">Ориентировочно: {{ activePoint.estimated_arrival }}</span>
-        <span v-if="activePoint.late_reason" class="late-reason">Опоздание: {{ activePoint.late_reason }}</span>
+        <div v-if="lateReasonLines(activePoint.late_reason).length" class="late-reason">
+          <span v-for="(line, idx) in lateReasonLines(activePoint.late_reason)" :key="idx">{{ line }}</span>
+        </div>
       </div>
 
       <button v-if="activeRoute.status === 'new'" class="primary" @click.stop="emit('acceptActiveRoute')">Принять рейс</button>
@@ -221,6 +223,8 @@ const canAdvance = computed(() => {
   font-size: 0.84rem;
 }
 .late-reason {
+  display: grid;
+  gap: 0.18rem;
   color: #fecaca;
   font-size: 0.84rem;
 }
