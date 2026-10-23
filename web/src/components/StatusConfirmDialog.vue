@@ -347,21 +347,21 @@ input {
   font-weight: 650;
 }
 .primary {
-  border: none;
-  background: linear-gradient(180deg, #3b82f6, #2563eb);
+  border: 1px solid #93c5fd;
+  background: #2563eb;
   color: #fff;
 }
 .primary:disabled {
   opacity: 0.48;
 }
 .secondary {
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: #e2e8f0;
+  border: 1px solid #60a5fa;
+  background: #1e3a5f;
+  color: #e0f2fe;
 }
 .ghost {
-  border: none;
-  background: transparent;
-  color: #94a3b8;
+  border: 1px solid #6b7c93;
+  background: #243044;
+  color: #f1f5f9;
 }
 </style>

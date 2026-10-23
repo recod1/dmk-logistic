@@ -518,9 +518,9 @@ function showRevert(pointId: number): boolean {
   min-height: 0;
 }
 .card {
-  border: 1px solid var(--border);
+  border: 1px solid #3d5270;
   border-radius: 16px;
-  background: rgba(15, 23, 42, 0.92);
+  background: #152033;
   padding: 0.8rem 0.95rem;
   box-shadow: var(--shadow-sm);
 }
@@ -719,10 +719,10 @@ small {
 }
 .secondary.wide,
 .secondary {
-  border: 1px solid var(--border-strong);
+  border: 1px solid #60a5fa;
   border-radius: 12px;
-  background: var(--surface);
-  color: #dbeafe;
+  background: #1e3a5f;
+  color: #e0f2fe;
   padding: 0.5rem 0.75rem;
   margin-top: 0.4rem;
 }
@@ -738,10 +738,10 @@ small {
   line-height: 1.35;
 }
 .ghost {
-  border: 1px solid #78350f;
+  border: 1px solid #6b7c93;
   border-radius: 12px;
-  background: #451a03;
-  color: #fed7aa;
+  background: #243044;
+  color: #f1f5f9;
   padding: 0.45rem 0.62rem;
 }
 .note {

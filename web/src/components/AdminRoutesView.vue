@@ -984,7 +984,7 @@ onMounted(() => {
   z-index: 20;
   margin: 0 -0.2rem;
   padding: 0.15rem 0.2rem 0.45rem;
-  background: rgba(3, 7, 18, 0.96);
+  background: #07111f;
   backdrop-filter: blur(12px);
 }
 .toolbar-card {
@@ -1005,9 +1005,9 @@ onMounted(() => {
   margin: 0 0 0.45rem;
 }
 .card {
-  border: 1px solid #243043;
+  border: 1px solid #3d5270;
   border-radius: 16px;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.85), rgba(2, 6, 23, 0.95));
+  background: #152033;
   box-shadow: 0 10px 28px rgba(2, 6, 23, 0.28);
   padding: 1rem;
 }
@@ -1369,36 +1369,38 @@ select,
 textarea {
   width: 100%;
   border-radius: 10px;
-  border: 1px solid #334155;
-  background: #0b1220;
+  border: 1px solid #5b7394;
+  background: #0f1a2b;
   color: #fff;
   padding: 0.5rem 0.62rem;
 }
 .upper {
   text-transform: uppercase;
 }
-button:not(.kind-chip):not(.unread-toggle):not(.problem-toggle) {
-  border: none;
+button:not(.kind-chip):not(.unread-toggle):not(.problem-toggle):not(.ghost):not(.tab-btn) {
   border-radius: 10px;
   padding: 0.48rem 0.72rem;
   color: #fff;
 }
 .primary {
-  background: #10b981;
+  background: #15803d;
+  border: 1px solid #86efac;
 }
 .secondary {
-  background: #3b82f6;
+  background: #1d4ed8;
+  border: 1px solid #93c5fd;
 }
 .danger {
-  background: #ef4444;
+  background: #dc2626;
+  border: 1px solid #fca5a5;
 }
 .danger.soft {
   background: #7f1d1d;
 }
 .ghost {
-  background: transparent;
-  border: 1px solid #334155;
-  color: #cbd5e1;
+  background: #243044;
+  border: 1px solid #6b7c93;
+  color: #f1f5f9;
 }
 @media (max-width: 760px) {
   .desktop-status {

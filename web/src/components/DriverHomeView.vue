@@ -137,9 +137,9 @@ const canAdvance = computed(() => {
   display: grid;
   gap: 0.7rem;
   padding: 1.05rem;
-  border: 1px solid var(--border);
+  border: 1px solid #3d5270;
   border-radius: 18px;
-  background: linear-gradient(180deg, rgba(17, 24, 39, 0.96), rgba(11, 18, 32, 0.92));
+  background: #152033;
   box-shadow: var(--shadow-sm);
 }
 .title-row {
@@ -276,9 +276,9 @@ const canAdvance = computed(() => {
   box-shadow: 0 10px 22px rgba(37, 99, 235, 0.24);
 }
 .secondary {
-  border: 1px solid var(--border-strong);
-  background: transparent;
-  color: #bfdbfe;
+  border: 1px solid #60a5fa;
+  background: #1e3a5f;
+  color: #e0f2fe;
 }
 .empty-state p {
   margin: 0;

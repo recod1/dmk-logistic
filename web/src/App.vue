@@ -6179,11 +6179,84 @@ function isEditableTarget(el: EventTarget | null): el is HTMLElement {
   return el.isContentEditable;
 }
 
+const headerIconsOnly = ref(false);
+const headerShiftTitle = ref(false);
+let headerFitBusy = false;
+
+function headerOverflows(): boolean {
+  const bar = topbarEl.value;
+  if (!bar || window.innerWidth <= 760) {
+    return false;
+  }
+  if (bar.scrollWidth > bar.clientWidth + 4) {
+    return true;
+  }
+  const right = bar.querySelector(".topbar-side.right") as HTMLElement | null;
+  if (right && right.scrollWidth > right.clientWidth + 4) {
+    return true;
+  }
+  const slot = bar.querySelector(".header-nav-slot") as HTMLElement | null;
+  const nav = bar.querySelector(".header-nav") as HTMLElement | null;
+  return Boolean(slot && nav && nav.scrollWidth > slot.clientWidth + 4);
+}
+
+async function syncHeaderFit(): Promise<void> {
+  if (window.innerWidth <= 760) {
+    headerIconsOnly.value = false;
+    headerShiftTitle.value = false;
+    return;
+  }
+  if (headerFitBusy) {
+    return;
+  }
+  headerFitBusy = true;
+  try {
+    await nextTick();
+    if (headerOverflows()) {
+      if (!headerIconsOnly.value) {
+        headerIconsOnly.value = true;
+        await nextTick();
+      }
+      if (headerOverflows()) {
+        headerShiftTitle.value = true;
+      }
+      return;
+    }
+    if (headerShiftTitle.value) {
+      headerShiftTitle.value = false;
+      await nextTick();
+      if (headerOverflows()) {
+        headerShiftTitle.value = true;
+        return;
+      }
+    }
+    if (headerIconsOnly.value) {
+      headerIconsOnly.value = false;
+      await nextTick();
+      if (headerOverflows()) {
+        headerIconsOnly.value = true;
+      }
+    }
+  } finally {
+    window.setTimeout(() => {
+      headerFitBusy = false;
+    }, 80);
+  }
+}
+
+watch(
+  () => [showHeaderNav.value, headerNavItems.value.length, isAuthed.value] as const,
+  () => {
+    void syncHeaderFit();
+  }
+);
+
 function syncTopbarHeight(): void {
   const height = Math.ceil(topbarEl.value?.getBoundingClientRect().height ?? 0);
   if (height > 0) {
     document.documentElement.style.setProperty("--topbar-h", `${height}px`);
   }
+  void syncHeaderFit();
 }
 
 function updateViewportVars(): void {
@@ -6370,7 +6443,11 @@ onUnmounted(() => {
       'container--chat': isChatSection
     }"
   >
-    <header ref="topbarEl" class="topbar">
+    <header
+      ref="topbarEl"
+      class="topbar"
+      :class="{ 'header-icons': headerIconsOnly, 'header-shift': headerShiftTitle }"
+    >
       <div class="topbar-side">
         <button v-if="isAuthed" class="icon-btn bell-btn" type="button" aria-label="Уведомления" @click="openNotifications">
           <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
@@ -6399,6 +6476,7 @@ onUnmounted(() => {
           <HeaderNav
             :items="headerNavItems"
             :active-id="activeBottomNavId"
+            :icons-only="headerIconsOnly"
             :chats-unread="hasUnreadChatsNav"
             :routes-unread="hasUnreadRouteChats"
             :salary-unread="hasUnreadSalary"
@@ -6992,14 +7070,17 @@ onUnmounted(() => {
   top: 0;
   z-index: 30;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) max-content;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
   align-items: center;
   gap: 0.7rem;
   margin: -0.85rem -1.5rem 0.95rem;
   padding: calc(0.55rem + env(safe-area-inset-top, 0px)) 1.5rem 0.65rem;
-  background: rgba(3, 7, 18, 0.78);
+  background: #07111f;
   backdrop-filter: blur(16px);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid #3d5270;
+}
+.topbar.header-shift {
+  grid-template-columns: auto minmax(0, 1fr) auto;
 }
 .topbar-side {
   display: flex;
@@ -7007,15 +7088,22 @@ onUnmounted(() => {
   min-width: 0;
 }
 .topbar-side.right {
+  justify-self: end;
   justify-content: flex-end;
   flex-wrap: nowrap;
   gap: 0.4rem;
-  min-width: max-content;
+  min-width: 0;
   overflow: visible;
+}
+.topbar.header-shift .topbar-side.right {
+  min-width: max-content;
 }
 .header-nav-slot {
   flex: 1 1 auto;
   min-width: 0;
+  overflow: hidden;
+}
+.topbar.header-shift .header-nav-slot {
   overflow: visible;
 }
 .topbar-center {
@@ -7046,9 +7134,9 @@ onUnmounted(() => {
 .icon-btn {
   width: 42px;
   height: 42px;
-  border: 1px solid var(--border-strong);
+  border: 1px solid #64748b;
   border-radius: 12px;
-  background: rgba(15, 23, 42, 0.9);
+  background: #1e293b;
   color: #fff;
   display: inline-flex;
   align-items: center;
@@ -7073,9 +7161,9 @@ onUnmounted(() => {
   z-index: 50;
 }
 .profile-btn {
-  border: 1px solid var(--border-strong);
+  border: 1px solid #64748b;
   border-radius: 999px;
-  background: rgba(15, 23, 42, 0.9);
+  background: #1e293b;
   color: #fff;
   padding: 0.18rem;
   display: inline-flex;
@@ -7111,9 +7199,9 @@ onUnmounted(() => {
   top: calc(100% + 0.45rem);
   z-index: 40;
   width: min(280px, 84vw);
-  border: 1px solid var(--border);
+  border: 1px solid #4b6280;
   border-radius: 16px;
-  background: rgba(11, 18, 32, 0.96);
+  background: #122033;
   backdrop-filter: blur(16px);
   padding: 0.7rem;
   display: grid;
@@ -7130,9 +7218,9 @@ onUnmounted(() => {
   font-size: 0.85rem;
 }
 .menu-item {
-  border: 1px solid var(--border);
+  border: 1px solid #4b6280;
   border-radius: 10px;
-  background: var(--surface);
+  background: #1e2d44;
   color: #fff;
   padding: 0.52rem 0.65rem;
   text-align: left;
@@ -7193,9 +7281,9 @@ onUnmounted(() => {
   gap: 0.5rem;
 }
 .confirm-actions .ghost {
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  color: #bfdbfe;
+  background: #243044;
+  border: 1px solid #64748b;
+  color: #f1f5f9;
 }
 .app-toast {
   position: fixed;
@@ -7216,13 +7304,13 @@ onUnmounted(() => {
 button {
   border: none;
   border-radius: 10px;
-  background: var(--primary-strong);
+  background: var(--btn-primary);
   color: #fff;
   padding: 0.4rem 0.7rem;
 }
 .card {
   padding: 1rem;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-strong);
   background: var(--surface);
   border-radius: var(--radius);
   box-shadow: var(--shadow-sm);

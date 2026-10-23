@@ -5,6 +5,7 @@ import NavIcon from "./NavIcon.vue";
 defineProps<{
   items: BottomNavItem[];
   activeId: BottomNavId | null;
+  iconsOnly?: boolean;
   chatsUnread?: boolean;
   routesUnread?: boolean;
   salaryUnread?: boolean;
@@ -16,13 +17,15 @@ const emit = defineEmits<{
 </script>
 
 <template>
-  <nav v-if="items.length" class="header-nav" aria-label="Разделы">
+  <nav v-if="items.length" class="header-nav" :class="{ 'icons-only': iconsOnly }" aria-label="Разделы">
     <button
       v-for="item in items"
       :key="item.id"
       type="button"
       class="tab"
       :class="{ active: item.id === activeId }"
+      :title="item.label"
+      :aria-label="item.label"
       @click="emit('select', item)"
     >
       <NavIcon
@@ -44,10 +47,9 @@ const emit = defineEmits<{
     align-items: center;
     flex-wrap: nowrap;
     justify-content: flex-end;
-    gap: 0.12rem;
+    gap: 0.2rem;
     min-width: 0;
     overflow: visible;
-    flex-wrap: nowrap;
   }
 }
 .tab {
@@ -58,16 +60,16 @@ const emit = defineEmits<{
   flex: 0 0 auto;
   white-space: nowrap;
   padding: 0.28rem 0.55rem;
-  border: 1px solid transparent;
+  border: 1px solid #4b6280;
   border-radius: 12px;
-  background: transparent;
-  color: #94a3b8;
+  background: #1e2a3d;
+  color: #e2e8f0;
   font: inherit;
 }
 .tab.active {
-  color: #93c5fd;
-  background: rgba(37, 99, 235, 0.16);
-  border-color: rgba(96, 165, 250, 0.28);
+  color: #fff;
+  background: #1d4ed8;
+  border-color: #93c5fd;
 }
 .label {
   font-size: 0.82rem;
@@ -76,17 +78,12 @@ const emit = defineEmits<{
   line-height: 1;
   white-space: nowrap;
 }
-@media (min-width: 761px) and (max-width: 1280px) {
-  .header-nav {
-    flex-wrap: wrap;
-    max-width: min(640px, 62vw);
-  }
-  .label {
-    font-size: 0.72rem;
-  }
-  .tab {
-    padding: 0.22rem 0.38rem;
-    gap: 0.22rem;
-  }
+.icons-only .label {
+  display: none;
+}
+.icons-only .tab {
+  width: 42px;
+  padding: 0;
+  justify-content: center;
 }
 </style>

@@ -1326,9 +1326,9 @@ function removeRoute(): void {
   min-width: 0;
 }
 .card {
-  border: 1px solid #243043;
+  border: 1px solid #3d5270;
   border-radius: 16px;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.85), rgba(2, 6, 23, 0.95));
+  background: #152033;
   box-shadow: 0 10px 28px rgba(2, 6, 23, 0.28);
   padding: 1rem;
 }
@@ -1683,24 +1683,25 @@ textarea {
   text-transform: uppercase;
 }
 button {
-  border: none;
   border-radius: 10px;
   padding: 0.48rem 0.72rem;
   color: #fff;
 }
 .secondary {
-  background: #3b82f6;
+  background: #1d4ed8;
+  border: 1px solid #93c5fd;
 }
 .danger {
-  background: #ef4444;
+  background: #dc2626;
+  border: 1px solid #fca5a5;
 }
 .danger.soft {
   background: #7f1d1d;
 }
 .ghost {
-  background: transparent;
-  border: 1px solid #334155;
-  color: #cbd5e1;
+  background: #243044;
+  border: 1px solid #6b7c93;
+  color: #f1f5f9;
 }
 @media (min-width: 900px) {
   .edit-grid,

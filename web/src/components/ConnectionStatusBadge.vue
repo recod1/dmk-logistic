@@ -34,9 +34,9 @@ const emit = defineEmits<{
   min-height: 22px;
   padding: 0.08rem 0.42rem 0.08rem 0.32rem;
   border-radius: 999px;
-  border: 1px solid var(--border);
-  background: rgba(15, 23, 42, 0.72);
-  color: var(--text-muted);
+  border: 1px solid #5b7394;
+  background: #1e293b;
+  color: #e2e8f0;
   font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.01em;
