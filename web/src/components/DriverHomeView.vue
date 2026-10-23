@@ -249,6 +249,7 @@ const canAdvance = computed(() => {
   min-height: 46px;
   border-radius: 12px;
   font-weight: 650;
+  box-shadow: 0 6px 14px rgba(2, 6, 23, 0.28);
 }
 .status-row {
   display: flex;
@@ -262,7 +263,7 @@ const canAdvance = computed(() => {
   flex: 0 0 auto;
   min-width: 4.4rem;
   padding: 0 0.55rem;
-  border: none;
+  border: 1px solid #fca5a5;
   border-radius: 12px;
   background: #b91c1c;
   color: #fff;
@@ -270,7 +271,7 @@ const canAdvance = computed(() => {
   font-weight: 700;
 }
 .primary {
-  border: none;
+  border: 1px solid #93c5fd;
   background: linear-gradient(180deg, #3b82f6, #2563eb);
   color: #fff;
   box-shadow: 0 10px 22px rgba(37, 99, 235, 0.24);

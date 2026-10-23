@@ -49,7 +49,7 @@ const emit = defineEmits<{
     justify-content: flex-end;
     gap: 0.2rem;
     min-width: 0;
-    overflow: visible;
+    overflow: hidden;
   }
 }
 .tab {

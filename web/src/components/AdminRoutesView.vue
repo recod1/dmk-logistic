@@ -1054,7 +1054,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.45rem;
   border: 1px dashed rgba(34, 197, 94, 0.55);
-  border-radius: 10px;
+  border-radius: 12px;
   background: rgba(34, 197, 94, 0.08);
   color: #86efac;
   padding: 0.4rem 0.75rem;
@@ -1124,7 +1124,7 @@ onMounted(() => {
   margin: 0;
   padding: 0.4rem 0.55rem;
   border: 1px solid rgba(248, 113, 113, 0.28);
-  border-radius: 10px;
+  border-radius: 12px;
   background: rgba(127, 29, 29, 0.18);
   color: #fecaca;
   text-align: left;
@@ -1378,7 +1378,7 @@ textarea {
   text-transform: uppercase;
 }
 button:not(.kind-chip):not(.unread-toggle):not(.problem-toggle):not(.ghost):not(.tab-btn) {
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 0.48rem 0.72rem;
   color: #fff;
 }

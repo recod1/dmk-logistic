@@ -679,7 +679,7 @@ small {
   flex: 0 0 auto;
   min-width: 4.4rem;
   padding: 0 0.55rem;
-  border: none;
+  border: 1px solid #fca5a5;
   border-radius: 12px;
   background: #b91c1c;
   color: #fff;
@@ -710,12 +710,13 @@ small {
   animation: pulse-dot 1.8s ease-in-out infinite;
 }
 .primary {
-  border: none;
+  border: 1px solid #93c5fd;
   border-radius: 12px;
   background: linear-gradient(180deg, #3b82f6, #2563eb);
   color: #fff;
   padding: 0.55rem 0.78rem;
   font-weight: 650;
+  box-shadow: 0 6px 14px rgba(2, 6, 23, 0.28);
 }
 .secondary.wide,
 .secondary {

@@ -6188,16 +6188,24 @@ function headerOverflows(): boolean {
   if (!bar || window.innerWidth <= 760) {
     return false;
   }
-  if (bar.scrollWidth > bar.clientWidth + 4) {
+  if (bar.scrollWidth > bar.clientWidth + 2) {
     return true;
   }
+  const center = bar.querySelector(".topbar-center") as HTMLElement | null;
+  const nav = bar.querySelector(".header-nav") as HTMLElement | null;
   const right = bar.querySelector(".topbar-side.right") as HTMLElement | null;
-  if (right && right.scrollWidth > right.clientWidth + 4) {
+  if (center && nav) {
+    const titleBox = center.getBoundingClientRect();
+    const navBox = nav.getBoundingClientRect();
+    if (navBox.left < titleBox.right + 10) {
+      return true;
+    }
+  }
+  if (right && right.scrollWidth > right.clientWidth + 2) {
     return true;
   }
   const slot = bar.querySelector(".header-nav-slot") as HTMLElement | null;
-  const nav = bar.querySelector(".header-nav") as HTMLElement | null;
-  return Boolean(slot && nav && nav.scrollWidth > slot.clientWidth + 4);
+  return Boolean(slot && nav && nav.scrollWidth > slot.clientWidth + 2);
 }
 
 async function syncHeaderFit(): Promise<void> {
@@ -7088,23 +7096,27 @@ onUnmounted(() => {
   min-width: 0;
 }
 .topbar-side.right {
-  justify-self: end;
+  width: 100%;
+  justify-self: stretch;
   justify-content: flex-end;
   flex-wrap: nowrap;
   gap: 0.4rem;
   min-width: 0;
-  overflow: visible;
+  overflow: hidden;
 }
 .topbar.header-shift .topbar-side.right {
+  width: auto;
   min-width: max-content;
+  overflow: visible;
 }
 .header-nav-slot {
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   min-width: 0;
   overflow: hidden;
 }
 .topbar.header-shift .header-nav-slot {
   overflow: visible;
+  flex: 0 0 auto;
 }
 .topbar-center {
   display: grid;
@@ -7302,11 +7314,11 @@ onUnmounted(() => {
   text-align: center;
 }
 button {
-  border: none;
-  border-radius: 10px;
+  border: 1px solid transparent;
+  border-radius: 12px;
   background: var(--btn-primary);
   color: #fff;
-  padding: 0.4rem 0.7rem;
+  padding: 0.45rem 0.85rem;
 }
 .card {
   padding: 1rem;

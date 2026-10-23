@@ -1683,7 +1683,7 @@ textarea {
   text-transform: uppercase;
 }
 button {
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 0.48rem 0.72rem;
   color: #fff;
 }

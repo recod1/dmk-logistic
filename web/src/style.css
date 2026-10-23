@@ -31,6 +31,7 @@
   --btn-danger: #dc2626;
   --radius: 14px;
   --radius-sm: 10px;
+  --radius-btn: 12px;
   --shadow: 0 10px 32px rgba(2, 6, 23, 0.42);
   --shadow-sm: 0 4px 16px rgba(2, 6, 23, 0.28);
   --focus-ring: rgba(59, 130, 246, 0.35);
@@ -103,6 +104,7 @@ select {
 button {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+  border-radius: var(--radius-btn);
   transition:
     transform 0.16s ease,
     background-color 0.16s ease,
@@ -112,6 +114,13 @@ button {
     color 0.16s ease;
 }
 
+.primary,
+.secondary,
+.ghost,
+.danger {
+  border-radius: var(--radius-btn);
+  box-shadow: 0 6px 14px rgba(2, 6, 23, 0.28);
+}
 .primary {
   background: var(--btn-primary);
   border: 1px solid #93c5fd;
