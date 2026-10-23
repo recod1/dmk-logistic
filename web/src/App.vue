@@ -330,6 +330,9 @@ const statusConfirm = ref<{
   showEta: boolean;
   etaTime: string;
   allowSkip: boolean;
+  lateKind: "" | "process" | "registration";
+  datePoint: string;
+  pointTime: string;
 } | null>(null);
 const docsUpload = ref<{
   pointId: number;
@@ -2930,7 +2933,8 @@ async function syncOutboxInBackground(): Promise<void> {
             odometer: event.odometer ?? null,
             odometer_source: event.odometer_source ?? null,
             coordinates: event.coordinates ?? null,
-            estimated_arrival: event.estimated_arrival ?? null
+            estimated_arrival: event.estimated_arrival ?? null,
+            late_reason: (event.late_reason || "").trim() || null
           };
           if (event.document_file_ids?.length) {
             payload.document_file_ids = event.document_file_ids;
@@ -2947,7 +2951,12 @@ async function syncOutboxInBackground(): Promise<void> {
           return false;
         }
         const err = item.error.toLowerCase();
-        return err.includes("invalid transition") || err.includes("unauthorized") || err.includes("forbidden");
+        return (
+          err.includes("invalid transition") ||
+          err.includes("unauthorized") ||
+          err.includes("forbidden") ||
+          err.includes("причину опоздания")
+        );
       });
       if (fatal.length) {
         removable.push(...fatal.map((item) => item.client_event_id));
@@ -4134,7 +4143,10 @@ function openStatusConfirm(pointId: number, mode: "driver" | "manager" = "driver
       mode === "driver"
         ? (current.estimated_arrival || "").trim() || plannedTimeInputValue(current.date_point, current.point_time)
         : "",
-    allowSkip: mode === "manager"
+    allowSkip: mode === "manager",
+    lateKind: mode === "driver" && (to === "process" || to === "registration") ? to : "",
+    datePoint: current.date_point || "",
+    pointTime: current.point_time || ""
   };
   if (mode === "driver" && hasNetwork() && authToken.value) {
     void (async () => {
@@ -4175,6 +4187,7 @@ async function applyManagerStatusConfirm(
     odometer_source: "manual" | "wialon" | null;
     etaTime: string;
     skipped?: boolean;
+    lateReason?: string;
   }
 ): Promise<void> {
   const routeDetails = selectedAdminRoute.value;
@@ -4247,19 +4260,12 @@ async function applyStatusConfirm(payload: {
       return;
     }
     const eta = to === "process" ? payload.etaTime : undefined;
+    const lateReason = (payload.lateReason || "").trim();
     const needsLateReason =
       (to === "process" && etaIsLate(current.date_point, current.point_time, eta)) ||
       (to === "registration" && registrationIsLate(iso, current.date_point, current.point_time));
-    if (needsLateReason) {
-      lateReasonPending.value = {
-        pointId: pending.pointId,
-        iso,
-        timeSource,
-        pressedAt: pending.pressedAtIso,
-        odometer: payload.odometer,
-        odometer_source: payload.odometer_source,
-        estimatedArrival: eta
-      };
+    if (needsLateReason && !lateReason) {
+      syncMessage.value = "Укажите причину опоздания";
       return;
     }
     await markPointNext(pending.pointId, iso, undefined, {
@@ -4267,7 +4273,8 @@ async function applyStatusConfirm(payload: {
       pressedAt: pending.pressedAtIso,
       odometer: payload.odometer,
       odometer_source: payload.odometer_source,
-      estimatedArrival: eta
+      estimatedArrival: eta,
+      lateReason
     });
   } catch (error) {
     syncMessage.value = (error as Error).message;
@@ -6812,6 +6819,11 @@ onUnmounted(() => {
       :show-eta="statusConfirm.showEta"
       :eta-time="statusConfirm.etaTime"
       :allow-skip="statusConfirm.allowSkip"
+      :initial-datetime-local="statusConfirm.initialDatetimeLocal"
+      :pressed-at-iso="statusConfirm.pressedAtIso"
+      :late-kind="statusConfirm.lateKind"
+      :date-point="statusConfirm.datePoint"
+      :point-time="statusConfirm.pointTime"
       @update:datetime-local="
         (v) => {
           if (statusConfirm) statusConfirm.datetimeLocal = v;

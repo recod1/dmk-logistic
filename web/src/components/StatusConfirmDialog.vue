@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 
+import { fromDatetimeLocalToIso } from "../datetimeLocal";
+import { datetimeLocalKey } from "../factTime";
+import { etaIsLate, registrationIsLate } from "../lateArrival";
+
 const props = defineProps<{
   open: boolean;
   nextStatusLabel: string;
   datetimeLocal: string;
+  initialDatetimeLocal?: string;
+  pressedAtIso?: string;
   showOdometer?: boolean;
   odometer?: string;
   odometerPrefillSource?: "wialon" | null;
@@ -13,6 +19,9 @@ const props = defineProps<{
   showEta?: boolean;
   etaTime?: string;
   allowSkip?: boolean;
+  lateKind?: "" | "process" | "registration";
+  datePoint?: string;
+  pointTime?: string;
 }>();
 
 const emit = defineEmits<{
@@ -24,6 +33,7 @@ const emit = defineEmits<{
       odometer_source: "manual" | "wialon" | null;
       etaTime: string;
       skipped?: boolean;
+      lateReason?: string;
     }
   ];
   "update:datetimeLocal": [value: string];
@@ -32,6 +42,7 @@ const emit = defineEmits<{
 }>();
 
 const odometerMode = ref<"ask" | "edit" | "manual">("manual");
+const lateReason = ref("");
 
 const localValue = computed({
   get: () => props.datetimeLocal,
@@ -47,6 +58,15 @@ const etaValue = computed({
   get: () => props.etaTime ?? "",
   set: (v: string) => emit("update:etaTime", v)
 });
+
+watch(
+  () => props.open,
+  (open) => {
+    if (open) {
+      lateReason.value = "";
+    }
+  }
+);
 
 watch(
   () => [props.open, props.odometerPrefillSource, props.initialOdometer, props.telemetryLoading] as const,
@@ -82,7 +102,35 @@ const etaReady = computed(() => {
   return Boolean((etaValue.value || "").trim());
 });
 
-const formReady = computed(() => odometerReady.value && etaReady.value);
+const occurredIso = computed(() => {
+  const current = localValue.value;
+  const initial = props.initialDatetimeLocal || current;
+  if (datetimeLocalKey(initial) === datetimeLocalKey(current) && props.pressedAtIso) {
+    return props.pressedAtIso;
+  }
+  try {
+    return fromDatetimeLocalToIso(current);
+  } catch {
+    return props.pressedAtIso || "";
+  }
+});
+
+const needsLateReason = computed(() => {
+  if (props.allowSkip || !props.lateKind) {
+    return false;
+  }
+  if (props.lateKind === "process") {
+    return etaIsLate(props.datePoint, props.pointTime, etaValue.value);
+  }
+  if (props.lateKind === "registration") {
+    return registrationIsLate(occurredIso.value, props.datePoint, props.pointTime);
+  }
+  return false;
+});
+
+const formReady = computed(
+  () => odometerReady.value && etaReady.value && (!needsLateReason.value || Boolean(lateReason.value.trim()))
+);
 
 function acceptWialon(): void {
   odometerMode.value = "ask";
@@ -112,7 +160,8 @@ function confirm(): void {
     odometer: odo,
     odometer_source: source,
     etaTime: (etaValue.value || "").trim(),
-    skipped: false
+    skipped: false,
+    lateReason: lateReason.value.trim()
   });
 }
 
@@ -151,7 +200,7 @@ function skip(): void {
           <p class="wialon-value">{{ odometerValue || "—" }}</p>
           <p class="hint">Данные подтянуты из Wialon. Они верны или их нужно исправить?</p>
           <div class="ask-actions">
-            <button type="button" class="primary" :disabled="!etaReady" @click="acceptWialon">Верны</button>
+            <button type="button" class="primary" :disabled="!formReady" @click="acceptWialon">Верны</button>
             <button type="button" class="secondary" @click="editWialon">Исправить</button>
           </div>
         </template>
@@ -162,6 +211,11 @@ function skip(): void {
           <small v-else class="hint">Если Wialon не ответил — введите показания вручную.</small>
         </label>
       </div>
+      <label v-if="needsLateReason" class="field">
+        Причина опоздания
+        <textarea v-model="lateReason" rows="3" maxlength="1000" placeholder="Например: пробка на МКАД" />
+        <small class="hint">Обязательно, потому что время позже плана точки.</small>
+      </label>
       <div class="actions">
         <button type="button" class="secondary" @click="emit('cancel')">Отмена</button>
         <button v-if="allowSkip" type="button" class="ghost" @click="skip">Пропустить</button>
@@ -244,6 +298,17 @@ function skip(): void {
   flex-wrap: wrap;
   gap: 0.5rem;
   margin-top: 0.55rem;
+}
+textarea {
+  border-radius: 12px;
+  border: 1px solid var(--border-strong);
+  background: var(--surface);
+  color: var(--text);
+  padding: 0.6rem 0.7rem;
+  font: inherit;
+  font-size: 16px;
+  width: 100%;
+  resize: vertical;
 }
 input[type="datetime-local"],
 input[type="time"],
