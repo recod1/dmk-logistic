@@ -6183,6 +6183,26 @@ const headerIconsOnly = ref(false);
 const headerShiftTitle = ref(false);
 let headerFitBusy = false;
 
+function measureHeaderNavWidth(): number {
+  const right = topbarEl.value?.querySelector(".topbar-side.right") as HTMLElement | null;
+  if (!right) {
+    return 56;
+  }
+  const nav = right.querySelector(".header-nav") as HTMLElement | null;
+  const profile = right.querySelector(".profile-wrap") as HTMLElement | null;
+  const navW = nav ? Math.ceil(nav.scrollWidth) : 0;
+  const profileW = profile ? Math.ceil(profile.getBoundingClientRect().width) : 0;
+  return Math.max(56, navW + profileW + 8);
+}
+
+function applyHeaderNavWidth(): void {
+  const bar = topbarEl.value;
+  if (!bar) {
+    return;
+  }
+  bar.style.setProperty("--nav-w", `${measureHeaderNavWidth()}px`);
+}
+
 function headerOverflows(): boolean {
   const bar = topbarEl.value;
   if (!bar || window.innerWidth <= 760) {
@@ -6193,25 +6213,22 @@ function headerOverflows(): boolean {
   }
   const center = bar.querySelector(".topbar-center") as HTMLElement | null;
   const nav = bar.querySelector(".header-nav") as HTMLElement | null;
-  const right = bar.querySelector(".topbar-side.right") as HTMLElement | null;
   if (center && nav) {
     const titleBox = center.getBoundingClientRect();
     const navBox = nav.getBoundingClientRect();
-    if (navBox.left < titleBox.right + 10) {
+    if (navBox.left < titleBox.right + 12) {
       return true;
     }
   }
-  if (right && right.scrollWidth > right.clientWidth + 2) {
-    return true;
-  }
-  const slot = bar.querySelector(".header-nav-slot") as HTMLElement | null;
-  return Boolean(slot && nav && nav.scrollWidth > slot.clientWidth + 2);
+  return false;
 }
 
 async function syncHeaderFit(): Promise<void> {
-  if (window.innerWidth <= 760) {
+  const bar = topbarEl.value;
+  if (!bar || window.innerWidth <= 760) {
     headerIconsOnly.value = false;
     headerShiftTitle.value = false;
+    bar?.style.removeProperty("--nav-w");
     return;
   }
   if (headerFitBusy) {
@@ -6219,32 +6236,23 @@ async function syncHeaderFit(): Promise<void> {
   }
   headerFitBusy = true;
   try {
+    headerShiftTitle.value = false;
+    headerIconsOnly.value = false;
     await nextTick();
-    if (headerOverflows()) {
-      if (!headerIconsOnly.value) {
-        headerIconsOnly.value = true;
-        await nextTick();
-      }
-      if (headerOverflows()) {
-        headerShiftTitle.value = true;
-      }
+    applyHeaderNavWidth();
+    await nextTick();
+    if (!headerOverflows()) {
       return;
     }
-    if (headerShiftTitle.value) {
-      headerShiftTitle.value = false;
-      await nextTick();
-      if (headerOverflows()) {
-        headerShiftTitle.value = true;
-        return;
-      }
+    headerIconsOnly.value = true;
+    await nextTick();
+    applyHeaderNavWidth();
+    await nextTick();
+    if (!headerOverflows()) {
+      return;
     }
-    if (headerIconsOnly.value) {
-      headerIconsOnly.value = false;
-      await nextTick();
-      if (headerOverflows()) {
-        headerIconsOnly.value = true;
-      }
-    }
+    headerShiftTitle.value = true;
+    bar.style.removeProperty("--nav-w");
   } finally {
     window.setTimeout(() => {
       headerFitBusy = false;
@@ -7078,7 +7086,7 @@ onUnmounted(() => {
   top: 0;
   z-index: 30;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(var(--nav-w, 3.5rem), 1fr) auto minmax(var(--nav-w, 3.5rem), 1fr);
   align-items: center;
   gap: 0.7rem;
   margin: -0.85rem -1.5rem 0.95rem;
@@ -7086,9 +7094,10 @@ onUnmounted(() => {
   background: #07111f;
   backdrop-filter: blur(16px);
   border-bottom: 1px solid #3d5270;
+  overflow: visible;
 }
 .topbar.header-shift {
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto minmax(0, 1fr) max-content;
 }
 .topbar-side {
   display: flex;
@@ -7101,22 +7110,16 @@ onUnmounted(() => {
   justify-content: flex-end;
   flex-wrap: nowrap;
   gap: 0.4rem;
-  min-width: 0;
-  overflow: hidden;
+  overflow: visible;
 }
 .topbar.header-shift .topbar-side.right {
   width: auto;
   min-width: max-content;
-  overflow: visible;
 }
 .header-nav-slot {
-  flex: 0 1 auto;
-  min-width: 0;
-  overflow: hidden;
-}
-.topbar.header-shift .header-nav-slot {
-  overflow: visible;
   flex: 0 0 auto;
+  min-width: 0;
+  overflow: visible;
 }
 .topbar-center {
   display: grid;
@@ -7124,6 +7127,10 @@ onUnmounted(() => {
   gap: 0.12rem;
   min-width: 0;
   overflow: hidden;
+}
+.topbar.header-shift .topbar-center {
+  justify-self: start;
+  justify-items: start;
 }
 .brand-mark {
   margin: 0;

@@ -972,7 +972,7 @@ onMounted(() => {
 @import "../lateHighlight.css";
 .admin-routes-page {
   display: grid;
-  gap: 0.9rem;
+  gap: 0.55rem;
   width: 100%;
   max-width: 1200px;
   margin: 0 auto;
@@ -983,7 +983,7 @@ onMounted(() => {
   top: var(--topbar-h, 0px);
   z-index: 20;
   margin: 0 -0.2rem;
-  padding: 0.15rem 0.2rem 0.45rem;
+  padding: 0 0.2rem 0.45rem;
   background: #07111f;
   backdrop-filter: blur(12px);
 }
@@ -1328,7 +1328,15 @@ tbody tr.has-problem td {
 .create-toggles {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.45rem;
+  align-items: stretch;
+  gap: 0.55rem;
+}
+.create-toggle {
+  min-height: 48px;
+  padding: 0.7rem 1.15rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  border-radius: 12px;
 }
 .create-grid {
   display: grid;
