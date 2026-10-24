@@ -6268,7 +6268,8 @@ watch(
 );
 
 function syncTopbarHeight(): void {
-  const height = Math.ceil(topbarEl.value?.getBoundingClientRect().height ?? 0);
+  const el = topbarEl.value;
+  const height = Math.ceil(el?.clientHeight || el?.getBoundingClientRect().height || 0);
   if (height > 0) {
     document.documentElement.style.setProperty("--topbar-h", `${height}px`);
   }
@@ -7075,6 +7076,8 @@ onUnmounted(() => {
   width: 100%;
   max-width: 100%;
   overflow-x: hidden;
+  overflow-x: clip;
+  overflow-y: visible;
 }
 .page-stage > section {
   width: 100%;

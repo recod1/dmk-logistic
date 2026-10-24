@@ -980,12 +980,17 @@ onMounted(() => {
 }
 .list-sticky {
   position: sticky;
-  top: var(--topbar-h, 0px);
+  top: 0;
   z-index: 20;
   margin: 0 -0.2rem;
   padding: 0 0.2rem 0.45rem;
   background: #07111f;
   backdrop-filter: blur(12px);
+}
+@supports (overflow: clip) {
+  .list-sticky {
+    top: var(--topbar-h, 0px);
+  }
 }
 .toolbar-card {
   padding: 0.75rem 0.9rem 0.85rem;

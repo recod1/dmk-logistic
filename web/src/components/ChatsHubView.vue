@@ -591,7 +591,7 @@ h2 {
 }
 .search-sticky {
   position: sticky;
-  top: var(--topbar-h, 0px);
+  top: 0;
   z-index: 20;
   margin: 0 -0.2rem;
   padding: 0.2rem 0.2rem 0.45rem;
@@ -599,6 +599,11 @@ h2 {
   backdrop-filter: blur(12px);
   display: grid;
   gap: 0.45rem;
+}
+@supports (overflow: clip) {
+  .search-sticky {
+    top: var(--topbar-h, 0px);
+  }
 }
 .unread-toggle {
   justify-self: start;

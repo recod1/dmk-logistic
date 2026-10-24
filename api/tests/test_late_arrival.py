@@ -11,6 +11,7 @@ from utils.late_arrival import (
     last_late_reason_text,
     late_reason_lines,
     late_reason_required,
+    point_has_delay,
     point_late_kind,
     registration_is_late,
 )
@@ -131,6 +132,35 @@ class LateArrivalTests(TestCase):
         apply_late_reason(point, "", "Причина опоздания (регистрация)")
         self.assertIn("Причина опоздания (ОВП): пробки", point.late_reason)
         self.assertIn("Причина опоздания (регистрация): пробки", point.late_reason)
+
+    def test_point_has_delay_includes_automatic_late(self) -> None:
+        risk = SimpleNamespace(
+            date_point="22.10.2026",
+            point_time="18:30",
+            estimated_arrival="19:00",
+            registration_time=None,
+            time_registration=None,
+            late_reason="",
+        )
+        on_time = SimpleNamespace(
+            date_point="22.10.2026",
+            point_time="18:30",
+            estimated_arrival="18:00",
+            registration_time=datetime(2026, 10, 22, 18, 20, tzinfo=MOSCOW),
+            time_registration=None,
+            late_reason="",
+        )
+        recorded = SimpleNamespace(
+            date_point="22.10.2026",
+            point_time="18:30",
+            estimated_arrival="18:00",
+            registration_time=datetime(2026, 10, 22, 18, 20, tzinfo=MOSCOW),
+            time_registration=None,
+            late_reason="Причина опоздания (ОВП): пробки",
+        )
+        self.assertTrue(point_has_delay(risk))
+        self.assertFalse(point_has_delay(on_time))
+        self.assertTrue(point_has_delay(recorded))
 
     def test_gates_never_require_late_reason(self) -> None:
         fact = datetime(2026, 10, 22, 19, 10, tzinfo=MOSCOW)

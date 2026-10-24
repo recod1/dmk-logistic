@@ -124,3 +124,10 @@ def point_late_kind(point) -> LateKind:
     if eta and eta_is_late(date_point, point_time, eta) and registration is None:
         return "risk"
     return ""
+
+
+def point_has_delay(point) -> bool:
+    """Automatic lateness or a stored reason — not only a driver-pressed delay incident."""
+    if (getattr(point, "late_reason", None) or "").strip():
+        return True
+    return bool(point_late_kind(point))

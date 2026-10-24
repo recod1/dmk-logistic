@@ -46,7 +46,7 @@ from mobile_api.logistics_contacts_router import logistics_contacts_payload
 from mobile_api.fleet_router import ensure_fleet_trailer, ensure_fleet_vehicle
 from mobile_api.point_status import effective_point_status, point_is_completed
 from mobile_api.route_incidents import INCIDENT_KINDS
-from utils.late_arrival import point_late_kind
+from utils.late_arrival import point_has_delay, point_late_kind
 from utils.onec_datetime import planned_wall_fields, split_onec_wall_datetime, normalize_planned_time
 from utils.vehicle_plate import normalize_plate, require_plate
 from utils.route_point_changes import changed_text as _changed_text, diff_route_points
@@ -532,6 +532,21 @@ def _open_problem_kinds_map(db: Session, route_ids: list[str]) -> dict[str, list
         if kind not in bucket:
             bucket.append(str(kind))
     return out
+
+
+def _auto_late_route_ids(db: Session) -> set[str]:
+    rows = db.execute(
+        select(RoutePoint.route_id, Point)
+        .join(Point, Point.id == RoutePoint.point_id)
+        .join(Route, Route.id == RoutePoint.route_id)
+        .where(
+            or_(
+                Route.status.in_(["new", "process"]),
+                Point.late_reason != "",
+            )
+        )
+    ).all()
+    return {str(route_id) for route_id, point in rows if point_has_delay(point)}
 
 
 def _route_out(
@@ -1242,11 +1257,16 @@ def list_routes(
         query = query.where(Route.id.in_(unread_ids))
     if has_problem:
         kinds = [item.strip() for item in (problem_kinds or "").split(",") if item.strip()] or list(INCIDENT_KINDS)
-        problem_ids = db.scalars(
-            select(RouteIncident.route_id)
-            .where(RouteIncident.status == "open", RouteIncident.kind.in_(kinds))
-            .distinct()
-        ).all()
+        problem_ids = {
+            str(item)
+            for item in db.scalars(
+                select(RouteIncident.route_id)
+                .where(RouteIncident.status == "open", RouteIncident.kind.in_(kinds))
+                .distinct()
+            ).all()
+        }
+        if "delay" in kinds:
+            problem_ids.update(_auto_late_route_ids(db))
         if not problem_ids:
             return {"items": [], "total": 0, "limit": limit, "offset": offset}
         query = query.where(Route.id.in_(list(problem_ids)))
