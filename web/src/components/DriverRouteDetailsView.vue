@@ -16,7 +16,7 @@ import {
   statusLabel
 } from "../status";
 import { lateKindClass, lateReasonLines, pointLateKind } from "../lateArrival";
-import { plannedScheduleDisplay } from "../plannedTime";
+import { formatEstimatedArrival, plannedScheduleDisplay } from "../plannedTime";
 import { RETURN_WARNING, type RouteIncident } from "../routeIncidents";
 import type { RouteDto } from "../types";
 
@@ -310,7 +310,7 @@ function showRevert(pointId: number): boolean {
               <MapsAddressLink :address="point.place_point" />
             </p>
             <small>{{ plannedScheduleDisplay(point.date_point, point.point_time) }}</small>
-            <p v-if="point.estimated_arrival" class="eta">Ориентировочное прибытие: {{ point.estimated_arrival }}</p>
+            <p v-if="point.estimated_arrival" class="eta">Ориентировочное прибытие: {{ formatEstimatedArrival(point.estimated_arrival, point.date_point, point.point_time) }}</p>
             <div v-if="lateReasonLines(point.late_reason).length" class="late-reason">
               <p v-for="(line, idx) in lateReasonLines(point.late_reason)" :key="idx">{{ line }}</p>
             </div>

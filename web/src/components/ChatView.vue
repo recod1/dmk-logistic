@@ -319,7 +319,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <section class="chat-wrap">
+  <section class="chat-wrap" :class="{ readonly: !canSend }">
     <div class="chrome-top">
       <header class="head-row">
         <button class="ghost" type="button" @click="emit('back')">← Назад</button>
@@ -383,7 +383,8 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <footer class="composer">
+    <p v-if="!canSend" class="readonly-note">Рассылка администратора. Ответы недоступны.</p>
+    <footer v-else class="composer">
       <input ref="fileInputRef" type="file" multiple class="hidden-file" @change="onPickFiles" />
       <p v-if="pickedFiles.length" class="picked-hint">К отправке: {{ pickedFiles.length }} фото. Можно вставить ещё из буфера.</p>
       <div v-if="emojiOpen" class="emoji-panel" role="list">
@@ -434,6 +435,19 @@ onUnmounted(() => {
   color: #e7edf4;
 }
 
+.chat-wrap.readonly {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+.readonly-note {
+  grid-row: 3;
+  margin: 0;
+  padding: 0.7rem 0.85rem calc(0.7rem + env(safe-area-inset-bottom, 0px));
+  text-align: center;
+  color: #94a3b8;
+  font-size: 0.88rem;
+  background: #17212b;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
 .chrome-top {
   grid-row: 1;
   min-width: 0;

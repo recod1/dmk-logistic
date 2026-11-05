@@ -176,6 +176,8 @@ def build_point_status_changed_notifications(
             message = f"{message} · ОВП {eta}"
             payload["estimated_arrival"] = eta
             payload["ovp"] = eta
+            payload["date_point"] = (getattr(point, "date_point", None) or "").strip()
+            payload["point_time"] = (getattr(point, "point_time", None) or "").strip()
     late_kind = point_late_kind(point)
     if late_kind:
         payload["late_kind"] = late_kind

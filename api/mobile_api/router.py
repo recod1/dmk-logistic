@@ -29,7 +29,7 @@ from mobile_api.point_status import effective_point_status, point_is_completed
 from mobile_api.time_formatting import format_dt_for_app
 from mobile_api.roles import role_label_ru
 from utils.late_arrival import apply_late_reason, late_reason_required, point_late_kind
-from utils.onec_datetime import normalize_planned_time, planned_wall_fields
+from utils.onec_datetime import format_estimated_arrival, planned_wall_fields
 from services.wialon_service import (
     WIALON_ENABLED,
     get_vehicle_location_data,
@@ -886,7 +886,7 @@ def batch_events(
 
         applied, error = _try_apply_point_status(point, target_status, event.occurred_at_client)
         if applied and target_status == "process":
-            eta = normalize_planned_time(event.estimated_arrival or "")
+            eta = format_estimated_arrival(event.estimated_arrival, point.date_point, point.point_time)
             point.estimated_arrival = eta
             if late_reason_required(
                 to_status="process",

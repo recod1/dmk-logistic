@@ -16,6 +16,7 @@ export type ChatRoomListItem = {
   last_message_user_id?: number | null;
   last_message_read?: boolean;
   last_message_delivered?: boolean;
+  can_send?: boolean;
 };
 
 export type UserListItem = {

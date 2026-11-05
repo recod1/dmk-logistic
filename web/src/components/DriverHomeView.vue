@@ -4,7 +4,7 @@ import { computed } from "vue";
 import MapsAddressLink from "./MapsAddressLink.vue";
 import { lateKindClass, lateReasonLines, pointLateKind } from "../lateArrival";
 import { isPointDone, routeStatusLabel, statusLabel } from "../status";
-import { plannedScheduleDisplay } from "../plannedTime";
+import { formatEstimatedArrival, plannedScheduleDisplay } from "../plannedTime";
 import type { DriverRouteListItem, DriverShiftListItem, RouteDto } from "../types";
 
 const props = defineProps<{
@@ -94,7 +94,7 @@ const canAdvance = computed(() => {
         </span>
         <span v-else class="plan">Адрес не указан</span>
         <span class="plan">План: {{ plannedScheduleDisplay(activePoint.date_point, activePoint.point_time) || "—" }}</span>
-        <span v-if="activePoint.estimated_arrival" class="plan">Ориентировочно: {{ activePoint.estimated_arrival }}</span>
+        <span v-if="activePoint.estimated_arrival" class="plan">Ориентировочно: {{ formatEstimatedArrival(activePoint.estimated_arrival, activePoint.date_point, activePoint.point_time) }}</span>
         <div v-if="lateReasonLines(activePoint.late_reason).length" class="late-reason">
           <span v-for="(line, idx) in lateReasonLines(activePoint.late_reason)" :key="idx">{{ line }}</span>
         </div>

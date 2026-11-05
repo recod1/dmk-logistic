@@ -64,7 +64,7 @@ watch(
   () => props.open,
   (open) => {
     if (open) {
-      lateReason.value = "";
+      lateReason.value = lastLateReasonText(props.existingLateReason);
     }
   }
 );
@@ -131,9 +131,11 @@ const isLateNow = computed(() => {
   return false;
 });
 
-const needsLateReason = computed(() => isLateNow.value && !reusedLateReason.value);
+const needsLateReason = computed(() => isLateNow.value);
 
-const formReady = computed(() => odometerReady.value && etaReady.value);
+const formReady = computed(
+  () => odometerReady.value && etaReady.value && (!needsLateReason.value || Boolean(lateReason.value.trim()))
+);
 
 function acceptWialon(): void {
   odometerMode.value = "ask";
@@ -193,8 +195,8 @@ function skip(): void {
         <input v-model="localValue" type="datetime-local" step="60" />
       </label>
       <label v-if="showEta" class="field">
-        Ориентировочное время прибытия
-        <input v-model="etaValue" type="time" step="60" lang="ru" />
+        Ориентировочные дата и время прибытия
+        <input v-model="etaValue" type="datetime-local" step="60" />
       </label>
       <div v-if="showOdometer" class="odo-block">
         <p class="field-label">Одометр</p>
@@ -216,8 +218,8 @@ function skip(): void {
       </div>
       <label v-if="needsLateReason" class="field">
         Причина опоздания
-        <textarea v-model="lateReason" rows="3" maxlength="1000" placeholder="Например: пробка на МКАД" />
-        <small class="hint">Если есть причина — укажите. Этап сохранится в любом случае.</small>
+        <textarea v-model="lateReason" rows="3" maxlength="1000" required placeholder="Например: пробка на МКАД" />
+        <small class="hint">Без причины этап не сохранится.</small>
       </label>
       <div class="actions">
         <button type="button" class="secondary" @click="emit('cancel')">Отмена</button>

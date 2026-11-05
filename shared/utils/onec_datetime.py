@@ -190,6 +190,27 @@ def normalize_planned_date(raw: object | None) -> str:
     return date_s
 
 
+def format_estimated_arrival(
+    raw: object | None,
+    date_point: object | None = None,
+    point_time: object | None = None,
+) -> str:
+    """Store ОВП as 'dd.MM.yyyy HH:mm', filling the date from the point plan when only a clock is given."""
+    text = coerce_onec_datetime_input(raw)
+    date_s, time_s = planned_wall_fields(raw)
+    if not _DATE_DMY.search(text) and not _DATE_ISO.search(text):
+        date_s = ""
+    if not time_s:
+        time_s = normalize_planned_time(raw)
+    if not time_s:
+        return ""
+    if not date_s:
+        date_s, _ = planned_wall_fields(date_point, point_time)
+    if date_s and (_DATE_DMY.search(date_s) or _DATE_ISO.search(date_s)):
+        return f"{date_s} {time_s}"
+    return time_s
+
+
 def normalize_planned_time(raw: object | None) -> str:
     _, time_s = split_onec_wall_datetime(raw)
     if time_s:

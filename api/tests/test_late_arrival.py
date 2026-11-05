@@ -27,6 +27,8 @@ class LateArrivalTests(TestCase):
     def test_eta_after_plan_is_late(self) -> None:
         self.assertTrue(eta_is_late("22.10.2026", "18:30", "18:31"))
         self.assertTrue(eta_is_late("22.10.2026", "18:30", "19:00"))
+        self.assertTrue(eta_is_late("22.10.2026", "18:30", "22.10.2026 19:00"))
+        self.assertTrue(eta_is_late("22.10.2026", "18:30", "23.10.2026 08:00"))
 
     def test_no_eta_is_not_late(self) -> None:
         self.assertFalse(eta_is_late("22.10.2026", "18:30", ""))

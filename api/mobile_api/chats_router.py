@@ -179,6 +179,38 @@ def ensure_driver_system_rooms(db: Session, driver: User) -> None:
             db.rollback()
 
 
+def _room_has_driver_role(db: Session, room_id: int) -> bool:
+    count = db.scalar(
+        select(func.count())
+        .select_from(ChatRoomRoleMember)
+        .where(ChatRoomRoleMember.room_id == room_id, ChatRoomRoleMember.role_code == RoleCode.DRIVER.value)
+    )
+    return bool(count)
+
+
+def _driver_broadcast_room_ids(db: Session, room_ids: list[int]) -> set[int]:
+    if not room_ids:
+        return set()
+    return {
+        int(room_id)
+        for room_id in db.scalars(
+            select(ChatRoomRoleMember.room_id).where(
+                ChatRoomRoleMember.room_id.in_(room_ids),
+                ChatRoomRoleMember.role_code == RoleCode.DRIVER.value,
+            )
+        ).all()
+    }
+
+
+def _room_can_send(user: User, room_id: int, driver_broadcast_ids: set[int]) -> bool:
+    return not (_is_driver_role(user) and int(room_id) in driver_broadcast_ids)
+
+
+def _assert_room_can_send(db: Session, user: User, room: ChatRoom) -> None:
+    if _is_driver_role(user) and _room_has_driver_role(db, int(room.id)):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Ответы в рассылке недоступны")
+
+
 def _assert_room_access(db: Session, user: User, room: ChatRoom) -> None:
     # Admins can access everything
     try:
@@ -248,6 +280,11 @@ def _room_out(db: Session, room: ChatRoom, current_user: User, unread_by_room: d
         "last_message_user_id": last_user_id,
         "last_message_read": last_read,
         "last_message_delivered": last_delivered,
+        "can_send": _room_can_send(
+            current_user,
+            int(room.id),
+            {int(room.id)} if _is_driver_role(current_user) and _room_has_driver_role(db, int(room.id)) else set(),
+        ),
         "created_at": room.created_at.isoformat() if isinstance(room.created_at, datetime) else str(room.created_at),
     }
 
@@ -284,6 +321,7 @@ def _rooms_list_out(db: Session, rooms: list[ChatRoom], current_user: User) -> l
         )
     ).all()
     last_by_room = {int(msg.room_id): msg for msg in last_msgs}
+    driver_broadcast_ids = _driver_broadcast_room_ids(db, room_ids) if _is_driver_role(current_user) else set()
     author_ids = {int(msg.user_id) for msg in last_msgs}
     authors = (
         {int(user.id): user for user in db.scalars(select(User).where(User.id.in_(author_ids))).all()}
@@ -325,6 +363,7 @@ def _rooms_list_out(db: Session, rooms: list[ChatRoom], current_user: User) -> l
                 "last_message_user_id": last_user_id,
                 "last_message_read": last_read,
                 "last_message_delivered": last_delivered,
+                "can_send": _room_can_send(current_user, int(room.id), driver_broadcast_ids),
                 "created_at": room.created_at.isoformat() if isinstance(room.created_at, datetime) else str(room.created_at),
             }
         )
@@ -683,6 +722,7 @@ def send_room_message(
     if room is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     _assert_room_access(db, current_user, room)
+    _assert_room_can_send(db, current_user, room)
     msg = ChatMessage(room_id=room_id, user_id=current_user.id, text=payload.text.strip())
     db.add(msg)
     db.commit()
@@ -708,6 +748,7 @@ async def send_room_attachments(
     if room is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
     _assert_room_access(db, current_user, room)
+    _assert_room_can_send(db, current_user, room)
     if not files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files")
     if len(files) > MAX_CHAT_FILES:

@@ -36,6 +36,15 @@ export function fromDatetimeLocalToIso(local: string): string {
   return deviceLocal.toISOString();
 }
 
+/** Значение datetime-local → «дд.мм.гггг чч:мм». */
+export function datetimeLocalToRu(local?: string | null): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec((local || "").trim());
+  if (!match) {
+    return (local || "").trim();
+  }
+  return `${match[3]}.${match[2]}.${match[1]} ${match[4]}:${match[5]}`;
+}
+
 /** Преобразует отображаемое «дд.мм.гггг чч:мм» в значение datetime-local. */
 export function displayRuToDatetimeLocal(value?: string | null): string {
   if (!value) {

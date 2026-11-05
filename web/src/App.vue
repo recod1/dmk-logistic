@@ -179,11 +179,10 @@ import {
 import { DRIVER_PRESENCE_SYNC_TAG, reportPresenceFromSession } from "./driverPresence";
 import { DRIVER_PREFETCH_SYNC_TAG, persistPrefetchPayload, prefetchAssignedRoutesFromSession, routeToListItem } from "./offlinePrefetch";
 import { applyLatestAppVersion } from "./appUpdate";
-import { fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
+import { datetimeLocalToRu, displayRuToDatetimeLocal, fromDatetimeLocalToIso, toDatetimeLocalValue } from "./datetimeLocal";
 import { datetimeLocalKey } from "./factTime";
 import { readDeviceCoordinates } from "./deviceLocation";
-import { plannedTimeInputValue } from "./plannedTime";
-import { etaIsLate, registrationIsLate } from "./lateArrival";
+import { plannedDateInputValue, plannedTimeInputValue } from "./plannedTime";
 import { prepareDocumentImageBlobs } from "./imageUploadPrep";
 import { parseChatDeliveryHint } from "./chatDeliveryBg";
 import { notificationKind } from "./notificationKinds";
@@ -397,7 +396,9 @@ let chatWsBackoffMs = 4000;
 let realtimeSocketsAllowed = false;
 
 // Generic chats hub
-const chatsRooms = ref<Array<{ id: number; kind: "direct" | "group"; title: string; unread_count?: number }>>([]);
+const chatsRooms = ref<
+  Array<{ id: number; kind: "direct" | "group"; title: string; unread_count?: number; can_send?: boolean }>
+>([]);
 const chatsUsers = ref<Array<{ id: number; login: string; full_name: string | null; role_code: string; role_label: string }>>([]);
 const chatsLoading = ref(false);
 const chatsError = ref("");
@@ -428,6 +429,7 @@ const adminChatRoomsList = ref<
 >([]);
 const adminChatRoomsLoading = ref(false);
 const chatRoomId = ref<number | null>(null);
+const chatRoomCanSend = ref(true);
 const chatRoomTitle = ref<string>("");
 const chatRoomMessages = ref<any[]>([]);
 const chatRoomLoading = ref(false);
@@ -4099,6 +4101,29 @@ async function doAcceptRoute(routeId?: string): Promise<void> {
   void syncOutboxInBackground();
 }
 
+function etaDatetimeLocalForPoint(point: {
+  estimated_arrival?: string | null;
+  date_point?: string | null;
+  point_time?: string | null;
+}): string {
+  const existing = (point.estimated_arrival || "").trim();
+  const fromRu = displayRuToDatetimeLocal(existing);
+  if (fromRu) {
+    return fromRu;
+  }
+  const timeOnly = /^(\d{1,2}):(\d{2})/.exec(existing);
+  const dateIso = plannedDateInputValue(existing) || plannedDateInputValue(point.date_point, point.point_time);
+  const timeHm = timeOnly
+    ? `${String(Number(timeOnly[1])).padStart(2, "0")}:${timeOnly[2]}`
+    : plannedTimeInputValue(point.date_point, point.point_time);
+  const planned = dateIso && timeHm ? `${dateIso}T${timeHm}` : "";
+  const now = toDatetimeLocalValue(new Date());
+  if (planned && now > planned) {
+    return now;
+  }
+  return planned || now;
+}
+
 function openStatusConfirm(pointId: number, mode: "driver" | "manager" = "driver"): void {
   if (mode === "driver" && !isDriver.value) {
     return;
@@ -4140,10 +4165,7 @@ function openStatusConfirm(pointId: number, mode: "driver" | "manager" = "driver
     odometerPrefillSource: null,
     telemetryLoading: true,
     showEta: mode === "driver" && to === "process",
-    etaTime:
-      mode === "driver"
-        ? (current.estimated_arrival || "").trim() || plannedTimeInputValue(current.date_point, current.point_time)
-        : "",
+    etaTime: mode === "driver" ? etaDatetimeLocalForPoint(current) : "",
     allowSkip: mode === "manager",
     lateKind: mode === "driver" && (to === "process" || to === "registration") ? to : "",
     datePoint: current.date_point || "",
@@ -4262,7 +4284,7 @@ async function applyStatusConfirm(payload: {
       };
       return;
     }
-    const eta = to === "process" ? payload.etaTime : undefined;
+    const eta = to === "process" ? datetimeLocalToRu(payload.etaTime) || payload.etaTime.trim() : undefined;
     const lateReason = (payload.lateReason || "").trim();
     await markPointNext(pending.pointId, iso, undefined, {
       timeSource,
@@ -4387,29 +4409,7 @@ async function markPointNext(
 
   const occurredAt = occurredAtOverride ?? new Date().toISOString();
   const pressedAt = options?.pressedAt || occurredAt;
-  const coords = await readDeviceCoordinates();
   const eta = (options?.estimatedArrival || "").trim();
-  const event: EventPayload = {
-    client_event_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-    occurred_at_client: occurredAt,
-    pressed_at_client: pressedAt,
-    point_id: pointId,
-    to_status: toStatus,
-    time_source: options?.timeSource ?? "device",
-    odometer: (options?.odometer || "").trim() || null,
-    odometer_source: options?.odometer_source ?? null,
-    coordinates: coords ? { lat: coords.lat, lng: coords.lng } : null,
-    estimated_arrival: toStatus === "process" ? eta || null : null,
-    late_reason: (options?.lateReason || "").trim() || null
-  };
-  if (toStatus === "docs" && docsAttach) {
-    if ("fileIds" in docsAttach) {
-      event.document_file_ids = docsAttach.fileIds;
-    } else {
-      event.document_local_keys = docsAttach.localKeys;
-    }
-  }
-
   const overlayFields = {
     time: occurredAt,
     pressed_at: pressedAt,
@@ -4443,6 +4443,27 @@ async function markPointNext(
     previous_status: fromStatus
   });
   await persistDriverRoute(route.value);
+  const coords = await readDeviceCoordinates(2000, { enableHighAccuracy: false, maximumAge: 60_000 });
+  const event: EventPayload = {
+    client_event_id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+    occurred_at_client: occurredAt,
+    pressed_at_client: pressedAt,
+    point_id: pointId,
+    to_status: toStatus,
+    time_source: options?.timeSource ?? "device",
+    odometer: (options?.odometer || "").trim() || null,
+    odometer_source: options?.odometer_source ?? null,
+    coordinates: coords ? { lat: coords.lat, lng: coords.lng } : null,
+    estimated_arrival: toStatus === "process" ? eta || null : null,
+    late_reason: (options?.lateReason || "").trim() || null
+  };
+  if (toStatus === "docs" && docsAttach) {
+    if ("fileIds" in docsAttach) {
+      event.document_file_ids = docsAttach.fileIds;
+    } else {
+      event.document_local_keys = docsAttach.localKeys;
+    }
+  }
   await addOutboxEvent({
     ...event,
     device_id: getDeviceId(),
@@ -5062,6 +5083,10 @@ async function openChatRoom(roomId: number, titleHint?: string): Promise<void> {
   roomUnreadBump.value = nextBump;
   chatRoomId.value = roomId;
   chatRoomTitle.value = titleHint || `#${roomId}`;
+  const fromHub = chatsRooms.value.find((room) => room.id === roomId);
+  const fromLogist = logisticDriverChatRooms.value.find((row) => row.room.id === roomId)?.room;
+  const fromAcc = accountantDriverChatRooms.value.find((row) => row.room.id === roomId)?.room;
+  chatRoomCanSend.value = (fromHub?.can_send ?? fromLogist?.can_send ?? fromAcc?.can_send) !== false;
   pushSection("chat_room");
   await refreshChatRoom();
   startRoomChatPolling();
@@ -5938,7 +5963,7 @@ async function refreshChatRoom(options?: { silent?: boolean }): Promise<void> {
 }
 
 async function sendChatRoom(text: string): Promise<void> {
-  if (!authToken.value || !chatRoomId.value) return;
+  if (!authToken.value || !chatRoomId.value || !chatRoomCanSend.value) return;
   const roomId = chatRoomId.value;
   const trimmed = text.trim();
   if (!trimmed) return;
@@ -5957,7 +5982,11 @@ async function sendChatRoom(text: string): Promise<void> {
       return;
     }
     if (!isOfflineLikeError(error)) {
-      chatRoomError.value = (error as Error).message;
+      const message = (error as Error).message;
+      if (/рассылк/i.test(message) || /403/.test(message)) {
+        chatRoomCanSend.value = false;
+      }
+      chatRoomError.value = message;
       return;
     }
   }
@@ -5978,7 +6007,7 @@ async function sendChatRoom(text: string): Promise<void> {
 }
 
 async function uploadChatRoomFiles(payload: { text: string; files: File[] }): Promise<void> {
-  if (!authToken.value || !chatRoomId.value) return;
+  if (!authToken.value || !chatRoomId.value || !chatRoomCanSend.value) return;
   if (!payload.files.length) return;
   if (!hasNetwork()) {
     chatRoomError.value = "Файлы можно отправить только при сети. Текст без вложения поставьте в очередь отдельно.";
@@ -6775,7 +6804,7 @@ onUnmounted(() => {
         :items="chatRoomMessages"
         :loading="chatRoomLoading"
         :error="chatRoomError"
-        :can-send="Boolean(isAuthed)"
+        :can-send="Boolean(isAuthed) && chatRoomCanSend"
         :current-user-id="authUser?.id ?? null"
         @back="closeChatRoomToHub"
         @send="sendChatRoom"

@@ -1,6 +1,9 @@
 export type DeviceCoords = { lat: number; lng: number };
 
-export async function readDeviceCoordinates(timeoutMs = 8000): Promise<DeviceCoords | null> {
+export async function readDeviceCoordinates(
+  timeoutMs = 8000,
+  options?: { enableHighAccuracy?: boolean; maximumAge?: number }
+): Promise<DeviceCoords | null> {
   if (typeof navigator === "undefined" || !navigator.geolocation) {
     return null;
   }
@@ -21,7 +24,11 @@ export async function readDeviceCoordinates(timeoutMs = 8000): Promise<DeviceCoo
         window.clearTimeout(timer);
         resolve(null);
       },
-      { enableHighAccuracy: true, timeout: timeoutMs, maximumAge: 0 }
+      {
+        enableHighAccuracy: options?.enableHighAccuracy ?? true,
+        timeout: timeoutMs,
+        maximumAge: options?.maximumAge ?? 0
+      }
     );
   });
 }

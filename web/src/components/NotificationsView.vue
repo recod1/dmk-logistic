@@ -5,6 +5,7 @@ import type { NotificationPrefs } from "../api";
 import { formatNotificationReceivedAt } from "../factTime";
 import { NOTIFICATION_KIND_LABELS, notificationKind, visibleNotificationKindTabs, type NotificationKind } from "../notificationKinds";
 import { lateKindClass } from "../lateArrival";
+import { formatEstimatedArrival } from "../plannedTime";
 import type { NotificationDto } from "../types";
 
 const props = defineProps<{
@@ -196,7 +197,9 @@ function formatExtra(item: NotificationDto): string {
   }
   const ovp = (item.payload?.ovp || item.payload?.estimated_arrival || "").toString().trim();
   if (ovp && item.event_type === "point_status_changed") {
-    parts.push(`ОВП: ${ovp}`);
+    const pointDate = (item.payload?.date_point || "").toString();
+    const pointTime = (item.payload?.point_time || "").toString();
+    parts.push(`ОВП: ${formatEstimatedArrival(ovp, pointDate, pointTime)}`);
   }
   const lateKind = notificationLateKind(item);
   if (lateKind === "risk") parts.push("Риск опоздания");
@@ -293,8 +296,10 @@ function formatExtra(item: NotificationDto): string {
   position: sticky;
   top: 0;
   z-index: 20;
-  margin: 0 -0.2rem;
-  padding: 0.2rem 0.2rem 0.4rem;
+  margin: 0;
+  padding: 0.35rem 0.1rem 0.5rem;
+  box-sizing: border-box;
+  overflow: visible;
   background: rgba(3, 7, 18, 0.96);
   backdrop-filter: blur(12px);
 }
@@ -373,11 +378,12 @@ function formatExtra(item: NotificationDto): string {
 }
 @media (max-width: 760px) {
   .notifications-wrap {
-    margin-top: -0.85rem;
+    margin-top: -0.55rem;
     gap: 0.4rem;
+    padding-inline: 0;
   }
   .head-sticky {
-    padding: 0.4rem 0.1rem 0.45rem;
+    padding: 0.45rem 0.05rem 0.5rem;
   }
   .page-heading {
     display: none;
@@ -387,23 +393,30 @@ function formatExtra(item: NotificationDto): string {
   }
   .head-actions {
     width: 100%;
-    flex-wrap: nowrap;
-    gap: 0.3rem;
+    flex-wrap: wrap;
+    gap: 0.35rem;
   }
   .head-actions button {
-    flex: 1 1 0;
-    min-width: 0;
-    min-height: 34px;
-    padding: 0.32rem 0.28rem;
-    font-size: 0.72rem;
-    line-height: 1.15;
+    flex: 1 1 calc(50% - 0.35rem);
+    min-width: 6.4rem;
+    min-height: 38px;
+    padding: 0.4rem 0.45rem;
+    font-size: 0.78rem;
+    line-height: 1.2;
     white-space: normal;
   }
+  .kind-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.35rem;
+  }
   .kind-btn {
-    flex: 1 1 0;
+    width: 100%;
     min-width: 0;
+    min-height: 38px;
     white-space: normal;
     line-height: 1.2;
+    padding: 0.4rem 0.45rem;
   }
 }
 .list {

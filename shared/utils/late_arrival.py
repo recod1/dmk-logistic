@@ -19,8 +19,14 @@ def _aware(value: datetime, fallback_tz) -> datetime:
 
 
 def eta_datetime(date_point: str | None, point_time: str | None, eta_raw: str | None) -> datetime | None:
+    eta_text = (eta_raw or "").strip()
+    if not eta_text:
+        return None
+    stamped = planned_wall_datetime(eta_text)
+    if stamped is not None:
+        return stamped
     planned = planned_wall_datetime(date_point, point_time)
-    eta = normalize_planned_time(eta_raw)
+    eta = normalize_planned_time(eta_text)
     if planned is None or not eta:
         return None
     hour_s, minute_s = eta.split(":", 1)

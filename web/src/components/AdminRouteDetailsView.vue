@@ -9,7 +9,7 @@ import { liveRouteElapsedLabel, routeAnalyticsView } from "../routeAnalytics";
 import { useLiveNow } from "../liveNow";
 import { stageDeltasForPoint } from "../stageDeltas";
 import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
-import { normalizePlannedTimeInput, plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
+import { formatEstimatedArrival, normalizePlannedTimeInput, plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
 import { lateKindClass, lateReasonLines, pointLateKind } from "../lateArrival";
 import { listPointStatusLabel, nextStatus } from "../status";
 import type { RouteIncident } from "../routeIncidents";
@@ -641,7 +641,7 @@ function removeRoute(): void {
         <div class="kv">
           <span class="k">N рейса</span>
           <span class="v">{{ route.id }}</span>
-        </div>
+      </div>
         <div class="kv">
           <span class="k">Водитель</span>
           <span class="v">{{ route.driver?.full_name || route.driver?.login || "—" }}</span>
@@ -829,7 +829,7 @@ function removeRoute(): void {
         <h3>Редактирование рейса</h3>
         <div class="edit-grid">
           <SuggestField
-            v-model="editForm.number_auto"
+              v-model="editForm.number_auto"
             :items="vehicleSuggest"
             @update:model-value="(v) => (editForm.number_auto = normalizePlate(v))"
             @pick="(item) => (editForm.number_auto = item.label)"
@@ -853,7 +853,7 @@ function removeRoute(): void {
             <input v-model="editForm.registration_number" />
           </label>
           <SuggestField
-            v-model="editForm.trailer_number"
+              v-model="editForm.trailer_number"
             :items="trailerSuggest"
             @update:model-value="(v) => (editForm.trailer_number = normalizePlate(v))"
             @pick="(item) => (editForm.trailer_number = item.label)"
@@ -953,7 +953,7 @@ function removeRoute(): void {
             <span v-else>Без адреса</span>
           </p>
           <p class="meta-line">{{ formatPlannedLine(point.date_point, point.point_time) }}</p>
-          <p v-if="point.estimated_arrival" class="meta-line">Ориентировочное прибытие: {{ point.estimated_arrival }}</p>
+          <p v-if="point.estimated_arrival" class="meta-line">Ориентировочное прибытие: {{ formatEstimatedArrival(point.estimated_arrival, point.date_point, point.point_time) }}</p>
           <div v-if="lateReasonLines(point.late_reason).length" class="late-reason">
             <p v-for="(line, idx) in lateReasonLines(point.late_reason)" :key="idx">{{ line }}</p>
           </div>
@@ -1711,7 +1711,7 @@ button {
   }
   .stage-edit-title {
     grid-column: 1 / -1;
-  }
+}
   .summary-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

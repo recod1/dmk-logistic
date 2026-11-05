@@ -177,6 +177,23 @@ export function plannedScheduleDisplay(date?: string | null, time?: string | nul
   return [plannedDateDisplay(date, time), plannedTimeDisplay(date, time)].filter(Boolean).join(" ");
 }
 
+/** ОВП: дата + время. Если в поле только часы — берём дату плана точки. */
+export function formatEstimatedArrival(
+  eta?: string | null,
+  datePoint?: string | null,
+  pointTime?: string | null
+): string {
+  const raw = (eta || "").trim();
+  if (!raw) {
+    return "";
+  }
+  const dateFromEta = plannedDateDisplay(raw);
+  const timeFromEta = plannedTimeDisplay(raw) || plannedTimeDisplay("", raw);
+  const date = dateFromEta || plannedDateDisplay(datePoint, pointTime);
+  const time = timeFromEta || raw;
+  return [date, time].filter(Boolean).join(" ");
+}
+
 export function normalizePlannedTimeInput(raw: string): string {
   const trimmed = (raw || "").trim();
   return splitPlannedDateTime(trimmed).time || trimmed;

@@ -3,6 +3,7 @@ from __future__ import annotations
 from unittest import TestCase
 
 from utils.onec_datetime import (
+    format_estimated_arrival,
     normalize_planned_date,
     normalize_planned_time,
     planned_wall_fields,
@@ -31,6 +32,16 @@ class OnecDatetimeTests(TestCase):
 
     def test_time_only_input(self) -> None:
         self.assertEqual(normalize_planned_time("16:30"), "16:30")
+
+    def test_format_estimated_arrival_adds_plan_date(self) -> None:
+        self.assertEqual(
+            format_estimated_arrival("16:30", "21.09.2026", "14:00"),
+            "21.09.2026 16:30",
+        )
+        self.assertEqual(
+            format_estimated_arrival("22.09.2026 08:15", "21.09.2026", "14:00"),
+            "22.09.2026 08:15",
+        )
 
     def test_combined_leftover_splits_for_api(self) -> None:
         self.assertEqual(planned_wall_fields("21.09.2026 16:30", ""), ("21.09.2026", "16:30"))

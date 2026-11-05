@@ -21,10 +21,16 @@ function plannedWallDate(datePoint?: string | null, pointTime?: string | null): 
 }
 
 function etaWallDate(datePoint?: string | null, pointTime?: string | null, etaRaw?: string | null): Date | null {
-  const date = plannedDateDisplay(datePoint, pointTime);
   const eta = (etaRaw || "").trim();
+  const isoLocal = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(eta);
+  if (isoLocal) {
+    const value = new Date(`${isoLocal[1]}-${isoLocal[2]}-${isoLocal[3]}T${isoLocal[4]}:${isoLocal[5]}:00+03:00`);
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  const date = plannedDateDisplay(eta) || plannedDateDisplay(datePoint, pointTime);
+  const time = plannedTimeDisplay(eta) || plannedTimeDisplay("", eta);
   const dm = /^(\d{1,2})\.(\d{1,2})\.(\d{4})$/.exec(date || "");
-  const tm = /^(\d{1,2}):(\d{2})/.exec(eta);
+  const tm = /^(\d{1,2}):(\d{2})/.exec(time || eta);
   if (!dm || !tm) {
     return null;
   }
