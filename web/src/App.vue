@@ -2033,9 +2033,39 @@ function clearAuth(): void {
   void clearAuthSession();
 }
 
+const pageStageEl = ref<HTMLElement | null>(null);
+let sectionMotionTimer: number | null = null;
+
+function playSectionMotion(dir: "forward" | "back"): void {
+  void nextTick(() => {
+    const el = pageStageEl.value;
+    if (!el || typeof window === "undefined") {
+      return;
+    }
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+    const next = dir === "back" ? "section-anim-back" : "section-anim-fwd";
+    el.classList.remove("section-anim-fwd", "section-anim-back");
+    void el.offsetWidth;
+    el.classList.add(next);
+    if (sectionMotionTimer !== null) {
+      window.clearTimeout(sectionMotionTimer);
+    }
+    sectionMotionTimer = window.setTimeout(() => {
+      el.classList.remove("section-anim-fwd", "section-anim-back");
+      sectionMotionTimer = null;
+    }, 380);
+  });
+}
+
 function resetToSection(section: AppSection): void {
+  const changed = currentSection.value !== section;
   sectionStack.value = [];
   currentSection.value = section;
+  if (changed) {
+    playSectionMotion("forward");
+  }
 }
 
 function pushSection(section: AppSection): void {
@@ -2047,6 +2077,7 @@ function pushSection(section: AppSection): void {
     sectionStack.value = sectionStack.value.slice(-24);
   }
   currentSection.value = section;
+  playSectionMotion("forward");
 }
 
 function goBack(): void {
@@ -2069,6 +2100,7 @@ function goBack(): void {
     return;
   }
   currentSection.value = prev;
+  playSectionMotion("back");
 }
 
 function openDefaultSectionByRole(user: AuthUser): void {
@@ -6435,6 +6467,10 @@ onMounted(async () => {
 });
 
 onUnmounted(() => {
+  if (sectionMotionTimer !== null) {
+    window.clearTimeout(sectionMotionTimer);
+    sectionMotionTimer = null;
+  }
   if (toastTimer) {
     window.clearTimeout(toastTimer);
   }
@@ -6577,7 +6613,7 @@ onUnmounted(() => {
     </header>
 
     <Transition name="page" mode="out-in">
-      <div :key="isAuthed ? 'app' : 'login'" class="page-stage">
+      <div ref="pageStageEl" :key="isAuthed ? 'app' : 'login'" class="page-stage">
     <LoginView v-if="!isAuthed" :loading="authLoading" :error="authError" @submit="doLogin" />
 
     <template v-else>

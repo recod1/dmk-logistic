@@ -91,11 +91,13 @@ def create_route_from_integration(db: Session, route_data: Any) -> dict:
         if type_point not in {"loading", "unloading"}:
             type_point = "loading"
         logger.info(
-            "legacy /api/route %s point[%s] raw date_point=%r point_time=%r stored date=%s time=%s",
+            "1c_route_inbound stored route_id=%s point[%s] raw date_point=%r (%s) point_time=%r (%s) -> date=%s time=%s",
             route_id,
             index,
             raw_date,
+            type(raw_date).__name__,
             raw_time,
+            type(raw_time).__name__,
             date_point,
             point_time,
         )

@@ -3,6 +3,7 @@
 import sys
 import os
 import asyncio
+import json
 import logging
 from pathlib import Path
 
@@ -15,7 +16,7 @@ for _path in (_API_ROOT, _REPO_ROOT / "shared", _REPO_ROOT / "bot"):
         if _s not in sys.path:
             sys.path.insert(0, _s)
 
-from fastapi import FastAPI, HTTPException, Depends, Header
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.responses import RedirectResponse
 from pydantic import BaseModel
 from typing import Any, Optional, List
@@ -47,6 +48,20 @@ app = FastAPI(
 logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("API_KEY")
+_1C_ROUTE_PATHS = {"/api/route", "/route"}
+
+
+@app.middleware("http")
+async def log_1c_route_raw_body(request: Request, call_next):
+    if request.method == "POST" and request.url.path in _1C_ROUTE_PATHS:
+        body = await request.body()
+        logger.info(
+            "1c_route_inbound path=%s bytes=%s raw=%s",
+            request.url.path,
+            len(body),
+            body.decode("utf-8", errors="replace")[:12000],
+        )
+    return await call_next(request)
 
 
 @app.on_event("startup")
@@ -196,10 +211,41 @@ def _create_route_from_1c(route_data: RouteCreate):
             raise HTTPException(status_code=500, detail="Failed to create route")
 
 
+def _log_1c_route_inbound(path: str, route_data: RouteCreate) -> None:
+    """Разобранный JSON 1С. Сырое тело пишет middleware. Искать: grep 1c_route_inbound."""
+    parsed = (
+        route_data.model_dump(mode="python")
+        if hasattr(route_data, "model_dump")
+        else route_data.dict()
+    )
+    points_dump: list[dict] = []
+    for index, point in enumerate(route_data.points or []):
+        date_val = getattr(point, "date_point", None)
+        time_val = getattr(point, "point_time", None)
+        points_dump.append(
+            {
+                "i": index,
+                "type_point": getattr(point, "type_point", None),
+                "date_point": date_val,
+                "date_point_type": type(date_val).__name__,
+                "point_time": time_val,
+                "point_time_type": type(time_val).__name__,
+            }
+        )
+    logger.info(
+        "1c_route_inbound parsed path=%s route_id=%s points=%s payload=%s",
+        path,
+        route_data.route_id,
+        json.dumps(points_dump, ensure_ascii=False, default=str),
+        json.dumps(parsed, ensure_ascii=False, default=str)[:8000],
+    )
+
+
 @app.post("/api/route", dependencies=[Depends(verify_api_key)])
 @app.post("/route", dependencies=[Depends(verify_api_key)])
-async def create_route(route_data: RouteCreate):
+async def create_route(route_data: RouteCreate, request: Request):
     """Создать рейс из 1С. Водитель: driver_name (ФИО) или driver_tg_id."""
+    _log_1c_route_inbound(request.url.path, route_data)
     return _create_route_from_1c(route_data)
 
 

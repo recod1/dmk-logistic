@@ -222,17 +222,53 @@ h3 {
 
 .page-enter-active,
 .page-leave-active {
-  transition: opacity 0.2s ease, transform 0.22s ease;
+  transition: opacity 0.28s cubic-bezier(0.22, 1, 0.36, 1), transform 0.28s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .page-enter-from {
   opacity: 0;
-  transform: translateY(10px);
+  transform: translateY(12px);
 }
 
 .page-leave-to {
   opacity: 0;
   transform: translateY(-8px);
+}
+
+@keyframes section-fwd {
+  from {
+    opacity: 0.35;
+    transform: translate3d(18px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@keyframes section-back {
+  from {
+    opacity: 0.35;
+    transform: translate3d(-18px, 0, 0);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.page-stage.section-anim-fwd > section {
+  animation: section-fwd 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.page-stage.section-anim-back > section {
+  animation: section-back 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.container.container--chat .page-stage.section-anim-fwd > section,
+.container.container--chat .page-stage.section-anim-back > section {
+  animation-name: overlay-in;
+  animation-duration: 0.22s;
 }
 
 .dropdown-enter-active,
@@ -258,7 +294,32 @@ h3 {
 }
 
 .overlay {
-  animation: overlay-in 0.2s ease;
+  animation: overlay-in 0.24s ease;
+}
+
+.card,
+.item-card,
+.room,
+.route-card,
+.route-card-mobile,
+.user,
+.clickable-card {
+  transition:
+    background-color 0.2s ease,
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.kind-btn,
+.tab,
+.filter-chip,
+.chip {
+  transition:
+    background-color 0.18s ease,
+    border-color 0.18s ease,
+    color 0.18s ease,
+    transform 0.18s ease;
 }
 
 @keyframes overlay-in {
@@ -305,11 +366,17 @@ h3 {
     border-color: rgba(96, 165, 250, 0.45);
     background: var(--surface-hover);
     box-shadow: var(--shadow-sm);
+    transform: translateY(-1px);
   }
 
   .primary:hover:not(:disabled),
   .send-btn:hover:not(:disabled) {
     filter: brightness(1.08);
+  }
+
+  .ghost:hover:not(:disabled),
+  .secondary:hover:not(:disabled) {
+    filter: brightness(1.06);
   }
 }
 
