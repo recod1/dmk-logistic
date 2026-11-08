@@ -97,12 +97,40 @@ def late_reason_lines(raw: str | None) -> list[str]:
     return lines
 
 
+def _reason_key(text: str) -> str:
+    return " ".join(_LATE_PREFIX_RE.sub("", (text or "").strip()).lower().split())
+
+
 def last_late_reason_text(raw: str | None) -> str:
     lines = late_reason_lines(raw)
     if not lines:
         return ""
     cleaned = _LATE_PREFIX_RE.sub("", lines[-1]).strip()
     return cleaned or lines[-1]
+
+
+def unique_late_reason_lines(raw: str | None) -> list[str]:
+    """Одна строка на уникальный текст. Две разные причины — обе, одинаковые не дублируются."""
+    seen: set[str] = set()
+    unique_texts: list[str] = []
+    labeled: list[str] = []
+    for line in late_reason_lines(raw):
+        text = _LATE_PREFIX_RE.sub("", line).strip()
+        key = _reason_key(text)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique_texts.append(text)
+        labeled.append(line if _LATE_PREFIX_RE.search(line) else f"Причина опоздания: {text}")
+    if not unique_texts:
+        return []
+    if len(unique_texts) == 1:
+        return [f"Причина опоздания: {unique_texts[0]}"]
+    return labeled
+
+
+def unique_late_reason_display(raw: str | None) -> str:
+    return " · ".join(unique_late_reason_lines(raw))
 
 
 def apply_late_reason(point, reason: str, label: str) -> None:
@@ -113,10 +141,11 @@ def apply_late_reason(point, reason: str, label: str) -> None:
         return
     line = f"{label}: {text}"
     existing = (getattr(point, "late_reason", None) or "").strip()
-    if line not in existing:
+    existing_keys = {_reason_key(item) for item in late_reason_lines(existing)}
+    if _reason_key(text) not in existing_keys:
         setattr(point, "late_reason", f"{existing}\n{line}".strip() if existing else line)
     note = (getattr(point, "point_note", None) or "").strip()
-    if line not in note:
+    if text not in note and line not in note:
         setattr(point, "point_note", f"{note}\n{line}".strip() if note else line)
 
 

@@ -127,3 +127,45 @@ export function lastLateReasonText(raw?: string | null): string {
   const cleaned = lines[lines.length - 1].replace(LATE_PREFIX_RE, "").trim();
   return cleaned || lines[lines.length - 1];
 }
+
+function reasonKey(text: string): string {
+  return text.replace(LATE_PREFIX_RE, "").trim().toLowerCase().replace(/\s+/g, " ");
+}
+
+/** Одна причина на точку. Две разные — обе, одинаковый текст не повторяется. */
+export function uniqueLateReasonLines(raw?: string | null): string[] {
+  const seen = new Set<string>();
+  const uniqueTexts: string[] = [];
+  const labeled: string[] = [];
+  for (const line of lateReasonLines(raw)) {
+    const text = line.replace(LATE_PREFIX_RE, "").trim();
+    const key = reasonKey(text);
+    if (!key || seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    uniqueTexts.push(text);
+    labeled.push(LATE_PREFIX_RE.test(line) ? line : `Причина опоздания: ${text}`);
+  }
+  if (!uniqueTexts.length) {
+    return [];
+  }
+  if (uniqueTexts.length === 1) {
+    return [`Причина опоздания: ${uniqueTexts[0]}`];
+  }
+  return labeled;
+}
+
+export function mergeLateReason(existing: string | null | undefined, incoming: string | null | undefined, label: string): string {
+  const text = (incoming || "").replace(LATE_PREFIX_RE, "").trim() || lastLateReasonText(existing);
+  if (!text) {
+    return (existing || "").trim();
+  }
+  const current = (existing || "").trim();
+  const keys = new Set(lateReasonLines(current).map((line) => reasonKey(line)));
+  if (keys.has(reasonKey(text))) {
+    return current;
+  }
+  const line = `${label}: ${text}`;
+  return current ? `${current}\n${line}` : line;
+}

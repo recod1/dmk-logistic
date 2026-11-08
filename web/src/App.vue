@@ -30,6 +30,7 @@ import LateReasonDialog from "./components/LateReasonDialog.vue";
 import ShiftPhotosDialog from "./components/ShiftPhotosDialog.vue";
 import ShiftsView from "./components/ShiftsView.vue";
 import ShiftDetailsView from "./components/ShiftDetailsView.vue";
+import ShiftInspectionView from "./components/ShiftInspectionView.vue";
 import { RETURN_WARNING, type IncidentKind, type RouteIncident } from "./routeIncidents";
 import {
   ApiError,
@@ -143,7 +144,15 @@ import {
   getDriverShift,
   getMyActiveShift,
   startDriverShift,
-  finishDriverShift
+  finishDriverShift,
+  createShiftDraft,
+  patchDriverShift,
+  uploadShiftInspectionPhoto,
+  acceptShiftVehicle,
+  beginShiftHandover,
+  cancelShiftHandover,
+  closeShiftVehicle,
+  deleteShiftDraft
 } from "./api";
 import {
   addAction,
@@ -183,6 +192,7 @@ import { datetimeLocalToRu, displayRuToDatetimeLocal, fromDatetimeLocalToIso, to
 import { datetimeLocalKey } from "./factTime";
 import { readDeviceCoordinates } from "./deviceLocation";
 import { plannedDateInputValue, plannedTimeInputValue } from "./plannedTime";
+import { mergeLateReason } from "./lateArrival";
 import { prepareDocumentImageBlobs } from "./imageUploadPrep";
 import { parseChatDeliveryHint } from "./chatDeliveryBg";
 import { notificationKind } from "./notificationKinds";
@@ -244,7 +254,8 @@ type AppSection =
   | "salary_detail"
   | "salary_chat"
   | "shifts"
-  | "shift_details";
+  | "shift_details"
+  | "shift_inspect";
 type RouteFilters = {
   status?: string;
   route_id?: string;
@@ -820,7 +831,7 @@ const currentPageTitle = computed(() => {
   if (currentSection.value === "admin_fleet_lists") {
     return "Списки";
   }
-  if (currentSection.value === "shifts" || currentSection.value === "shift_details") {
+  if (currentSection.value === "shifts" || currentSection.value === "shift_details" || currentSection.value === "shift_inspect") {
     return "Вахты";
   }
   if (currentSection.value === "notifications") {
@@ -1029,7 +1040,7 @@ const activeBottomNavId = computed(() => {
   if (section === "admin_fleet_lists") {
     return "lists";
   }
-  if (section === "shifts" || section === "shift_details") {
+  if (section === "shifts" || section === "shift_details" || section === "shift_inspect") {
     return "shifts";
   }
   if (section === "chats" || section === "chat" || section === "chat_room") {
@@ -1770,7 +1781,7 @@ function handleIncomingNotification(
   }
   if (
     (item.event_type === "shift_started" || item.event_type === "shift_ended") &&
-    (currentSection.value === "shifts" || currentSection.value === "shift_details")
+    (currentSection.value === "shifts" || currentSection.value === "shift_details" || currentSection.value === "shift_inspect")
   ) {
     void refreshShiftsList();
   }
@@ -2116,7 +2127,7 @@ async function applyOverlaysToRoute(baseRoute: RouteDto | null): Promise<RouteDt
     return null;
   }
   try {
-    const overlays = await getPointOverlays(baseRoute.id);
+  const overlays = await getPointOverlays(baseRoute.id);
     const pendingAccepts = await getPendingAccepts();
     const locallyAccepted = pendingAccepts.some((item) => item.route_id === baseRoute.id);
     const queuedActions = await listActions(getDeviceId(), authUser.value?.id);
@@ -2124,16 +2135,16 @@ async function applyOverlaysToRoute(baseRoute: RouteDto | null): Promise<RouteDt
     const points = applyOverlaysToPoints(baseRoute, overlays).map((point) => {
       const queued = reverts.find((item) => item.payload.point_id === point.id);
       if (!queued) {
-        return point;
-      }
+      return point;
+    }
       const prev = previousStatus(point.status);
       return prev ? rollbackStageOnPoint(point, point.status, prev) : point;
-    });
-    return {
-      ...baseRoute,
+  });
+  return {
+    ...baseRoute,
       status: locallyAccepted && baseRoute.status === "new" ? "process" : baseRoute.status,
-      points
-    } as RouteDto;
+    points
+  } as RouteDto;
   } catch (error) {
     reportDebugError({ source: "overlay.apply", error });
     return {
@@ -2385,7 +2396,7 @@ async function refreshDriverRoutes(): Promise<void> {
       driverAssignedRoutes.value = assignedItems;
       driverActiveRouteId.value = pending[0]?.route_id ?? prefetch.active_route_id ?? null;
     } catch {
-      const assigned = await listDriverRoutes(authToken.value, "assigned");
+    const assigned = await listDriverRoutes(authToken.value, "assigned");
       assignedItems = applyPendingAcceptToLists(assigned.items, pendingIds);
       driverAssignedRoutes.value = assignedItems;
       driverActiveRouteId.value = pending[0]?.route_id ?? assigned.active_route_id ?? null;
@@ -2426,7 +2437,7 @@ async function refreshDriverRoutes(): Promise<void> {
         const activeRoute = cachedSnap ?? (await getDriverRoute(authToken.value, driverActiveRouteId.value));
         route.value = await applyOverlaysToRoute(activeRoute);
         await persistDriverRoute(route.value);
-      } else {
+    } else {
         route.value = await applyOverlaysToRoute(route.value);
         await persistDriverRoute(route.value);
       }
@@ -2476,7 +2487,7 @@ async function refreshRoute(): Promise<void> {
     }
     const merged = await applyOverlaysToRoute(serverRoute);
     if (merged) {
-      route.value = merged;
+    route.value = merged;
       await persistDriverRoute(merged);
     } else if (!localWork) {
       route.value = null;
@@ -2832,8 +2843,8 @@ async function flushPendingAccepts(): Promise<void> {
       }
     } catch (error) {
       if (handleAuthError(error)) {
-        return;
-      }
+    return;
+  }
       const message = ((error as Error)?.message || "").toLowerCase();
       if (message.includes("already") || message.includes("process")) {
         await removePendingAccept(item.route_id);
@@ -2842,8 +2853,8 @@ async function flushPendingAccepts(): Promise<void> {
       if (!isOfflineLikeError(error)) {
         console.debug("[pwa-sync] pending accept failed", error);
       }
-      break;
-    }
+          break;
+        }
   }
 }
 
@@ -2907,7 +2918,7 @@ async function flushActionQueue(): Promise<boolean> {
       }
       await removeActionsByClientIds([item.client_id]);
       changed = true;
-    } catch (error) {
+      } catch (error) {
       if (handleAuthError(error)) {
         return changed;
       }
@@ -2929,8 +2940,8 @@ async function flushActionQueue(): Promise<boolean> {
 
 async function syncOutboxInBackground(): Promise<void> {
   if (!authToken.value || !isDriver.value) {
-    return;
-  }
+      return;
+    }
   if (!hasNetwork() || syncing.value) {
     return;
   }
@@ -2961,29 +2972,29 @@ async function syncOutboxInBackground(): Promise<void> {
       const ready = (await getOutboxEvents(deviceId, authUser.value?.id)).sort((a, b) => a.created_at.localeCompare(b.created_at));
       const events: EventPayload[] = ready
         .map((event) => {
-          const payload: EventPayload = {
-            client_event_id: event.client_event_id,
-            occurred_at_client: event.occurred_at_client,
+      const payload: EventPayload = {
+        client_event_id: event.client_event_id,
+        occurred_at_client: event.occurred_at_client,
             pressed_at_client: event.pressed_at_client ?? event.occurred_at_client,
-            point_id: event.point_id,
-            to_status: event.to_status,
+        point_id: event.point_id,
+        to_status: event.to_status,
             time_source: event.time_source ?? null,
-            odometer: event.odometer ?? null,
-            odometer_source: event.odometer_source ?? null,
+        odometer: event.odometer ?? null,
+        odometer_source: event.odometer_source ?? null,
             coordinates: event.coordinates ?? null,
             estimated_arrival: event.estimated_arrival ?? null,
             late_reason: (event.late_reason || "").trim() || null
-          };
-          if (event.document_file_ids?.length) {
-            payload.document_file_ids = event.document_file_ids;
-          }
-          return payload;
-        });
+      };
+      if (event.document_file_ids?.length) {
+        payload.document_file_ids = event.document_file_ids;
+      }
+      return payload;
+    });
       if (!events.length) {
         return false;
       }
-      const result = await sendEventsBatch(authToken.value, deviceId, events);
-      const removable = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.client_event_id);
+    const result = await sendEventsBatch(authToken.value, deviceId, events);
+    const removable = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.client_event_id);
       const fatal = result.items.filter((item) => {
         if (item.applied || item.duplicate || !item.error) {
           return false;
@@ -2998,11 +3009,11 @@ async function syncOutboxInBackground(): Promise<void> {
           await applyLocalPointRollback(item.point_id, item.to_status);
         }
       }
-      await removeOutboxByClientEventIds(removable);
-      const appliedPointIds = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.point_id);
-      if (route.value && appliedPointIds.length) {
-        await removePointOverlays(route.value.id, appliedPointIds);
-      }
+    await removeOutboxByClientEventIds(removable);
+    const appliedPointIds = result.items.filter((item) => item.applied || item.duplicate).map((item) => item.point_id);
+    if (route.value && appliedPointIds.length) {
+      await removePointOverlays(route.value.id, appliedPointIds);
+    }
       return removable.length > 0;
     };
 
@@ -3041,8 +3052,8 @@ async function syncOutboxInBackground(): Promise<void> {
     const sentDocs = await flushReadyEvents();
     const sentActions = await flushActionQueue();
     if (sentStatuses || sentDocs || sentActions) {
-      await refreshRoute();
-      await refreshDriverRoutes();
+    await refreshRoute();
+    await refreshDriverRoutes();
     }
   } catch (error) {
     if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы продолжить синхронизацию." })) {
@@ -3055,7 +3066,7 @@ async function syncOutboxInBackground(): Promise<void> {
       syncWatchdogTimer = null;
     }
     if (gen === syncGeneration) {
-      syncing.value = false;
+    syncing.value = false;
       setConnectionSyncing(false);
     }
     await refreshConnectionQueue();
@@ -3160,10 +3171,10 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
     return refreshAdminRoutesInFlight;
   }
   refreshAdminRoutesInFlight = (async () => {
-    routesLoading.value = true;
-    routesError.value = "";
-    try {
-      const effectiveFilters = filters ?? routeFilters.value;
+  routesLoading.value = true;
+  routesError.value = "";
+  try {
+    const effectiveFilters = filters ?? routeFilters.value;
       const filtersChanged =
         routeFilters.value.status !== effectiveFilters.status ||
         routeFilters.value.route_id !== effectiveFilters.route_id ||
@@ -3172,7 +3183,7 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
         Boolean(routeFilters.value.unread_chat) !== Boolean(effectiveFilters.unread_chat) ||
         Boolean(routeFilters.value.has_problem) !== Boolean(effectiveFilters.has_problem) ||
         (routeFilters.value.problem_kinds || "") !== (effectiveFilters.problem_kinds || "");
-      routeFilters.value = effectiveFilters;
+    routeFilters.value = effectiveFilters;
       if (filtersChanged) {
         adminRoutesOffset.value = 0;
       }
@@ -3184,27 +3195,27 @@ async function refreshAdminRoutes(filters?: RouteFilters): Promise<void> {
       adminRoutes.value = page.items;
       adminRoutesTotal.value = page.total ?? page.items.length;
 
-      try {
-        const routeIds = adminRoutes.value.map((x) => x.id);
+    try {
+      const routeIds = adminRoutes.value.map((x) => x.id);
         mergeChatUnreadRows(await getChatUnreadSummary(authToken.value, routeIds));
-      } catch {
-        // ignore chat unread errors
-      }
-
-      if (selectedAdminRoute.value) {
-        const selected = adminRoutes.value.find((item) => item.id === selectedAdminRoute.value?.id);
-        if (selected) {
-          selectedAdminRoute.value = await getAdminRoute(authToken.value, selected.id);
-        }
-      }
-    } catch (error) {
-      if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы загрузить рейсы." })) {
-        return;
-      }
-      routesError.value = `Ошибка загрузки рейсов: ${(error as Error).message}`;
-    } finally {
-      routesLoading.value = false;
+    } catch {
+      // ignore chat unread errors
     }
+
+    if (selectedAdminRoute.value) {
+      const selected = adminRoutes.value.find((item) => item.id === selectedAdminRoute.value?.id);
+      if (selected) {
+        selectedAdminRoute.value = await getAdminRoute(authToken.value, selected.id);
+      }
+    }
+  } catch (error) {
+    if (handleAuthError(error, { userMessage: "Сессия истекла. Войдите заново, чтобы загрузить рейсы." })) {
+      return;
+    }
+    routesError.value = `Ошибка загрузки рейсов: ${(error as Error).message}`;
+  } finally {
+    routesLoading.value = false;
+  }
   })().finally(() => {
     refreshAdminRoutesInFlight = null;
   });
@@ -3600,7 +3611,7 @@ async function refreshNotifications(): Promise<void> {
     await saveMessageSnapshot("notifications", latestNotifications);
     catchUpChatDeliveriesFromNotifications(latestNotifications);
     try {
-      unreadNotificationsCount.value = await getUnreadNotificationsCount(authToken.value);
+    unreadNotificationsCount.value = await getUnreadNotificationsCount(authToken.value);
       badgeReady.value = true;
     } catch (error) {
       badgeReady.value = true;
@@ -3844,7 +3855,7 @@ async function openActiveRouteFromHome(): Promise<void> {
     }
   } catch (error) {
     if (!selectedDriverRoute.value) {
-      syncMessage.value = `Ошибка загрузки деталей рейса: ${(error as Error).message}`;
+    syncMessage.value = `Ошибка загрузки деталей рейса: ${(error as Error).message}`;
     }
   }
 }
@@ -3917,35 +3928,35 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
   closeNotificationsSocket();
   closeChatSocket();
   allowRealtimeSockets();
-    connectNotificationsSocket();
-    connectChatSocket();
-    startNotificationsPolling();
+  connectNotificationsSocket();
+  connectChatSocket();
+  startNotificationsPolling();
     try {
-    if (isAdminRole(user.role_code)) {
+  if (isAdminRole(user.role_code)) {
       resetToSection("admin_routes");
-      await refreshAdminUsers();
-      await refreshRouteDrivers();
-      await refreshAdminRoutes({ status: "process" });
-    } else if (isRouteManagerRole(user.role_code)) {
+    await refreshAdminUsers();
+    await refreshRouteDrivers();
+    await refreshAdminRoutes({ status: "process" });
+  } else if (isRouteManagerRole(user.role_code)) {
       resetToSection("admin_routes");
-      await refreshRouteDrivers();
-      await refreshAdminRoutes({ status: "process" });
-    } else {
+    await refreshRouteDrivers();
+    await refreshAdminRoutes({ status: "process" });
+  } else {
       resetToSection("driver_home");
-      await refreshDriverRoutes();
-      await refreshRoute();
+    await refreshDriverRoutes();
+    await refreshRoute();
       await refreshRouteChatUnread();
       geoSharingOn.value = readGeoSharingEnabled(user.id);
       ensureDriverGeoPermission();
-      await syncOutboxInBackground();
-      startBackgroundSyncLoop();
+    await syncOutboxInBackground();
+    startBackgroundSyncLoop();
       startPresenceTimer();
       void ensureDriverPushForPresence();
     }
     if (typeof Notification !== "undefined" && Notification.permission === "granted") {
       void ensureWebPushSubscription();
-    }
-    await refreshNotifications();
+  }
+  await refreshNotifications();
     void refreshChatNavUnread();
     await refreshLogisticsContacts();
     if (isRouteManager.value) {
@@ -4102,19 +4113,19 @@ async function doAcceptRoute(routeId?: string): Promise<void> {
 
   try {
     if (hasNetwork()) {
-      const serverRoute = await acceptRoute(authToken.value, id);
-      const merged = await applyOverlaysToRoute(serverRoute);
+    const serverRoute = await acceptRoute(authToken.value, id);
+    const merged = await applyOverlaysToRoute(serverRoute);
       if (merged) {
-        route.value = merged;
+    route.value = merged;
         if (selectedDriverRoute.value?.id === id) {
-          selectedDriverRoute.value = merged;
+    selectedDriverRoute.value = merged;
         }
         await persistDriverRoute(merged);
       }
       await removePendingAccept(id);
-      await refreshDriverRoutes();
-      await refreshNotifications();
-      syncMessage.value = "Рейс принят";
+    await refreshDriverRoutes();
+    await refreshNotifications();
+    syncMessage.value = "Рейс принят";
       return;
     }
   } catch (error) {
@@ -4167,8 +4178,8 @@ function openStatusConfirm(pointId: number, mode: "driver" | "manager" = "driver
     mode === "manager"
       ? selectedAdminRoute.value
       : currentSection.value === "driver_route_details" && selectedDriverRoute.value
-        ? selectedDriverRoute.value
-        : route.value;
+      ? selectedDriverRoute.value
+      : route.value;
   if (!base) {
     return;
   }
@@ -4352,26 +4363,26 @@ async function applyDocsUpload(files: File[]): Promise<void> {
   docsUploading.value = true;
   docsUploadAbort = new AbortController();
   try {
-    const localKeys: string[] = [];
+      const localKeys: string[] = [];
     for (const file of files) {
-      const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+        const key = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
       const buffer = await file.arrayBuffer();
       const blob = new Blob([buffer], { type: file.type || "image/jpeg" });
-      await savePendingDocBlob({
-        local_key: key,
-        point_id: ctx.pointId,
-        route_id: route.value.id,
-        blob,
-        content_type: blob.type || "image/jpeg",
-        created_at: new Date().toISOString()
-      });
-      localKeys.push(key);
-    }
+        await savePendingDocBlob({
+          local_key: key,
+          point_id: ctx.pointId,
+          route_id: route.value.id,
+          blob,
+          content_type: blob.type || "image/jpeg",
+          created_at: new Date().toISOString()
+        });
+        localKeys.push(key);
+      }
     const attach = { localKeys };
-    docsUpload.value = null;
-    await markPointNext(
-      ctx.pointId,
-      ctx.occurredAtIso,
+      docsUpload.value = null;
+      await markPointNext(
+        ctx.pointId,
+        ctx.occurredAtIso,
       attach,
       {
         timeSource: ctx.timeSource,
@@ -4453,8 +4464,8 @@ async function markPointNext(
   const nextPoint = applyStageOverlayToPoint(current, toStatus, overlayFields);
   const lateReason = (options?.lateReason || "").trim();
   if (lateReason) {
-    const existing = (current.late_reason || "").trim();
-    nextPoint.late_reason = existing || lateReason;
+    const label = toStatus === "registration" ? "Причина опоздания (регистрация)" : "Причина опоздания (ОВП)";
+    nextPoint.late_reason = mergeLateReason(current.late_reason, lateReason, label);
     nextPoint.late_kind = toStatus === "registration" ? "fact" : "risk";
   }
   Object.assign(current, nextPoint);
@@ -4463,8 +4474,8 @@ async function markPointNext(
     if (selectedPoint) {
       const overlaid = applyStageOverlayToPoint(selectedPoint, toStatus, overlayFields);
       if (lateReason) {
-        const existing = (selectedPoint.late_reason || "").trim();
-        overlaid.late_reason = existing || lateReason;
+        const label = toStatus === "registration" ? "Причина опоздания (регистрация)" : "Причина опоздания (ОВП)";
+        overlaid.late_reason = mergeLateReason(selectedPoint.late_reason, lateReason, label);
         overlaid.late_kind = toStatus === "registration" ? "fact" : "risk";
       }
       Object.assign(selectedPoint, overlaid);
@@ -4624,7 +4635,7 @@ async function openDriverRouteDetails(routeId: string): Promise<void> {
     void refreshRouteIncidents(routeId);
   } catch (error) {
     if (!selectedDriverRoute.value || selectedDriverRoute.value.id !== routeId) {
-      syncMessage.value = `Ошибка загрузки деталей рейса: ${(error as Error).message}`;
+    syncMessage.value = `Ошибка загрузки деталей рейса: ${(error as Error).message}`;
     }
   }
 }
@@ -4701,11 +4712,192 @@ async function openShiftDetails(shiftId: number): Promise<void> {
   }
 }
 
-function openShiftToggle(): void {
-  if (shiftUploading.value) {
+function applyLoadedShift(shift: DriverShiftDetails): void {
+  selectedShift.value = shift;
+  const mine = Boolean(isDriver.value && authUser.value && shift.driver_user_id === authUser.value.id);
+  if (!mine) {
     return;
   }
-  shiftPhotos.value = { mode: activeDriverShift.value ? "finish" : "start" };
+  if (shift.workflow_status === "closed" || shift.status === "ended") {
+    if (activeDriverShift.value?.id === shift.id) {
+      activeDriverShift.value = null;
+    }
+    return;
+  }
+  activeDriverShift.value = shift;
+}
+
+async function openShiftInspect(shiftId: number): Promise<void> {
+  if (!authToken.value) {
+    return;
+  }
+  shiftDetailsLoading.value = true;
+  shiftsError.value = "";
+  try {
+    const details = await getDriverShift(authToken.value, shiftId);
+    applyLoadedShift(details);
+    if (currentSection.value !== "shift_inspect") {
+      pushSection("shift_inspect");
+    }
+  } catch (error) {
+    shiftsError.value = (error as Error).message;
+    syncMessage.value = (error as Error).message;
+  } finally {
+    shiftDetailsLoading.value = false;
+  }
+}
+
+async function openShiftToggle(): Promise<void> {
+  if (shiftUploading.value || !authToken.value) {
+    return;
+  }
+  shiftUploading.value = true;
+  shiftsError.value = "";
+  try {
+    const open = activeDriverShift.value;
+    const wf = (open?.workflow_status || "").trim();
+    if (!open) {
+      const created = await createShiftDraft(authToken.value);
+      applyLoadedShift(created);
+      pushSection("shift_inspect");
+      syncMessage.value = "Приёмка ТС";
+      return;
+    }
+    if (wf === "active") {
+      const closing = await beginShiftHandover(authToken.value, open.id);
+      applyLoadedShift(closing);
+      pushSection("shift_inspect");
+      syncMessage.value = "Сдача ТС";
+      return;
+    }
+    await openShiftInspect(open.id);
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    shiftUploading.value = false;
+  }
+}
+
+async function saveShiftInspection(payload: Record<string, unknown>): Promise<void> {
+  if (!authToken.value || !selectedShift.value) {
+    return;
+  }
+  try {
+    const updated = await patchDriverShift(authToken.value, selectedShift.value.id, payload);
+    applyLoadedShift(updated);
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  }
+}
+
+async function uploadShiftInspectPhoto(payload: {
+  slot: string;
+  phase: "start" | "end";
+  file: Blob;
+  quality?: string[];
+}): Promise<void> {
+  if (!authToken.value || !selectedShift.value) {
+    return;
+  }
+  shiftUploading.value = true;
+  try {
+    const updated = await uploadShiftInspectionPhoto(authToken.value, selectedShift.value.id, payload);
+    applyLoadedShift(updated);
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    shiftUploading.value = false;
+  }
+}
+
+async function acceptOpenShift(force: boolean): Promise<void> {
+  if (!authToken.value || !selectedShift.value) {
+    return;
+  }
+  shiftUploading.value = true;
+  try {
+    const updated = await acceptShiftVehicle(authToken.value, selectedShift.value.id, force);
+    applyLoadedShift(updated);
+    syncMessage.value = "Вахта начата";
+    resetToSection("driver_home");
+    void refreshActiveDriverShift();
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    shiftUploading.value = false;
+  }
+}
+
+async function beginOpenShiftHandover(): Promise<void> {
+  if (!authToken.value || !selectedShift.value) {
+    return;
+  }
+  shiftUploading.value = true;
+  try {
+    const updated = await beginShiftHandover(authToken.value, selectedShift.value.id);
+    applyLoadedShift(updated);
+    syncMessage.value = "Сдача ТС";
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    shiftUploading.value = false;
+  }
+}
+
+async function closeOpenShift(force: boolean): Promise<void> {
+  if (!authToken.value || !selectedShift.value) {
+    return;
+  }
+  shiftUploading.value = true;
+  try {
+    const updated = await closeShiftVehicle(authToken.value, selectedShift.value.id, force);
+    applyLoadedShift(updated);
+    activeDriverShift.value = null;
+    syncMessage.value = "Вахта завершена";
+    if (isDriver.value) {
+      resetToSection("driver_home");
+    }
+    void refreshShiftsList();
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    shiftUploading.value = false;
+  }
+}
+
+async function cancelOpenShiftHandover(): Promise<void> {
+  if (!authToken.value || !selectedShift.value) {
+    return;
+  }
+  shiftUploading.value = true;
+  try {
+    const updated = await cancelShiftHandover(authToken.value, selectedShift.value.id);
+    applyLoadedShift(updated);
+    syncMessage.value = "Сдача отменена, вахта продолжается";
+    resetToSection("driver_home");
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    shiftUploading.value = false;
+  }
+}
+
+async function deleteOpenShiftDraft(): Promise<void> {
+  if (!authToken.value || !selectedShift.value) {
+    return;
+  }
+  shiftUploading.value = true;
+  try {
+    await deleteShiftDraft(authToken.value, selectedShift.value.id);
+    selectedShift.value = null;
+    activeDriverShift.value = null;
+    syncMessage.value = "Черновик удалён";
+    resetToSection("driver_home");
+  } catch (error) {
+    syncMessage.value = (error as Error).message;
+  } finally {
+    shiftUploading.value = false;
+  }
 }
 
 async function submitShiftPhotos(payload: {
@@ -4736,7 +4928,7 @@ async function submitShiftPhotos(payload: {
       syncMessage.value = "Вахта закончена";
     }
     shiftPhotos.value = null;
-    if (currentSection.value === "shifts" || currentSection.value === "shift_details") {
+    if (currentSection.value === "shifts" || currentSection.value === "shift_details" || currentSection.value === "shift_inspect") {
       void refreshShiftsList();
     }
   } catch (error) {
@@ -4887,7 +5079,7 @@ async function refreshChat(options?: { silent?: boolean }): Promise<void> {
     return;
   }
   if (!options?.silent) {
-    chatLoading.value = true;
+  chatLoading.value = true;
   }
   chatError.value = "";
   const routeId = chatRouteId.value;
@@ -4905,11 +5097,11 @@ async function refreshChat(options?: { silent?: boolean }): Promise<void> {
     if (!chatMessages.value.length) {
       chatError.value = hasNetwork() ? (error as Error).message : "Чат сохранён на телефоне. История появится после сети.";
     } else if (!isOfflineLikeError(error)) {
-      chatError.value = (error as Error).message;
+    chatError.value = (error as Error).message;
     }
   } finally {
     if (!options?.silent) {
-      chatLoading.value = false;
+    chatLoading.value = false;
     }
   }
 }
@@ -4927,9 +5119,9 @@ async function sendChat(text: string): Promise<void> {
   try {
     if (hasNetwork()) {
       const created = await sendRouteChatMessage(authToken.value, routeId, { text: trimmed });
-      const exists = chatMessages.value.some((m) => m.id === created.id);
-      if (!exists) {
-        chatMessages.value = [...chatMessages.value, created];
+    const exists = chatMessages.value.some((m) => m.id === created.id);
+    if (!exists) {
+      chatMessages.value = [...chatMessages.value, created];
       }
       return;
     }
@@ -4938,7 +5130,7 @@ async function sendChat(text: string): Promise<void> {
       return;
     }
     if (!isOfflineLikeError(error)) {
-      chatError.value = (error as Error).message;
+    chatError.value = (error as Error).message;
       return;
     }
   }
@@ -5210,14 +5402,14 @@ async function exportAccountantSalaryCsv(dateFrom: string, dateTo: string): Prom
 }
 
 function downloadBlob(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
   a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  window.setTimeout(() => URL.revokeObjectURL(url), 15_000);
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.setTimeout(() => URL.revokeObjectURL(url), 15_000);
 }
 
 function applySalaryRecordUpdate(updated: SalaryRecord): void {
@@ -5283,7 +5475,7 @@ async function doSalaryComment(text: string): Promise<void> {
       return;
     }
     if (!isOfflineLikeError(error)) {
-      syncMessage.value = (error as Error).message;
+    syncMessage.value = (error as Error).message;
       return;
     }
   } finally {
@@ -5387,7 +5579,7 @@ function closeSalaryChat(): void {
 async function refreshSalaryChat(options?: { silent?: boolean }): Promise<void> {
   if (!authToken.value || !salaryChatSalaryId.value) return;
   if (!options?.silent) {
-    salaryChatLoading.value = true;
+  salaryChatLoading.value = true;
   }
   salaryChatError.value = "";
   const salaryId = salaryChatSalaryId.value;
@@ -5407,7 +5599,7 @@ async function refreshSalaryChat(options?: { silent?: boolean }): Promise<void> 
     }
   } finally {
     if (!options?.silent) {
-      salaryChatLoading.value = false;
+    salaryChatLoading.value = false;
     }
   }
 }
@@ -5422,8 +5614,8 @@ async function sendSalaryChat(text: string): Promise<void> {
     if (hasNetwork()) {
       const created = await sendSalaryChatMessage(authToken.value, salaryId, { text: trimmed });
       const exists = salaryChatMessages.value.some((m: { id: number }) => m.id === created.id);
-      if (!exists) {
-        salaryChatMessages.value = [...salaryChatMessages.value, created];
+    if (!exists) {
+      salaryChatMessages.value = [...salaryChatMessages.value, created];
       }
       return;
     }
@@ -5432,7 +5624,7 @@ async function sendSalaryChat(text: string): Promise<void> {
       return;
     }
     if (!isOfflineLikeError(error)) {
-      salaryChatError.value = (error as Error).message;
+    salaryChatError.value = (error as Error).message;
       return;
     }
   }
@@ -5969,7 +6161,7 @@ async function ensureDriverPushForPresence(): Promise<void> {
 async function refreshChatRoom(options?: { silent?: boolean }): Promise<void> {
   if (!authToken.value || !chatRoomId.value) return;
   if (!options?.silent) {
-    chatRoomLoading.value = true;
+  chatRoomLoading.value = true;
   }
   chatRoomError.value = "";
   const roomId = chatRoomId.value;
@@ -5989,7 +6181,7 @@ async function refreshChatRoom(options?: { silent?: boolean }): Promise<void> {
     }
   } finally {
     if (!options?.silent) {
-      chatRoomLoading.value = false;
+    chatRoomLoading.value = false;
     }
   }
 }
@@ -6004,8 +6196,8 @@ async function sendChatRoom(text: string): Promise<void> {
     if (hasNetwork()) {
       const created = await sendChatRoomMessage(authToken.value, roomId, { text: trimmed });
       const exists = chatRoomMessages.value.some((m: { id: number }) => m.id === created.id);
-      if (!exists) {
-        chatRoomMessages.value = [...chatRoomMessages.value, created];
+    if (!exists) {
+      chatRoomMessages.value = [...chatRoomMessages.value, created];
       }
       return;
     }
@@ -6421,7 +6613,7 @@ onMounted(async () => {
   const rawUser = localStorage.getItem(USER_STORAGE_KEY);
   authToken.value = token;
   try {
-    authUser.value = rawUser ? (JSON.parse(rawUser) as AuthUser) : null;
+  authUser.value = rawUser ? (JSON.parse(rawUser) as AuthUser) : null;
   } catch {
     authUser.value = null;
   }
@@ -6437,7 +6629,7 @@ onMounted(async () => {
   }
   if (token && authUser.value) {
     try {
-      await bootstrapByRole(authUser.value);
+    await bootstrapByRole(authUser.value);
     } catch (error) {
       reportDebugError({ source: "bootstrap", error });
       syncMessage.value = "Не удалось загрузить данные. Проверьте связь.";
@@ -6549,7 +6741,7 @@ onUnmounted(() => {
 
       <div class="topbar-center">
         <p class="brand-mark">ДМК</p>
-        <h1 class="topbar-title">{{ currentPageTitle }}</h1>
+      <h1 class="topbar-title">{{ currentPageTitle }}</h1>
         <ConnectionStatusBadge :alert-count="isAdmin ? unreadDebugCount : 0" @open="onConnectionBadgeClick" />
       </div>
 
@@ -6572,18 +6764,18 @@ onUnmounted(() => {
             <span class="caret" :class="{ open: profileMenuOpen }">▾</span>
           </button>
           <Transition name="dropdown">
-            <div v-if="profileMenuOpen" class="profile-dropdown">
-              <p class="profile-name">{{ profileDisplayName }}</p>
-              <p class="profile-role">{{ authUser?.role_label }}</p>
-              <button
-                v-for="item in profileMenuItems"
-                :key="item.section"
-                class="menu-item"
+          <div v-if="profileMenuOpen" class="profile-dropdown">
+            <p class="profile-name">{{ profileDisplayName }}</p>
+            <p class="profile-role">{{ authUser?.role_label }}</p>
+            <button
+              v-for="item in profileMenuItems"
+              :key="item.section"
+              class="menu-item"
                 :class="{ active: currentSection === item.section, 'tabbar-item': item.tabBar, 'header-nav-item': item.headerNav }"
                 type="button"
-                @click="selectProfileSection(item.section)"
-              >
-                {{ item.label }}
+              @click="selectProfileSection(item.section)"
+            >
+              {{ item.label }}
                 <span v-if="item.section === 'chats' && hasUnreadChatsNav" class="notif-dot menu-dot" />
                 <span
                   v-else-if="(item.section === 'admin_routes' || item.section === 'driver_routes') && hasUnreadRouteChats"
@@ -6593,7 +6785,7 @@ onUnmounted(() => {
                   v-else-if="(item.section === 'driver_salary' || item.section === 'salary_accounting') && hasUnreadSalary"
                   class="notif-dot menu-dot success-dot"
                 />
-              </button>
+            </button>
               <button
                 v-if="isDriver"
                 class="menu-item"
@@ -6606,7 +6798,7 @@ onUnmounted(() => {
                 {{ resettingConnections ? "Переподключение…" : "Переподключить" }}
               </button>
               <button class="menu-item danger" type="button" @click="logout">Выход</button>
-            </div>
+          </div>
           </Transition>
         </div>
       </div>
@@ -6779,8 +6971,29 @@ onUnmounted(() => {
         :loading="shiftDetailsLoading"
         :error="shiftsError"
         :auth-token="authToken"
+        :can-inspect="Boolean(selectedShift)"
         @back="goBack"
         @open-route="openRouteDetailsForRole"
+        @open-inspect="selectedShift && openShiftInspect(selectedShift.id)"
+      />
+    </section>
+
+    <section v-else-if="canViewShifts && currentSection === 'shift_inspect'">
+      <ShiftInspectionView
+        :shift="selectedShift"
+        :auth-token="authToken"
+        :loading="shiftDetailsLoading"
+        :error="shiftsError"
+        :busy="shiftUploading"
+        :read-only="!(isDriver && selectedShift && selectedShift.driver_user_id === authUser?.id)"
+        @back="goBack"
+        @save="saveShiftInspection"
+        @upload-photo="uploadShiftInspectPhoto"
+        @accept="acceptOpenShift"
+        @begin-end="beginOpenShiftHandover"
+        @close="closeOpenShift"
+        @cancel-end="cancelOpenShiftHandover"
+        @delete-draft="deleteOpenShiftDraft"
       />
     </section>
 

@@ -10,7 +10,7 @@ import { useLiveNow } from "../liveNow";
 import { stageDeltasForPoint } from "../stageDeltas";
 import { displayRuToDatetimeLocal, fromDatetimeLocalToIso } from "../datetimeLocal";
 import { formatEstimatedArrival, normalizePlannedTimeInput, plannedDateDisplay, plannedDateInputValue, plannedTimeDisplay, plannedTimeInputValue } from "../plannedTime";
-import { lateKindClass, lateReasonLines, pointLateKind } from "../lateArrival";
+import { lateKindClass, uniqueLateReasonLines, pointLateKind } from "../lateArrival";
 import { listPointStatusLabel, nextStatus } from "../status";
 import type { RouteIncident } from "../routeIncidents";
 import type { AdminRoute, AdminRoutePointPayload, DriverOption, ManualEditMeta, PointStatus, RouteWorkflowStatus } from "../types";
@@ -186,6 +186,10 @@ function returnsForPoint(pointId: number): RouteIncident[] {
 
 function pointHasProblem(pointId: number): boolean {
   return (props.incidents || []).some((item) => item.status === "open" && item.point_id === pointId);
+}
+
+function incidentsForPoint(pointId: number): RouteIncident[] {
+  return (props.incidents || []).filter((item) => item.point_id === pointId && item.kind !== "return");
 }
 
 const problemIncidents = computed(() => (props.incidents || []).filter((item) => item.kind !== "return"));
@@ -954,8 +958,13 @@ function removeRoute(): void {
           </p>
           <p class="meta-line">{{ formatPlannedLine(point.date_point, point.point_time) }}</p>
           <p v-if="point.estimated_arrival" class="meta-line">Ориентировочное прибытие: {{ formatEstimatedArrival(point.estimated_arrival, point.date_point, point.point_time) }}</p>
-          <div v-if="lateReasonLines(point.late_reason).length" class="late-reason">
-            <p v-for="(line, idx) in lateReasonLines(point.late_reason)" :key="idx">{{ line }}</p>
+          <div v-if="uniqueLateReasonLines(point.late_reason).length" class="late-reason">
+            <p v-for="(line, idx) in uniqueLateReasonLines(point.late_reason)" :key="idx">{{ line }}</p>
+          </div>
+          <div v-if="incidentsForPoint(point.id).length" class="late-reason">
+            <p v-for="item in incidentsForPoint(point.id)" :key="item.id">
+              {{ item.kind_label }}<template v-if="item.comment">: {{ item.comment }}</template>
+            </p>
           </div>
           <p v-if="point.point_contacts" class="meta-line">{{ point.point_contacts }}</p>
           <div v-if="editingPointId !== point.id" class="actions">

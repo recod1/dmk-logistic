@@ -2,6 +2,7 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 
 import { fetchShiftImageBlob } from "../api";
+import { slotLabel, workflowLabel } from "../shiftInspection";
 import type { DriverShiftDetails } from "../types";
 
 const props = defineProps<{
@@ -9,11 +10,13 @@ const props = defineProps<{
   loading: boolean;
   error: string;
   authToken: string;
+  canInspect?: boolean;
 }>();
 
 const emit = defineEmits<{
   back: [];
   openRoute: [routeId: string];
+  openInspect: [];
 }>();
 
 const SLOT_LABELS: Record<string, string> = {
@@ -28,17 +31,12 @@ const viewer = ref<{ id: number; url: string; title: string; kind: string; slot:
 const busyId = ref<number | null>(null);
 
 function kindLabel(kind: string, slot: string): string {
-  const side = SLOT_LABELS[slot] || "";
-  if (kind === "start_vehicle") {
-    return `Начало · транспорт${side ? ` · ${side}` : ""}`;
-  }
-  if (kind === "end_vehicle") {
-    return `Окончание · транспорт${side ? ` · ${side}` : ""}`;
-  }
+  const phase = kind.startsWith("end") ? "Сдача" : "Приёмка";
+  const side = SLOT_LABELS[slot] || slotLabel(slot);
   if (kind === "start_waybill") {
-    return "Начало · путевой лист";
+    return "Приёмка · путевой лист";
   }
-  return kind;
+  return `${phase} · ${side}`;
 }
 
 function revokeThumbs(): void {
@@ -128,7 +126,8 @@ const title = computed(() => props.shift?.title || "Вахта");
     <button class="ghost" type="button" @click="emit('back')">← Назад</button>
     <article v-if="shift" class="card">
       <h2>{{ title }}</h2>
-      <p class="meta">{{ shift.status === "active" ? "Действует" : "Закончена" }} · {{ shift.driver_full_name }}</p>
+      <p class="meta">{{ workflowLabel(shift.workflow_status || shift.status) }} · {{ shift.driver_full_name }}{{ shift.truck ? ` · ${shift.truck}` : "" }}</p>
+      <button v-if="canInspect" class="primary" type="button" @click="emit('openInspect')">Открыть приёмку и сдачу ТС</button>
       <h3>Фото</h3>
       <div class="photos">
         <div v-for="img in shift.images" :key="img.id" class="photo">
@@ -198,6 +197,14 @@ const title = computed(() => props.shift?.title || "Вахта");
 h2,
 h3 {
   margin: 0;
+}
+.primary {
+  min-height: 46px;
+  border: none;
+  border-radius: 12px;
+  background: var(--primary-strong, #2563eb);
+  color: #fff;
+  font-weight: 700;
 }
 .meta {
   margin: 0;

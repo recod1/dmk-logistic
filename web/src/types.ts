@@ -403,6 +403,11 @@ export interface DriverShiftListItem {
   started_at: string | null;
   ended_at: string | null;
   status: "active" | "ended";
+  workflow_status?: "draft" | "active" | "closing" | "closed" | string;
+  workflow_label?: string;
+  truck?: string;
+  trailer?: string;
+  place?: string;
 }
 
 export interface DriverShiftImageMeta {
@@ -410,6 +415,7 @@ export interface DriverShiftImageMeta {
   kind: string;
   slot: string;
   content_type: string;
+  phase?: "start" | "end" | string;
 }
 
 export interface DriverShiftRouteItem {
@@ -425,5 +431,10 @@ export interface DriverShiftRouteItem {
 export interface DriverShiftDetails extends DriverShiftListItem {
   images: DriverShiftImageMeta[];
   routes: DriverShiftRouteItem[];
+  intake?: import("./shiftInspection").ShiftPhasePayload | null;
+  handover?: import("./shiftInspection").ShiftPhasePayload | null;
+  refuels?: import("./shiftInspection").ShiftRefuel[];
+  has_signature_start?: boolean;
+  has_signature_end?: boolean;
 }
 

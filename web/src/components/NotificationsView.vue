@@ -4,7 +4,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import type { NotificationPrefs } from "../api";
 import { formatNotificationReceivedAt } from "../factTime";
 import { NOTIFICATION_KIND_LABELS, notificationKind, visibleNotificationKindTabs, type NotificationKind } from "../notificationKinds";
-import { lateKindClass } from "../lateArrival";
+import { lateKindClass, uniqueLateReasonLines } from "../lateArrival";
 import { formatEstimatedArrival } from "../plannedTime";
 import type { NotificationDto } from "../types";
 
@@ -204,7 +204,7 @@ function formatExtra(item: NotificationDto): string {
   const lateKind = notificationLateKind(item);
   if (lateKind === "risk") parts.push("Риск опоздания");
   if (lateKind === "fact") parts.push("Опоздание");
-  const lateReason = (item.payload?.late_reason || "").toString().trim();
+  const lateReason = uniqueLateReasonLines((item.payload?.late_reason || "").toString()).join(" · ");
   if (lateReason) parts.push(`Причина: ${lateReason}`);
   const cancelReason = (item.payload?.cancel_reason || "").toString().trim();
   if (cancelReason && item.event_type === "route_cancelled") {

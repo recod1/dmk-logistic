@@ -14,6 +14,7 @@ from utils.late_arrival import (
     point_has_delay,
     point_late_kind,
     registration_is_late,
+    unique_late_reason_lines,
 )
 
 MOSCOW = ZoneInfo("Europe/Moscow")
@@ -132,8 +133,21 @@ class LateArrivalTests(TestCase):
     def test_apply_late_reason_reuses_existing_text(self) -> None:
         point = SimpleNamespace(late_reason="Причина опоздания (ОВП): пробки", point_note="")
         apply_late_reason(point, "", "Причина опоздания (регистрация)")
-        self.assertIn("Причина опоздания (ОВП): пробки", point.late_reason)
-        self.assertIn("Причина опоздания (регистрация): пробки", point.late_reason)
+        self.assertEqual(point.late_reason, "Причина опоздания (ОВП): пробки")
+        self.assertEqual(unique_late_reason_lines(point.late_reason), ["Причина опоздания: пробки"])
+
+    def test_apply_late_reason_keeps_two_different_problems(self) -> None:
+        point = SimpleNamespace(late_reason="Причина опоздания (ОВП): пробки", point_note="")
+        apply_late_reason(point, "сломался", "Причина опоздания (регистрация)")
+        self.assertIn("пробки", point.late_reason)
+        self.assertIn("сломался", point.late_reason)
+        self.assertEqual(
+            unique_late_reason_lines(point.late_reason),
+            [
+                "Причина опоздания (ОВП): пробки",
+                "Причина опоздания (регистрация): сломался",
+            ],
+        )
 
     def test_point_has_delay_includes_automatic_late(self) -> None:
         risk = SimpleNamespace(

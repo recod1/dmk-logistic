@@ -144,7 +144,7 @@ function clearDriver(): void {
     <div class="list">
       <button v-for="item in items" :key="item.id" class="shift-card" type="button" @click="emit('openShift', item.id)">
         <strong>{{ item.title }}</strong>
-        <small>{{ item.status === "active" ? "Действует" : "Закончена" }}</small>
+        <small>{{ item.workflow_label || (item.status === "active" ? "Действует" : "Закончена") }}{{ item.truck ? ` · ${item.truck}` : "" }}</small>
       </button>
       <p v-if="!items.length" class="empty">{{ emptyText }}</p>
     </div>

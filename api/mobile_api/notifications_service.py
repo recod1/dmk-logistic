@@ -14,7 +14,7 @@ from mobile_api.notification_kinds import notification_kind, pref_allows
 from mobile_api.models import Notification, Point, Route, User, UserNotificationPref
 from mobile_api.notifications_realtime import notifications_realtime_hub
 from mobile_api.push_notification_format import build_push_body, resolve_push_context_line
-from utils.late_arrival import point_late_kind
+from utils.late_arrival import point_late_kind, unique_late_reason_display
 
 POINT_STATUS_LABELS_RU: dict[str, str] = {
     "new": "Новая",
@@ -261,7 +261,7 @@ def notify_point_status_changed(
     late_kind = point_late_kind(point)
     if late_kind:
         payload["late_kind"] = late_kind
-        reason = (getattr(point, "late_reason", None) or "").strip()
+        reason = unique_late_reason_display(getattr(point, "late_reason", None))
         if reason:
             payload["late_reason"] = reason
             message = f"{message} {reason}."

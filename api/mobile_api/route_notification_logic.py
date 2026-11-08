@@ -9,7 +9,7 @@ from mobile_api.models import Point, Route, User
 from mobile_api.notifications_service import create_notification_for_users
 from mobile_api.roles import RoleCode
 from mobile_api.time_formatting import format_dt_for_app
-from utils.late_arrival import point_late_kind
+from utils.late_arrival import point_late_kind, unique_late_reason_display
 
 POINT_STATUS_LABELS_RU: dict[str, str] = {
     "new": "Новая",
@@ -181,7 +181,7 @@ def build_point_status_changed_notifications(
     late_kind = point_late_kind(point)
     if late_kind:
         payload["late_kind"] = late_kind
-        reason = (getattr(point, "late_reason", None) or "").strip()
+        reason = unique_late_reason_display(getattr(point, "late_reason", None))
         if reason:
             payload["late_reason"] = reason
             message = f"{message} · {reason}"

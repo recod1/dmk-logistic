@@ -2,9 +2,10 @@
 import { computed } from "vue";
 
 import MapsAddressLink from "./MapsAddressLink.vue";
-import { lateKindClass, lateReasonLines, pointLateKind } from "../lateArrival";
+import { lateKindClass, uniqueLateReasonLines, pointLateKind } from "../lateArrival";
 import { isPointDone, routeStatusLabel, statusLabel } from "../status";
 import { formatEstimatedArrival, plannedScheduleDisplay } from "../plannedTime";
+import { workflowLabel } from "../shiftInspection";
 import type { DriverRouteListItem, DriverShiftListItem, RouteDto } from "../types";
 
 const props = defineProps<{
@@ -59,13 +60,36 @@ const canAdvance = computed(() => {
   }
   return Boolean(activePoint.value && !isPointDone(activePoint.value.status));
 });
+
+const shiftActionLabel = computed(() => {
+  const wf = (props.activeShift?.workflow_status || "").trim();
+  if (!props.activeShift) return "Начать вахту";
+  if (wf === "draft") return "Продолжить приёмку";
+  if (wf === "closing") return "Продолжить сдачу";
+  return "Сдать ТС, закончить вахту";
+});
+
+const shiftHeroLine = computed(() => {
+  const wf = (props.activeShift?.workflow_status || "").trim();
+  if (wf === "draft") return "Приёмка ТС не закончена";
+  if (wf === "closing") return "Сдача ТС не закончена";
+  if (wf === "active") return "Вахта идёт";
+  return "Новая вахта начинается с приёмки машины";
+});
 </script>
 
 <template>
   <section class="driver-shell">
-    <button class="shift-btn" type="button" :disabled="shiftBusy" @click="emit('toggleShift')">
-      {{ activeShift ? "Закончить Вахту" : "Начать Вахту" }}
-    </button>
+    <section class="shift-hero" :class="{ start: !activeShift }">
+      <p>{{ shiftHeroLine }}</p>
+      <div class="plate-big">{{ activeShift?.truck || "Без номера" }}</div>
+      <p class="muted">
+        {{ activeShift ? `${activeShift.driver_full_name || "Водитель"} · ${workflowLabel(activeShift.workflow_status || activeShift.status)}` : "Данные, фото со всех сторон, салон, одометр, моточасы рефа и сверка документов." }}
+      </p>
+      <button class="shift-btn" type="button" :disabled="shiftBusy" @click="emit('toggleShift')">
+        {{ shiftActionLabel }}
+      </button>
+    </section>
     <article
       v-if="activeRoute"
       class="card main-card clickable-card"
@@ -95,8 +119,8 @@ const canAdvance = computed(() => {
         <span v-else class="plan">Адрес не указан</span>
         <span class="plan">План: {{ plannedScheduleDisplay(activePoint.date_point, activePoint.point_time) || "—" }}</span>
         <span v-if="activePoint.estimated_arrival" class="plan">Ориентировочно: {{ formatEstimatedArrival(activePoint.estimated_arrival, activePoint.date_point, activePoint.point_time) }}</span>
-        <div v-if="lateReasonLines(activePoint.late_reason).length" class="late-reason">
-          <span v-for="(line, idx) in lateReasonLines(activePoint.late_reason)" :key="idx">{{ line }}</span>
+        <div v-if="uniqueLateReasonLines(activePoint.late_reason).length" class="late-reason">
+          <span v-for="(line, idx) in uniqueLateReasonLines(activePoint.late_reason)" :key="idx">{{ line }}</span>
         </div>
       </div>
 
@@ -233,12 +257,40 @@ const canAdvance = computed(() => {
   color: var(--text-muted);
   font-size: 0.84rem;
 }
+.shift-hero {
+  padding: 16px;
+  border-radius: 20px;
+  background: var(--primary-strong, #1d4ed8);
+  color: #fff;
+  display: grid;
+  gap: 6px;
+}
+.shift-hero.start {
+  background: rgba(37, 99, 235, 0.18);
+  color: var(--text);
+  border: 2px dashed var(--primary);
+}
+.plate-big {
+  font-size: 1.45rem;
+  font-weight: 800;
+  letter-spacing: 0.03em;
+}
+.shift-hero .muted {
+  margin: 0;
+  opacity: 0.9;
+  font-size: 0.88rem;
+}
 .shift-btn {
-  min-height: 46px;
+  min-height: 52px;
+  margin-top: 8px;
   border: none;
-  border-radius: 12px;
+  border-radius: 14px;
   font-weight: 700;
-  background: linear-gradient(180deg, #0ea5e9, #0284c7);
+  background: #fff;
+  color: #1d4ed8;
+}
+.shift-hero.start .shift-btn {
+  background: var(--primary-strong, #1d4ed8);
   color: #fff;
 }
 .shift-btn:disabled {

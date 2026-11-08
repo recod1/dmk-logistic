@@ -15,7 +15,7 @@ import {
   routeStatusLabel,
   statusLabel
 } from "../status";
-import { lateKindClass, lateReasonLines, pointLateKind } from "../lateArrival";
+import { lateKindClass, uniqueLateReasonLines, pointLateKind } from "../lateArrival";
 import { formatEstimatedArrival, plannedScheduleDisplay } from "../plannedTime";
 import { RETURN_WARNING, type RouteIncident } from "../routeIncidents";
 import type { RouteDto } from "../types";
@@ -65,6 +65,10 @@ const openIncidents = computed(() => (props.incidents || []).filter((item) => it
 
 function pointHasProblem(pointId: number): boolean {
   return (props.incidents || []).some((item) => item.status === "open" && item.point_id === pointId);
+}
+
+function incidentsForPoint(pointId: number): RouteIncident[] {
+  return (props.incidents || []).filter((item) => item.point_id === pointId && item.kind !== "return");
 }
 
 async function copyToClipboard(value: string): Promise<void> {
@@ -311,8 +315,13 @@ function showRevert(pointId: number): boolean {
             </p>
             <small>{{ plannedScheduleDisplay(point.date_point, point.point_time) }}</small>
             <p v-if="point.estimated_arrival" class="eta">Ориентировочное прибытие: {{ formatEstimatedArrival(point.estimated_arrival, point.date_point, point.point_time) }}</p>
-            <div v-if="lateReasonLines(point.late_reason).length" class="late-reason">
-              <p v-for="(line, idx) in lateReasonLines(point.late_reason)" :key="idx">{{ line }}</p>
+            <div v-if="uniqueLateReasonLines(point.late_reason).length" class="late-reason">
+              <p v-for="(line, idx) in uniqueLateReasonLines(point.late_reason)" :key="idx">{{ line }}</p>
+            </div>
+            <div v-if="incidentsForPoint(point.id).length" class="point-problems">
+              <p v-for="item in incidentsForPoint(point.id)" :key="item.id">
+                {{ item.kind_label }}<template v-if="item.comment">: {{ item.comment }}</template>
+              </p>
             </div>
             <PointDocLinks
               v-if="authToken && point.docs_images?.length"
@@ -565,6 +574,16 @@ function showRevert(pointId: number): boolean {
 .late-reason p {
   margin: 0;
   white-space: pre-wrap;
+}
+.point-problems {
+  margin: 0.25rem 0 0;
+  display: grid;
+  gap: 0.15rem;
+  color: #fecaca;
+  font-size: 0.86rem;
+}
+.point-problems p {
+  margin: 0;
 }
 .manager-note {
   margin: 0;

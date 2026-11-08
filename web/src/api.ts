@@ -2013,6 +2013,109 @@ export async function finishDriverShift(
   return postShiftMultipart(`${API_BASE}/v1/shifts/${shiftId}/finish`, token, payload);
 }
 
+export async function createShiftDraft(token: string): Promise<DriverShiftDetails> {
+  return requestJson<DriverShiftDetails>(`${API_BASE}/v1/shifts/draft`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+export async function patchDriverShift(
+  token: string,
+  shiftId: number,
+  payload: Record<string, unknown>
+): Promise<DriverShiftDetails> {
+  return requestJson<DriverShiftDetails>(`${API_BASE}/v1/shifts/${shiftId}`, {
+    method: "PATCH",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function uploadShiftInspectionPhoto(
+  token: string,
+  shiftId: number,
+  payload: { slot: string; phase: "start" | "end"; file: Blob; quality?: string[] }
+): Promise<DriverShiftDetails> {
+  const fd = new FormData();
+  fd.append("slot", payload.slot);
+  fd.append("phase", payload.phase);
+  const ext = (payload.file.type || "").includes("png") ? "png" : "jpg";
+  fd.append("file", payload.file, `${payload.slot}.${ext}`);
+  if (payload.quality?.length) {
+    fd.append("quality_json", JSON.stringify(payload.quality));
+  }
+  const url = `${API_BASE}/v1/shifts/${shiftId}/photos`;
+  const response = await fetch(url, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+    body: fd
+  });
+  const text = await response.text();
+  if (!response.ok) {
+    let detail = text;
+    try {
+      const parsed = JSON.parse(text) as { detail?: string };
+      if (parsed.detail) detail = parsed.detail;
+    } catch {
+      // keep
+    }
+    throw new ApiError(detail || `HTTP ${response.status}`, {
+      status: response.status,
+      bodyText: text,
+      detail,
+      url,
+      method: "POST"
+    });
+  }
+  const parsed = JSON.parse(text) as { shift: DriverShiftDetails };
+  return parsed.shift;
+}
+
+export async function deleteShiftInspectionPhoto(token: string, shiftId: number, imageId: number): Promise<DriverShiftDetails> {
+  return requestJson<DriverShiftDetails>(`${API_BASE}/v1/shifts/${shiftId}/photos/${imageId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
+async function postShiftAction(token: string, url: string, body?: Record<string, unknown>): Promise<DriverShiftDetails> {
+  return requestJson<DriverShiftDetails>(url, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(body ? { "Content-Type": "application/json" } : {})
+    },
+    body: body ? JSON.stringify(body) : undefined
+  });
+}
+
+export async function acceptShiftVehicle(token: string, shiftId: number, force = false): Promise<DriverShiftDetails> {
+  return postShiftAction(token, `${API_BASE}/v1/shifts/${shiftId}/accept`, { force });
+}
+
+export async function beginShiftHandover(token: string, shiftId: number): Promise<DriverShiftDetails> {
+  return postShiftAction(token, `${API_BASE}/v1/shifts/${shiftId}/begin-end`);
+}
+
+export async function cancelShiftHandover(token: string, shiftId: number): Promise<DriverShiftDetails> {
+  return postShiftAction(token, `${API_BASE}/v1/shifts/${shiftId}/cancel-end`);
+}
+
+export async function closeShiftVehicle(token: string, shiftId: number, force = false): Promise<DriverShiftDetails> {
+  return postShiftAction(token, `${API_BASE}/v1/shifts/${shiftId}/close`, { force });
+}
+
+export async function deleteShiftDraft(token: string, shiftId: number): Promise<void> {
+  await requestJson(`${API_BASE}/v1/shifts/${shiftId}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${token}` }
+  });
+}
+
 export async function fetchShiftImageBlob(
   token: string,
   imageId: number,
