@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_driver, get_current_user
 from mobile_api.db import get_db
-from mobile_api.models import DriverShift, DriverShiftImage, Point, Route, User
+from mobile_api.models import DriverShift, DriverShiftImage, FleetTrailer, FleetVehicle, Point, Route, User
 from mobile_api.point_documents_router import (
     MAX_FILE_BYTES,
     _atomic_write_bytes,
@@ -46,6 +46,7 @@ from mobile_api.shift_inspection import (
     photo_slots,
 )
 from mobile_api.time_formatting import display_zone, format_dt_for_app
+from utils.vehicle_plate import require_plate
 
 router = APIRouter(tags=["driver-shifts"])
 logger = logging.getLogger(__name__)
@@ -102,6 +103,41 @@ def _driver_name(db: Session, user_id: int) -> str:
     if row is None:
         return "Водитель"
     return (row.full_name or row.login or "Водитель").strip()
+
+
+def resolve_shift_fleet_plate(
+    raw: str | None,
+    *,
+    allowed: set[str],
+    current: str = "",
+    empty_ok: bool = False,
+    label: str,
+) -> str:
+    cleaned = (raw or "").strip()
+    if not cleaned:
+        if empty_ok:
+            return ""
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=f"Выберите {label} из списка")
+    try:
+        normalized = require_plate(cleaned)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+    current_norm = (current or "").strip().upper()
+    if current_norm:
+        try:
+            current_norm = require_plate(current_norm)
+        except ValueError:
+            current_norm = current_norm
+    if normalized in allowed or normalized == current_norm:
+        return normalized
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail=f"{label} нет в списке администратора",
+    )
+
+
+def _fleet_plates(db: Session, model: type[FleetVehicle] | type[FleetTrailer]) -> set[str]:
+    return {str(plate) for plate in db.scalars(select(model.plate)).all() if plate}
 
 
 def _parse_day_bound(raw: str | None, *, end: bool) -> datetime | None:
@@ -470,12 +506,23 @@ def patch_shift(
     workflow = _workflow(shift)
     if workflow == WORKFLOW_CLOSED:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Вахта уже завершена")
-    if payload.driver_name is not None:
-        shift.driver_name = payload.driver_name.strip()
+    shift.driver_name = (current_user.full_name or current_user.login or shift.driver_name or "").strip()
     if payload.truck is not None:
-        shift.truck = payload.truck.strip().upper()
+        shift.truck = resolve_shift_fleet_plate(
+            payload.truck,
+            allowed=_fleet_plates(db, FleetVehicle),
+            current=getattr(shift, "truck", "") or "",
+            empty_ok=True,
+            label="тягач",
+        )
     if payload.trailer is not None:
-        shift.trailer = payload.trailer.strip().upper()
+        shift.trailer = resolve_shift_fleet_plate(
+            payload.trailer,
+            allowed=_fleet_plates(db, FleetTrailer),
+            current=getattr(shift, "trailer", "") or "",
+            empty_ok=True,
+            label="прицеп",
+        )
     if payload.place is not None:
         shift.place = payload.place.strip()
     started = _parse_iso(payload.started_at)

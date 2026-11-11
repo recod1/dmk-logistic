@@ -27,6 +27,7 @@ ROUTE_MANAGER_ROLES: set[RoleCode] = {
     RoleCode.LOGISTIC,
     RoleCode.ACCOUNTANT,
 }
+FLEET_READER_ROLES: set[RoleCode] = ROUTE_MANAGER_ROLES | {RoleCode.DRIVER}
 
 
 def normalize_role_code(value: str) -> RoleCode:

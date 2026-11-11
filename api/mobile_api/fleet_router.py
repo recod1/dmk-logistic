@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from mobile_api.auth import get_current_fleet_editor, get_current_route_manager
+from mobile_api.auth import get_current_fleet_editor, get_current_fleet_reader
 from mobile_api.db import get_db
 from mobile_api.driver_trip_rules import DriverRouteState, pick_active_route
 from mobile_api.models import FleetTrailer, FleetVehicle, Route, User
@@ -73,7 +73,7 @@ def ensure_fleet_trailer(db: Session, plate: str) -> FleetTrailer | None:
 @router.get("/v1/fleet/vehicles")
 def list_vehicles(
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_route_manager),
+    _: User = Depends(get_current_fleet_reader),
 ) -> dict:
     rows = db.scalars(select(FleetVehicle).order_by(FleetVehicle.plate.asc())).all()
     return {"items": [_item_out(row) for row in rows]}
@@ -132,7 +132,7 @@ def delete_vehicle(
 @router.get("/v1/fleet/trailers")
 def list_trailers(
     db: Session = Depends(get_db),
-    _: User = Depends(get_current_route_manager),
+    _: User = Depends(get_current_fleet_reader),
 ) -> dict:
     rows = db.scalars(select(FleetTrailer).order_by(FleetTrailer.plate.asc())).all()
     return {"items": [_item_out(row) for row in rows]}

@@ -41,6 +41,8 @@ const props = defineProps<{
   error?: string;
   busy?: boolean;
   readOnly?: boolean;
+  vehicles?: Array<{ id: number; plate: string }>;
+  trailers?: Array<{ id: number; plate: string }>;
 }>();
 
 const emit = defineEmits<{
@@ -104,6 +106,20 @@ const isRO = computed(() => {
   if (props.readOnly) return true;
   return phase.value === "start" ? workflow.value !== "draft" : workflow.value !== "closing";
 });
+const truckOptions = computed(() => mergePlateOptions(props.vehicles, truck.value));
+const trailerOptions = computed(() => mergePlateOptions(props.trailers, trailer.value));
+
+function mergePlateOptions(
+  items: Array<{ id: number; plate: string }> | undefined,
+  current: string
+): Array<{ id: number; plate: string }> {
+  const list = [...(items || [])];
+  const plate = current.trim();
+  if (plate && !list.some((item) => item.plate === plate)) {
+    list.unshift({ id: 0, plate });
+  }
+  return list;
+}
 const issues = computed(() =>
   analyseShift({
     driver_name: driverName.value,
@@ -196,13 +212,13 @@ function flushSave(): void {
 }
 
 watch(
-  () => [props.shift?.id, props.shift?.workflow_status] as const,
+  () => `${props.shift?.id ?? ""}:${props.shift?.workflow_status ?? ""}`,
   () => hydrate(true),
   { immediate: true }
 );
 
 watch(
-  () => [props.shift?.id, props.authToken, props.shift?.images?.length] as const,
+  () => `${props.shift?.id ?? ""}:${props.authToken}:${(props.shift?.images || []).map((img) => img.id).join(",")}`,
   async () => {
     Object.values(thumbs.value).forEach((url) => URL.revokeObjectURL(url));
     thumbs.value = {};
@@ -505,7 +521,7 @@ watch(step, () => {
       <div class="card stack">
         <label v-if="phase === 'start'" class="f">
           <span>Водитель, ФИО</span>
-          <input v-model="driverName" type="text" :disabled="isRO" placeholder="Иванов Иван Иванович" @input="scheduleSave" />
+          <input :value="driverName" type="text" disabled readonly tabindex="-1" />
         </label>
         <label class="f">
           <span>{{ phase === "end" ? "Окончание вахты" : "Начало вахты" }}</span>
@@ -535,12 +551,21 @@ watch(step, () => {
       <div v-if="phase === 'start'" class="card stack">
         <label class="f">
           <span>Тягач</span>
-          <input v-model="truck" class="plate" type="text" :disabled="isRO" placeholder="А123ВС 77" @input="scheduleSave" />
+          <select v-model="truck" class="plate" :disabled="isRO" @change="scheduleSave">
+            <option value="">Выберите тягач</option>
+            <option v-for="item in truckOptions" :key="'t-' + item.id + item.plate" :value="item.plate">{{ item.plate }}</option>
+          </select>
         </label>
         <label class="f">
           <span>Прицеп-рефрижератор</span>
-          <input v-model="trailer" class="plate" type="text" :disabled="isRO" placeholder="АВ1234 77" @input="scheduleSave" />
+          <select v-model="trailer" class="plate" :disabled="isRO" @change="scheduleSave">
+            <option value="">Выберите прицеп</option>
+            <option v-for="item in trailerOptions" :key="'r-' + item.id + item.plate" :value="item.plate">{{ item.plate }}</option>
+          </select>
         </label>
+        <p v-if="!isRO && !(vehicles || []).length && !(trailers || []).length" class="muted small">
+          Список ТС пуст. Номера задаёт администратор в разделе «Списки».
+        </p>
       </div>
       <div v-else class="card">
         <dl class="kv">
@@ -787,9 +812,10 @@ watch(step, () => {
   --bad-soft: rgba(239, 68, 68, 0.16);
   --slot: var(--surface-2);
   color: var(--ink);
-  padding-bottom: 5.5rem;
+  padding-bottom: 6.5rem;
+  position: relative;
 }
-.top { position: sticky; top: 0; z-index: 4; background: var(--paper); margin: -0.2rem -0.2rem 0; padding: 0.4rem 0.2rem 0; }
+.top { position: sticky; top: 0; z-index: 9; background: var(--paper); margin: -0.2rem -0.2rem 0; padding: 0.4rem 0.2rem 0; }
 .top-row { display: flex; align-items: center; gap: 8px; min-height: 44px; }
 .iconbtn { width: 44px; height: 44px; border: 0; background: transparent; color: inherit; border-radius: 12px; }
 .top-title { font-weight: 700; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -802,14 +828,16 @@ watch(step, () => {
 .phase { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 3px; margin-top: 6px; }
 .phase button { border: 0; background: transparent; border-radius: 9px; min-height: 38px; font-weight: 600; color: var(--muted); }
 .phase button.on { background: var(--accent); color: var(--accent-ink); }
-.stack { display: grid; gap: 12px; }
+.stack { display: grid; gap: 12px; position: relative; z-index: 0; }
 h2 { font-size: 1.05rem; margin: 18px 0 4px; }
 .muted { color: var(--muted); }
 .small { font-size: .875rem; }
 .card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; }
-.f { display: block; }
+.f { display: block; position: relative; z-index: 0; }
 .f span { display: block; font-size: .875rem; color: var(--muted); margin-bottom: 6px; }
-input, textarea { width: 100%; min-height: 52px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); font: inherit; padding: 10px 14px; }
+input, textarea, select { width: 100%; min-height: 52px; border: 1.5px solid var(--line); border-radius: 12px; background: var(--card); color: var(--ink); font: inherit; padding: 10px 14px; }
+select { appearance: none; -webkit-appearance: none; background-image: linear-gradient(45deg, transparent 50%, var(--muted) 50%), linear-gradient(135deg, var(--muted) 50%, transparent 50%); background-position: calc(100% - 18px) calc(50% - 3px), calc(100% - 12px) calc(50% - 3px); background-size: 6px 6px, 6px 6px; background-repeat: no-repeat; padding-right: 36px; }
+input:disabled, select:disabled { background: var(--slot); color: var(--ink); opacity: 1; }
 .plate { text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
 .btn { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 52px; border: 0; border-radius: 14px; background: var(--accent); color: var(--accent-ink); font-weight: 600; }
 .btn.sec { background: var(--card); color: var(--ink); border: 1.5px solid var(--line); }
@@ -818,7 +846,7 @@ input, textarea { width: 100%; min-height: 52px; border: 1.5px solid var(--line)
 .map { display: grid; grid-template-columns: 1fr 1fr 1fr; grid-template-rows: auto auto auto; gap: 8px; }
 .map .truck { grid-column: 2; grid-row: 2; display: grid; place-items: center; color: var(--muted); padding: 4px; }
 .map .truck :deep(svg) { width: 100%; max-width: 92px; height: auto; }
-.slot { position: relative; aspect-ratio: 4/3; border: 1.5px dashed var(--line); border-radius: 12px; background: var(--slot); display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); overflow: hidden; width: 100%; padding: 0; }
+.slot { position: relative; isolation: isolate; aspect-ratio: 4/3; border: 1.5px dashed var(--line); border-radius: 12px; background: var(--slot); display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--muted); overflow: hidden; width: 100%; padding: 0; }
 .slot.req { border-color: var(--accent); color: var(--ink); }
 .slot.tall { aspect-ratio: auto; height: 100%; min-height: 120px; }
 .slot.has { border: 0; }
@@ -860,7 +888,7 @@ input, textarea { width: 100%; min-height: 52px; border: 1.5px solid var(--line)
 .pill.active { background: rgba(59, 130, 246, 0.18); color: var(--accent); }
 .pill.closed, .pill.ok { background: var(--ok-soft); color: var(--ok); }
 .pill.bad { background: var(--bad-soft); color: var(--bad); }
-.bar { position: sticky; bottom: 0; background: var(--paper); border-top: 1px solid var(--line); padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px)); }
+.bar { position: sticky; bottom: 0; z-index: 8; background: var(--paper); border-top: 1px solid var(--line); padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px)); box-shadow: 0 -12px 18px var(--paper); }
 .bar .in { display: flex; gap: 10px; }
 .bar .btn.sec { flex: 0 0 34%; }
 .hidden { display: none; }

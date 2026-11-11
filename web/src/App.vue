@@ -3959,7 +3959,7 @@ async function bootstrapByRole(user: AuthUser): Promise<void> {
   await refreshNotifications();
     void refreshChatNavUnread();
     await refreshLogisticsContacts();
-    if (isRouteManager.value) {
+    if (isRouteManager.value || isDriver.value) {
       void refreshFleetLists();
     }
   } finally {
@@ -4731,6 +4731,7 @@ async function openShiftInspect(shiftId: number): Promise<void> {
   if (!authToken.value) {
     return;
   }
+  void refreshFleetLists();
   shiftDetailsLoading.value = true;
   shiftsError.value = "";
   try {
@@ -5802,7 +5803,7 @@ async function doSaveLogisticsContacts(items: Array<{ name: string; phone: strin
 }
 
 async function refreshFleetLists(): Promise<void> {
-  if (!authToken.value || !isRouteManager.value) {
+  if (!authToken.value || !(isRouteManager.value || isDriver.value)) {
     return;
   }
   fleetLoading.value = true;
@@ -6986,6 +6987,8 @@ onUnmounted(() => {
         :error="shiftsError"
         :busy="shiftUploading"
         :read-only="!(isDriver && selectedShift && selectedShift.driver_user_id === authUser?.id)"
+        :vehicles="fleetVehicles"
+        :trailers="fleetTrailers"
         @back="goBack"
         @save="saveShiftInspection"
         @upload-photo="uploadShiftInspectPhoto"
