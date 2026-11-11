@@ -48,18 +48,31 @@ app = FastAPI(
 logger = logging.getLogger(__name__)
 
 API_KEY = os.getenv("API_KEY")
-_1C_ROUTE_PATHS = {"/api/route", "/route"}
+_1C_ROUTE_PATHS = {"/api/route", "/route", "/api/api/route", "/v1/admin/routes/onec"}
+
+
+def _is_1c_route_post(request: Request) -> bool:
+    if request.method != "POST":
+        return False
+    path = (request.url.path or "").rstrip("/") or "/"
+    if path in _1C_ROUTE_PATHS:
+        return True
+    return path.endswith("/route") or path.endswith("/routes/onec")
 
 
 @app.middleware("http")
 async def log_1c_route_raw_body(request: Request, call_next):
-    if request.method == "POST" and request.url.path in _1C_ROUTE_PATHS:
+    if _is_1c_route_post(request):
+        from mobile_api.onec_inbound_log import emit_1c_inbound
+
         body = await request.body()
-        logger.info(
-            "1c_route_inbound path=%s bytes=%s raw=%s",
-            request.url.path,
-            len(body),
-            body.decode("utf-8", errors="replace")[:12000],
+        emit_1c_inbound(
+            "raw path=%s bytes=%s raw=%s"
+            % (
+                request.url.path,
+                len(body),
+                body.decode("utf-8", errors="replace")[:12000],
+            )
         )
     return await call_next(request)
 
@@ -67,6 +80,13 @@ async def log_1c_route_raw_body(request: Request, call_next):
 @app.on_event("startup")
 def bootstrap_mobile_user():
     """Опционально создаёт демо-пользователя для нового mobile-стека."""
+    try:
+        from mobile_api.onec_inbound_log import configure_1c_logging, emit_1c_inbound
+
+        configure_1c_logging()
+        emit_1c_inbound("logger_ready")
+    except Exception as exc:
+        print(f"1c_route_inbound logger_setup_failed {exc}", flush=True)
     try:
         import anyio
 
@@ -232,12 +252,16 @@ def _log_1c_route_inbound(path: str, route_data: RouteCreate) -> None:
                 "point_time_type": type(time_val).__name__,
             }
         )
-    logger.info(
-        "1c_route_inbound parsed path=%s route_id=%s points=%s payload=%s",
-        path,
-        route_data.route_id,
-        json.dumps(points_dump, ensure_ascii=False, default=str),
-        json.dumps(parsed, ensure_ascii=False, default=str)[:8000],
+    from mobile_api.onec_inbound_log import emit_1c_inbound
+
+    emit_1c_inbound(
+        "parsed path=%s route_id=%s points=%s payload=%s"
+        % (
+            path,
+            route_data.route_id,
+            json.dumps(points_dump, ensure_ascii=False, default=str),
+            json.dumps(parsed, ensure_ascii=False, default=str)[:8000],
+        )
     )
 
 

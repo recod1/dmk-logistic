@@ -90,16 +90,20 @@ def create_route_from_integration(db: Session, route_data: Any) -> dict:
         type_point = (getattr(point, "type_point", None) or "").strip().lower()
         if type_point not in {"loading", "unloading"}:
             type_point = "loading"
-        logger.info(
-            "1c_route_inbound stored route_id=%s point[%s] raw date_point=%r (%s) point_time=%r (%s) -> date=%s time=%s",
-            route_id,
-            index,
-            raw_date,
-            type(raw_date).__name__,
-            raw_time,
-            type(raw_time).__name__,
-            date_point,
-            point_time,
+        from mobile_api.onec_inbound_log import emit_1c_inbound
+
+        emit_1c_inbound(
+            "stored route_id=%s point[%s] raw date_point=%r (%s) point_time=%r (%s) -> date=%s time=%s"
+            % (
+                route_id,
+                index,
+                raw_date,
+                type(raw_date).__name__,
+                raw_time,
+                type(raw_time).__name__,
+                date_point,
+                point_time,
+            )
         )
         stored_points.append(
             {
