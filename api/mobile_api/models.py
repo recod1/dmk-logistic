@@ -1,10 +1,11 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    Date,
     DateTime,
     Float,
     ForeignKey,
@@ -674,6 +675,30 @@ class DriverShift(Base):
         back_populates="shift",
         cascade="all, delete-orphan",
     )
+    daily_checks: Mapped[list["DriverShiftDailyCheck"]] = relationship(
+        back_populates="shift",
+        cascade="all, delete-orphan",
+    )
+
+
+class DriverShiftDailyCheck(Base):
+    __tablename__ = "driver_shift_daily_checks"
+    __table_args__ = (UniqueConstraint("shift_id", "check_date", name="uq_shift_daily_check_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    shift_id: Mapped[int] = mapped_column(ForeignKey("driver_shifts.id", ondelete="CASCADE"), nullable=False, index=True)
+    check_date: Mapped[date] = mapped_column(Date, nullable=False, index=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="pending", server_default="pending")
+    checks_json: Mapped[str] = mapped_column(Text, nullable=False, default="[]", server_default="[]")
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    skipped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+    shift: Mapped[DriverShift] = relationship(back_populates="daily_checks")
 
 
 class DriverShiftImage(Base):

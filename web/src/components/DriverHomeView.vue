@@ -5,6 +5,7 @@ import MapsAddressLink from "./MapsAddressLink.vue";
 import { lateKindClass, uniqueLateReasonLines, pointLateKind } from "../lateArrival";
 import { isPointDone, routeStatusLabel, statusLabel } from "../status";
 import { formatEstimatedArrival, plannedScheduleDisplay } from "../plannedTime";
+import { dailyDateLabel } from "../shiftDaily";
 import { workflowLabel } from "../shiftInspection";
 import type { DriverRouteListItem, DriverShiftListItem, RouteDto } from "../types";
 
@@ -26,6 +27,7 @@ const emit = defineEmits<{
   advanceActivePoint: [];
   reportProblem: [];
   toggleShift: [];
+  openDailyCheck: [];
 }>();
 
 const activePoint = computed(
@@ -76,6 +78,8 @@ const shiftHeroLine = computed(() => {
   if (wf === "active") return "Вахта идёт";
   return "Новая вахта начинается с приёмки машины";
 });
+
+const pendingDailyCheck = computed(() => props.activeShift?.pending_daily_check ?? null);
 </script>
 
 <template>
@@ -90,6 +94,11 @@ const shiftHeroLine = computed(() => {
         {{ shiftActionLabel }}
       </button>
     </section>
+    <article v-if="pendingDailyCheck" class="card daily-banner">
+      <h2>Ежедневное техобслуживание</h2>
+      <p>Нужно проверить ТС за {{ dailyDateLabel(pendingDailyCheck.check_date) }}: шины, свет, масло, антифриз, тормоза, сцепление, тахограф, рефрижератор.</p>
+      <button class="primary" type="button" @click="emit('openDailyCheck')">Проверить сейчас</button>
+    </article>
     <article
       v-if="activeRoute"
       class="card main-card clickable-card"
@@ -333,6 +342,16 @@ const shiftHeroLine = computed(() => {
   background: #1e3a5f;
   color: #e0f2fe;
 }
+.daily-banner {
+  display: grid;
+  gap: 0.55rem;
+  padding: 1rem;
+  border: 1px solid #fbbf24;
+  border-radius: 18px;
+  background: rgba(180, 83, 9, 0.22);
+}
+.daily-banner h2 { margin: 0; font-size: 1.05rem; }
+.daily-banner p { margin: 0; color: var(--text-muted); line-height: 1.4; }
 .empty-state p {
   margin: 0;
   color: var(--text-muted);

@@ -22,6 +22,7 @@ import type {
   DriverShiftDetails,
   DriverShiftListItem
 } from "./types";
+import type { DailyCheckItem, ShiftDailyCheck } from "./shiftDaily";
 
 export const API_BASE = import.meta.env.VITE_API_BASE_URL ?? "/api";
 
@@ -2128,6 +2129,33 @@ export async function cancelShiftHandover(token: string, shiftId: number): Promi
 
 export async function closeShiftVehicle(token: string, shiftId: number, force = false): Promise<DriverShiftDetails> {
   return postShiftAction(token, `${API_BASE}/v1/shifts/${shiftId}/close`, { force });
+}
+
+export async function completeShiftDailyCheck(
+  token: string,
+  shiftId: number,
+  checkId: number,
+  items: DailyCheckItem[]
+): Promise<ShiftDailyCheck> {
+  return requestJson<ShiftDailyCheck>(`${API_BASE}/v1/shifts/${shiftId}/daily-checks/${checkId}/complete`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify({ items })
+  });
+}
+
+export async function skipShiftDailyCheck(token: string, shiftId: number, checkId: number): Promise<ShiftDailyCheck> {
+  return requestJson<ShiftDailyCheck>(`${API_BASE}/v1/shifts/${shiftId}/daily-checks/${checkId}/skip`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json"
+    },
+    body: "{}"
+  });
 }
 
 export async function deleteShiftDraft(token: string, shiftId: number): Promise<void> {

@@ -31,6 +31,7 @@ import ShiftPhotosDialog from "./components/ShiftPhotosDialog.vue";
 import ShiftsView from "./components/ShiftsView.vue";
 import ShiftDetailsView from "./components/ShiftDetailsView.vue";
 import ShiftInspectionView from "./components/ShiftInspectionView.vue";
+import ShiftDailyCheckDialog from "./components/ShiftDailyCheckDialog.vue";
 import { RETURN_WARNING, type IncidentKind, type RouteIncident } from "./routeIncidents";
 import {
   ApiError,
@@ -153,8 +154,11 @@ import {
   beginShiftHandover,
   cancelShiftHandover,
   closeShiftVehicle,
+  completeShiftDailyCheck,
+  skipShiftDailyCheck,
   deleteShiftDraft
 } from "./api";
+import type { DailyCheckItem } from "./shiftDaily";
 import {
   addAction,
   addOutboxEvent,
@@ -368,6 +372,9 @@ const lateReasonPending = ref<{
   estimatedArrival?: string;
 } | null>(null);
 const activeDriverShift = ref<DriverShiftListItem | null>(null);
+const dailyCheckOpen = ref(false);
+const dailyCheckBusy = ref(false);
+const dailyCheckError = ref("");
 const shiftPhotos = ref<{ mode: "start" | "finish" } | null>(null);
 const shiftUploading = ref(false);
 const shiftsList = ref<DriverShiftListItem[]>([]);
@@ -1786,8 +1793,19 @@ function handleIncomingNotification(
   ) {
     void refreshShiftsList();
   }
-  if (isDriver.value && (item.event_type === "shift_started" || item.event_type === "shift_ended")) {
+  if (isDriver.value && (item.event_type === "shift_started" || item.event_type === "shift_ended" || item.event_type === "shift_daily_check")) {
     void refreshActiveDriverShift();
+  }
+  if (
+    item.event_type === "shift_daily_fault" &&
+    (currentSection.value === "shifts" || currentSection.value === "shift_details")
+  ) {
+    void refreshShiftsList();
+    const p = notificationPayloadRecord(item);
+    const sid = p ? notificationPayloadNumber(p, "shift_id") : null;
+    if (sid != null && selectedShift.value?.id === sid) {
+      void openShiftDetails(sid);
+    }
   }
 
   if (syncDriverState && item.event_type === "route_deleted" && isDriver.value) {
@@ -3805,6 +3823,18 @@ async function openNotificationFromItem(item: NotificationDto): Promise<void> {
     }
   }
 
+  if (item.event_type === "shift_daily_check" && isDriver.value) {
+    await refreshActiveDriverShift();
+    if (currentSection.value !== "driver_home") {
+      pushSection("driver_home");
+    }
+    if (activeDriverShift.value?.pending_daily_check) {
+      dailyCheckError.value = "";
+      dailyCheckOpen.value = true;
+    }
+    return;
+  }
+
   if (shiftId != null && canViewShifts.value) {
     await openShiftDetails(shiftId);
     return;
@@ -4654,8 +4684,57 @@ async function refreshActiveDriverShift(): Promise<void> {
   }
   try {
     activeDriverShift.value = await getMyActiveShift(authToken.value);
+    if (!activeDriverShift.value?.pending_daily_check) {
+      dailyCheckOpen.value = false;
+    }
   } catch {
     // keep last known
+  }
+}
+
+function openDailyCheckDialog(): void {
+  if (!activeDriverShift.value?.pending_daily_check) {
+    return;
+  }
+  dailyCheckError.value = "";
+  dailyCheckOpen.value = true;
+}
+
+async function submitDailyCheck(items: DailyCheckItem[]): Promise<void> {
+  const shift = activeDriverShift.value;
+  const check = shift?.pending_daily_check;
+  if (!authToken.value || !shift || !check) {
+    return;
+  }
+  dailyCheckBusy.value = true;
+  dailyCheckError.value = "";
+  try {
+    await completeShiftDailyCheck(authToken.value, shift.id, check.id, items);
+    dailyCheckOpen.value = false;
+    await refreshActiveDriverShift();
+  } catch (error) {
+    dailyCheckError.value = (error as Error).message;
+  } finally {
+    dailyCheckBusy.value = false;
+  }
+}
+
+async function skipDailyCheck(): Promise<void> {
+  const shift = activeDriverShift.value;
+  const check = shift?.pending_daily_check;
+  if (!authToken.value || !shift || !check) {
+    return;
+  }
+  dailyCheckBusy.value = true;
+  dailyCheckError.value = "";
+  try {
+    await skipShiftDailyCheck(authToken.value, shift.id, check.id);
+    dailyCheckOpen.value = false;
+    await refreshActiveDriverShift();
+  } catch (error) {
+    dailyCheckError.value = (error as Error).message;
+  } finally {
+    dailyCheckBusy.value = false;
   }
 }
 
@@ -6963,6 +7042,7 @@ onUnmounted(() => {
         @revert-active-point="doRevertPoint"
         @report-problem="openProblemDialog()"
         @toggle-shift="openShiftToggle"
+        @open-daily-check="openDailyCheckDialog"
       />
     </section>
 
@@ -7254,6 +7334,15 @@ onUnmounted(() => {
       :open="Boolean(lateReasonPending)"
       @cancel="lateReasonPending = null"
       @confirm="applyLateReason"
+    />
+    <ShiftDailyCheckDialog
+      :open="dailyCheckOpen"
+      :check="activeDriverShift?.pending_daily_check || null"
+      :busy="dailyCheckBusy"
+      :error="dailyCheckError"
+      @cancel="dailyCheckOpen = false"
+      @complete="submitDailyCheck"
+      @skip="skipDailyCheck"
     />
     <ShiftPhotosDialog
       v-if="shiftPhotos"

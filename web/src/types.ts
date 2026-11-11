@@ -408,6 +408,7 @@ export interface DriverShiftListItem {
   truck?: string;
   trailer?: string;
   place?: string;
+  pending_daily_check?: import("./shiftDaily").ShiftDailyCheck | null;
 }
 
 export interface DriverShiftImageMeta {
@@ -439,5 +440,6 @@ export interface DriverShiftDetails extends DriverShiftListItem {
   driver_docs?: import("./entityDocs").EntityDocsMap;
   vehicle_docs?: import("./entityDocs").EntityDocsMap;
   trailer_docs?: import("./entityDocs").EntityDocsMap;
+  daily_checks?: import("./shiftDaily").ShiftDailyCheck[];
 }
 

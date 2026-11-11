@@ -39,6 +39,7 @@ from mobile_api.bootstrap import ensure_demo_user
 from mobile_api.db import SessionLocal
 from mobile_api.stale_point_job import run_stale_point_loop
 from mobile_api.presence import run_presence_history_loop
+from mobile_api.shift_daily_job import run_shift_daily_check_loop
 
 app = FastAPI(
     title="DMK API Server",
@@ -123,6 +124,10 @@ def bootstrap_mobile_user():
         asyncio.get_event_loop().create_task(run_presence_history_loop())
     except Exception as extra:
         logger.warning("driver presence history loop not started: %s", extra)
+    try:
+        asyncio.get_event_loop().create_task(run_shift_daily_check_loop())
+    except Exception as daily:
+        logger.warning("shift daily check loop not started: %s", daily)
 
 
 @app.get("/")

@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from mobile_api.auth import get_current_driver, get_current_user
 from mobile_api.db import get_db
 from mobile_api.entity_docs import apply_profile_to_shift_docs, collect_writeback, merge_writeback, parse_docs
-from mobile_api.models import DriverShift, DriverShiftImage, FleetTrailer, FleetVehicle, Point, Route, User
+from mobile_api.models import DriverShift, DriverShiftDailyCheck, DriverShiftImage, FleetTrailer, FleetVehicle, Point, Route, User
 from mobile_api.point_documents_router import (
     MAX_FILE_BYTES,
     _atomic_write_bytes,
@@ -27,6 +27,19 @@ from mobile_api.point_documents_router import (
 from mobile_api.roles import ADMIN_ACCESS_ROLES, RoleCode, normalize_role_code
 from mobile_api.route_notification_logic import _manager_ids
 from mobile_api.notifications_service import create_notification_for_users
+from mobile_api.shift_daily import (
+    EVENT_DAILY_FAULT,
+    STATUS_DONE,
+    STATUS_PENDING,
+    STATUS_SKIPPED,
+    daily_check_out,
+    dump_items,
+    empty_items,
+    fault_items,
+    list_for_shift,
+    normalize_complete_items,
+    oldest_pending,
+)
 from mobile_api.shift_inspection import (
     LEGACY_END_KINDS,
     LEGACY_START_KINDS,
@@ -75,6 +88,10 @@ class ShiftPatchBody(BaseModel):
 
 class ShiftActionBody(BaseModel):
     force: bool = False
+
+
+class DailyCheckCompleteBody(BaseModel):
+    items: list[dict] = Field(default_factory=list)
 
 
 def shift_title(full_name: str | None, started_at: datetime | None, ended_at: datetime | None) -> str:
@@ -265,6 +282,7 @@ def _shift_out(db: Session, shift: DriverShift, *, include_details: bool = False
         payload["refuels"] = as_list(parse_json(getattr(shift, "refuels_json", None), []))
         payload["has_signature_start"] = "sign" in photo_slots(images, phase="start")
         payload["has_signature_end"] = "sign" in photo_slots(images, phase="end")
+        payload["daily_checks"] = [daily_check_out(row) for row in list_for_shift(db, shift.id)]
         payload.update(_entity_docs_payload(db, shift))
     return payload
 
@@ -450,7 +468,12 @@ def get_my_active_shift(
     current_user: User = Depends(get_current_driver),
 ) -> dict:
     shift = _active_shift(db, current_user.id)
-    return {"shift": _shift_out(db, shift) if shift else None}
+    if shift is None:
+        return {"shift": None}
+    payload = _shift_out(db, shift)
+    pending = oldest_pending(db, shift.id)
+    payload["pending_daily_check"] = daily_check_out(pending) if pending else None
+    return {"shift": payload}
 
 
 @router.get("/v1/shifts")
@@ -873,6 +896,87 @@ async def finish_shift(
     db.commit()
     db.refresh(shift)
     return _shift_out(db, shift, include_details=True)
+
+
+def _owned_daily_check(db: Session, shift_id: int, check_id: int, user: User) -> tuple[DriverShift, DriverShiftDailyCheck]:
+    shift = _owned_open_shift(db, shift_id, user)
+    if _workflow(shift) == WORKFLOW_CLOSED:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Вахта уже закончена")
+    row = db.get(DriverShiftDailyCheck, check_id)
+    if row is None or int(row.shift_id) != int(shift.id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not found")
+    return shift, row
+
+
+def _notify_daily_fault(db: Session, *, shift: DriverShift, driver: User, row: DriverShiftDailyCheck, items: list[dict]) -> None:
+    faults = fault_items(items)
+    if not faults:
+        return
+    name = (driver.full_name or driver.login or shift.driver_name or "Водитель").strip()
+    truck = (shift.truck or "").strip()
+    names = ", ".join(str(item.get("name") or "") for item in faults if item.get("name"))
+    date_label = row.check_date.strftime("%d.%m.%Y") if row.check_date else ""
+    create_notification_for_users(
+        db,
+        user_ids=_manager_ids(db),
+        event_type=EVENT_DAILY_FAULT,
+        title="Неисправность на ежедневном ТО",
+        message=f"{name} · {date_label} · ТС {truck or '—'} · {names}".strip(" ·"),
+        payload={
+            "shift_id": shift.id,
+            "check_id": row.id,
+            "check_date": row.check_date.isoformat() if row.check_date else None,
+            "driver_user_id": driver.id,
+            "driver_full_name": name,
+            "faults": [{"key": item.get("key"), "name": item.get("name"), "note": item.get("note") or ""} for item in faults],
+        },
+        skip_user_ids=[driver.id],
+    )
+
+
+@router.post("/v1/shifts/{shift_id}/daily-checks/{check_id}/complete")
+def complete_daily_check(
+    shift_id: int,
+    check_id: int,
+    body: DailyCheckCompleteBody,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_driver),
+) -> dict:
+    shift, row = _owned_daily_check(db, shift_id, check_id, current_user)
+    if row.status != STATUS_PENDING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Проверка уже закрыта")
+    try:
+        items = normalize_complete_items(body.items)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    now = datetime.now(timezone.utc)
+    row.checks_json = dump_items(items)
+    row.status = STATUS_DONE
+    row.completed_at = now
+    _notify_daily_fault(db, shift=shift, driver=current_user, row=row, items=items)
+    db.commit()
+    db.refresh(row)
+    return daily_check_out(row)
+
+
+@router.post("/v1/shifts/{shift_id}/daily-checks/{check_id}/skip")
+def skip_daily_check(
+    shift_id: int,
+    check_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_driver),
+) -> dict:
+    _shift, row = _owned_daily_check(db, shift_id, check_id, current_user)
+    if row.status != STATUS_PENDING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Проверка уже закрыта")
+    now = datetime.now(timezone.utc)
+    if not (row.checks_json or "").strip() or row.checks_json == "[]":
+        row.checks_json = dump_items(empty_items())
+    row.status = STATUS_SKIPPED
+    row.skipped_at = now
+    db.commit()
+    db.refresh(row)
+    return daily_check_out(row)
 
 
 @router.get("/v1/shift-images/{image_id}/file")

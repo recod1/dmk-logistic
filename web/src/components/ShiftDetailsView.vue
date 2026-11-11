@@ -18,6 +18,13 @@ import {
   type ShiftPhase,
   type ShiftPhasePayload
 } from "../shiftInspection";
+import {
+  dailyDateLabel,
+  dailyItemLabel,
+  dailyStatusLabel,
+  dailyWhenLabel,
+  type ShiftDailyCheck
+} from "../shiftDaily";
 import type { DriverShiftDetails, DriverShiftImageMeta } from "../types";
 
 const props = defineProps<{
@@ -68,6 +75,14 @@ const issuesEnd = computed(() =>
 const fuel = computed(() => fuelStats(intake.value, handover.value, props.shift?.refuels || []));
 const title = computed(() => props.shift?.title || "Вахта");
 const hasHandover = computed(() => Boolean(handover.value) || props.shift?.workflow_status === "closing" || props.shift?.workflow_status === "closed");
+const dailyChecks = computed(() => props.shift?.daily_checks || []);
+
+function dailyStatusClass(row: ShiftDailyCheck): string {
+  if (row.status === "skipped") return "skipped";
+  if (row.has_fault || (row.status === "done" && row.items.some((item) => item.st === "bad"))) return "bad";
+  if (row.status === "done") return "ok";
+  return "pending";
+}
 
 function imagesFor(phase: ShiftPhase): DriverShiftImageMeta[] {
   return (props.shift?.images || []).filter((item) => {
@@ -199,6 +214,28 @@ onUnmounted(() => {
         <div><b>{{ fmtNum(fuel.refuel) }} л</b><span>заправлено</span></div>
       </div>
       <button v-if="canInspect" class="primary" type="button" @click="emit('openInspect')">Продолжить заполнение как водитель</button>
+    </article>
+
+    <article v-if="shift" class="card daily-history">
+      <h3>Ежедневное ТО</h3>
+      <p v-if="!dailyChecks.length" class="empty">Пока нет ежедневных проверок. Они появляются со следующего дня активной вахты.</p>
+      <div v-for="row in dailyChecks" :key="row.id" class="daily-row">
+        <div class="daily-head">
+          <strong>{{ dailyDateLabel(row.check_date) }}</strong>
+          <span class="pill" :class="dailyStatusClass(row)">{{ dailyStatusLabel(row.status) }}</span>
+        </div>
+        <p class="muted">{{ dailyWhenLabel(row) }}</p>
+        <p v-if="row.status === 'skipped'" class="empty">Водитель пропустил проверку</p>
+        <table v-else-if="row.status === 'done'" class="table">
+          <tbody>
+            <tr v-for="item in row.items" :key="item.key">
+              <td>{{ item.name }}</td>
+              <td :class="item.st === 'bad' ? 'bad' : ''">{{ dailyItemLabel(item) }}{{ item.note ? ` · ${item.note}` : "" }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p v-else class="muted">Ожидает ответа водителя</p>
+      </div>
     </article>
 
     <nav v-if="shift" class="tabs">
@@ -423,7 +460,13 @@ h4 { font-size: 0.82rem; letter-spacing: 0.04em; text-transform: uppercase; colo
 .pill { display: inline-block; font-size: 0.78rem; font-weight: 600; padding: 3px 9px; border-radius: 999px; }
 .pill.draft, .pill.closing { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
 .pill.active { background: rgba(59, 130, 246, 0.18); color: #93c5fd; }
-.pill.closed, .pill.ended { background: rgba(34, 197, 94, 0.16); color: #86efac; }
+.pill.closed, .pill.ended, .pill.ok { background: rgba(34, 197, 94, 0.16); color: #86efac; }
+.pill.skipped { background: rgba(148, 163, 184, 0.18); color: #cbd5e1; }
+.pill.pending { background: rgba(245, 158, 11, 0.16); color: #fbbf24; }
+.daily-history { gap: 0.85rem; }
+.daily-row { display: grid; gap: 0.35rem; padding-bottom: 0.7rem; border-bottom: 1px solid var(--border); }
+.daily-row:last-child { border-bottom: 0; padding-bottom: 0; }
+.daily-head { display: flex; justify-content: space-between; gap: 0.5rem; align-items: center; }
 .routes { display: grid; gap: 0.45rem; }
 .route-card { text-align: left; border: 1px solid var(--border); border-radius: 12px; background: var(--surface-2, #111827); color: #fff; padding: 0.7rem; display: grid; gap: 0.2rem; }
 .empty, .muted, .error { margin: 0; }
