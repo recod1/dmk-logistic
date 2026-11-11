@@ -436,5 +436,8 @@ export interface DriverShiftDetails extends DriverShiftListItem {
   refuels?: import("./shiftInspection").ShiftRefuel[];
   has_signature_start?: boolean;
   has_signature_end?: boolean;
+  driver_docs?: import("./entityDocs").EntityDocsMap;
+  vehicle_docs?: import("./entityDocs").EntityDocsMap;
+  trailer_docs?: import("./entityDocs").EntityDocsMap;
 }
 

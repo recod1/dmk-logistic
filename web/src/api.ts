@@ -1543,7 +1543,7 @@ export async function saveLogisticsContacts(token: string, items: Array<{ name: 
   return data.items ?? [];
 }
 
-export type FleetPlate = { id: number; plate: string; updated_at?: string };
+export type FleetPlate = { id: number; plate: string; updated_at?: string; docs?: import("./entityDocs").EntityDocsMap };
 
 async function fleetList(token: string, kind: "vehicles" | "trailers"): Promise<FleetPlate[]> {
   const data = await requestJson<{ items: FleetPlate[] }>(`${API_BASE}/v1/fleet/${kind}`, {
@@ -1575,6 +1575,7 @@ export type LiveDriverCard = {
   last_seen_at?: string | null;
   connection_status: string;
   connection_label: string;
+  docs?: import("./entityDocs").EntityDocsMap;
 };
 
 export type DriverPresenceSample = {
@@ -1712,11 +1713,15 @@ export async function createFleetVehicle(token: string, plate: string): Promise<
   });
 }
 
-export async function updateFleetVehicle(token: string, id: number, plate: string): Promise<FleetPlate> {
+export async function updateFleetVehicle(
+  token: string,
+  id: number,
+  payload: { plate?: string; docs?: import("./entityDocs").EntityDocsMap }
+): Promise<FleetPlate> {
   return requestJson<FleetPlate>(`${API_BASE}/v1/fleet/vehicles/${id}`, {
     method: "PATCH",
     headers: { Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ plate })
+    body: JSON.stringify(payload)
   });
 }
 
@@ -1735,11 +1740,27 @@ export async function createFleetTrailer(token: string, plate: string): Promise<
   });
 }
 
-export async function updateFleetTrailer(token: string, id: number, plate: string): Promise<FleetPlate> {
+export async function updateFleetTrailer(
+  token: string,
+  id: number,
+  payload: { plate?: string; docs?: import("./entityDocs").EntityDocsMap }
+): Promise<FleetPlate> {
   return requestJson<FleetPlate>(`${API_BASE}/v1/fleet/trailers/${id}`, {
     method: "PATCH",
     headers: { Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ plate })
+    body: JSON.stringify(payload)
+  });
+}
+
+export async function updateDriverDocs(
+  token: string,
+  userId: number,
+  docs: import("./entityDocs").EntityDocsMap
+): Promise<LiveDriverCard> {
+  return requestJson<LiveDriverCard>(`${API_BASE}/v1/fleet/drivers/${userId}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ docs })
   });
 }
 

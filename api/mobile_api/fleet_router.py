@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -10,6 +11,7 @@ from sqlalchemy.orm import Session
 from mobile_api.auth import get_current_fleet_editor, get_current_fleet_reader
 from mobile_api.db import get_db
 from mobile_api.driver_trip_rules import DriverRouteState, pick_active_route
+from mobile_api.entity_docs import dump_docs, parse_docs
 from mobile_api.models import FleetTrailer, FleetVehicle, Route, User
 from mobile_api.presence import list_presence_history, presence_fields, queue_presence_probes
 from mobile_api.roles import RoleCode
@@ -23,10 +25,25 @@ class FleetPlateBody(BaseModel):
     plate: str = Field(min_length=1, max_length=32)
 
 
+class FleetItemPatch(BaseModel):
+    plate: str | None = Field(default=None, max_length=32)
+    docs: dict[str, Any] | None = None
+
+
+class DriverDocsBody(BaseModel):
+    docs: dict[str, Any]
+
+
+def _item_kind(row: FleetVehicle | FleetTrailer) -> str:
+    return "trailer" if isinstance(row, FleetTrailer) else "vehicle"
+
+
 def _item_out(row: FleetVehicle | FleetTrailer) -> dict:
+    kind = _item_kind(row)
     return {
         "id": int(row.id),
         "plate": row.plate,
+        "docs": parse_docs(getattr(row, "docs_json", None), kind),
         "updated_at": row.updated_at.isoformat() if isinstance(row.updated_at, datetime) else str(row.updated_at),
     }
 
@@ -98,18 +115,21 @@ def create_vehicle(
 @router.patch("/v1/fleet/vehicles/{item_id}")
 def update_vehicle(
     item_id: int,
-    payload: FleetPlateBody,
+    payload: FleetItemPatch,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_fleet_editor),
 ) -> dict:
     row = db.get(FleetVehicle, item_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="ТС не найден")
-    plate = _http_plate(payload.plate)
-    other = db.scalar(select(FleetVehicle).where(FleetVehicle.plate == plate, FleetVehicle.id != item_id))
-    if other is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Такой номер ТС уже есть в списке")
-    row.plate = plate
+    if payload.plate is not None:
+        plate = _http_plate(payload.plate)
+        other = db.scalar(select(FleetVehicle).where(FleetVehicle.plate == plate, FleetVehicle.id != item_id))
+        if other is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Такой номер ТС уже есть в списке")
+        row.plate = plate
+    if payload.docs is not None:
+        row.docs_json = dump_docs(payload.docs, "vehicle")
     db.commit()
     db.refresh(row)
     return _item_out(row)
@@ -157,18 +177,21 @@ def create_trailer(
 @router.patch("/v1/fleet/trailers/{item_id}")
 def update_trailer(
     item_id: int,
-    payload: FleetPlateBody,
+    payload: FleetItemPatch,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_fleet_editor),
 ) -> dict:
     row = db.get(FleetTrailer, item_id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Прицеп не найден")
-    plate = _http_plate(payload.plate)
-    other = db.scalar(select(FleetTrailer).where(FleetTrailer.plate == plate, FleetTrailer.id != item_id))
-    if other is not None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Такой номер прицепа уже есть в списке")
-    row.plate = plate
+    if payload.plate is not None:
+        plate = _http_plate(payload.plate)
+        other = db.scalar(select(FleetTrailer).where(FleetTrailer.plate == plate, FleetTrailer.id != item_id))
+        if other is not None:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Такой номер прицепа уже есть в списке")
+        row.plate = plate
+    if payload.docs is not None:
+        row.docs_json = dump_docs(payload.docs, "trailer")
     db.commit()
     db.refresh(row)
     return _item_out(row)
@@ -220,6 +243,7 @@ def _driver_live_out(driver: User, assigned: list[Route]) -> dict:
         "lat": lat,
         "lng": lng,
         "location_at": loc_at,
+        "docs": parse_docs(getattr(driver, "docs_json", None), "driver"),
         **presence,
     }
 
@@ -253,3 +277,20 @@ def get_live_driver(
     payload = _driver_live_out(driver, by_driver.get(int(driver.id), []))
     payload["history"] = list_presence_history(db, int(driver.id))
     return payload
+
+
+@router.patch("/v1/fleet/drivers/{user_id}")
+def update_driver_docs(
+    user_id: int,
+    payload: DriverDocsBody,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_fleet_editor),
+) -> dict:
+    driver = db.get(User, user_id)
+    if driver is None or driver.role_code != RoleCode.DRIVER.value:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Водитель не найден")
+    driver.docs_json = dump_docs(payload.docs, "driver")
+    db.commit()
+    db.refresh(driver)
+    by_driver = _active_routes_by_driver(db, [int(driver.id)])
+    return _driver_live_out(driver, by_driver.get(int(driver.id), []))

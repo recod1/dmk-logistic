@@ -2,10 +2,12 @@
 import { computed, onUnmounted, ref, watch } from "vue";
 
 import MapsCoordsLink from "./MapsCoordsLink.vue";
+import EntityDocsForm from "./EntityDocsForm.vue";
 import { getLiveDriver, type DriverPresenceSample } from "../api";
+import { emptyEntityDocs, normalizeEntityDocs, type EntityDocsMap, type EntityKind } from "../entityDocs";
 import { isValidPlate, normalizePlate, PLATE_HINT } from "../vehiclePlate";
 
-export type FleetItem = { id: number; plate: string };
+export type FleetItem = { id: number; plate: string; docs?: EntityDocsMap };
 export type LiveDriver = {
   id: number;
   login: string;
@@ -20,6 +22,7 @@ export type LiveDriver = {
   last_seen_at?: string | null;
   connection_status: "online" | "recent" | "offline" | string;
   connection_label: string;
+  docs?: EntityDocsMap;
 };
 
 const props = defineProps<{
@@ -36,16 +39,20 @@ const emit = defineEmits<{
   refresh: [];
   refreshDrivers: [];
   createVehicle: [plate: string];
-  updateVehicle: [payload: { id: number; plate: string }];
+  updateVehicle: [payload: { id: number; plate?: string; docs?: EntityDocsMap }];
   deleteVehicle: [id: number];
   createTrailer: [plate: string];
-  updateTrailer: [payload: { id: number; plate: string }];
+  updateTrailer: [payload: { id: number; plate?: string; docs?: EntityDocsMap }];
   deleteTrailer: [id: number];
+  updateDriverDocs: [payload: { id: number; docs: EntityDocsMap }];
 }>();
 
 const tab = ref<"vehicles" | "trailers" | "drivers">("vehicles");
 let driversTimer: number | null = null;
 const selectedDriverId = ref<number | null>(null);
+const selectedItemId = ref<number | null>(null);
+const itemDocs = ref<EntityDocsMap>(emptyEntityDocs("vehicle"));
+const driverDocs = ref<EntityDocsMap>(emptyEntityDocs("driver"));
 const driverHistory = ref<DriverPresenceSample[]>([]);
 const driverHistoryLoading = ref(false);
 const driverHistoryError = ref("");
@@ -55,6 +62,8 @@ const editPlate = ref("");
 const localError = ref("");
 
 const currentItems = computed(() => (tab.value === "vehicles" ? props.vehicles : props.trailers));
+const selectedItem = computed(() => currentItems.value.find((item) => item.id === selectedItemId.value) || null);
+const itemKind = computed<EntityKind>(() => (tab.value === "trailers" ? "trailer" : "vehicle"));
 
 function stopDriversPoll(): void {
   if (driversTimer !== null) {
@@ -73,6 +82,7 @@ function switchTab(next: "vehicles" | "trailers" | "drivers"): void {
   tab.value = next;
   draft.value = "";
   editId.value = null;
+  selectedItemId.value = null;
   localError.value = "";
   if (next === "drivers") {
     startDriversPoll();
@@ -103,6 +113,17 @@ watch(
   () => {
     if (selectedDriverId.value) {
       void loadDriverHistory(selectedDriverId.value);
+      const driver = (props.drivers || []).find((item) => item.id === selectedDriverId.value);
+      if (driver) driverDocs.value = normalizeEntityDocs(driver.docs, "driver");
+    }
+  }
+);
+
+watch(
+  () => [selectedItemId.value, tab.value, props.vehicles, props.trailers] as const,
+  () => {
+    if (selectedItem.value) {
+      itemDocs.value = normalizeEntityDocs(selectedItem.value.docs, itemKind.value);
     }
   }
 );
@@ -126,6 +147,28 @@ async function loadDriverHistory(userId: number): Promise<void> {
 
 function openDriver(driver: LiveDriver): void {
   selectedDriverId.value = driver.id;
+  driverDocs.value = normalizeEntityDocs(driver.docs, "driver");
+}
+
+function openItem(item: FleetItem): void {
+  selectedItemId.value = item.id;
+  itemDocs.value = normalizeEntityDocs(item.docs, itemKind.value);
+}
+
+function closeItem(): void {
+  selectedItemId.value = null;
+}
+
+function saveItemDocs(): void {
+  if (!selectedItem.value) return;
+  const payload = { id: selectedItem.value.id, plate: selectedItem.value.plate, docs: itemDocs.value };
+  if (tab.value === "vehicles") emit("updateVehicle", payload);
+  else emit("updateTrailer", payload);
+}
+
+function saveDriverDocs(): void {
+  if (!selectedDriver.value) return;
+  emit("updateDriverDocs", { id: selectedDriver.value.id, docs: driverDocs.value });
 }
 
 function closeDriver(): void {
@@ -233,6 +276,10 @@ function remove(item: FleetItem): void {
           </li>
         </ul>
         <p v-else-if="!driverHistoryLoading" class="empty">История пока пустая — первая запись появится после опроса.</p>
+        <h3 class="history-title">Документы водителя</h3>
+        <p class="hint">Права, карта тахографа, медсправка, медкнижка и ДОПОГ. Подставляются в приёмку вахты.</p>
+        <EntityDocsForm v-model="driverDocs" kind="driver" :disabled="saving" />
+        <button type="button" class="primary" :disabled="saving" @click="saveDriverDocs">Сохранить документы</button>
       </template>
       <template v-else>
         <h2>Водители</h2>
@@ -265,8 +312,16 @@ function remove(item: FleetItem): void {
       </template>
     </div>
     <div v-else class="card">
+      <template v-if="selectedItem">
+        <button class="ghost back" type="button" @click="closeItem">← К списку</button>
+        <h2>{{ selectedItem.plate }}</h2>
+        <p class="hint">{{ tab === "vehicles" ? "СТС, ОСАГО, диагностическая карта, калибровка тахографа, зелёная карта и ДОПОГ тягача." : "СТС прицепа, ATP, санпаспорт и диагностическая карта." }}</p>
+        <EntityDocsForm v-model="itemDocs" :kind="itemKind" :disabled="saving" />
+        <button type="button" class="primary" :disabled="saving" @click="saveItemDocs">Сохранить документы</button>
+      </template>
+      <template v-else>
       <h2>{{ tab === "vehicles" ? "Транспорт" : "Прицепы" }}</h2>
-      <p class="hint">{{ PLATE_HINT }}</p>
+      <p class="hint">{{ PLATE_HINT }} Нажмите на номер, чтобы заполнить постоянные документы.</p>
       <div class="row">
         <input
           v-model="draft"
@@ -286,7 +341,7 @@ function remove(item: FleetItem): void {
             <button type="button" class="ghost" @click="editId = null">Отмена</button>
           </template>
           <template v-else>
-            <strong>{{ item.plate }}</strong>
+            <button type="button" class="plate-btn" @click="openItem(item)"><strong>{{ item.plate }}</strong></button>
             <div class="item-actions">
               <button type="button" class="icon-btn" :disabled="saving" title="Изменить" aria-label="Изменить" @click="startEdit(item)">
                 <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -308,6 +363,7 @@ function remove(item: FleetItem): void {
           </template>
         </li>
       </ul>
+      </template>
     </div>
   </section>
 </template>
@@ -399,6 +455,15 @@ input {
 .item strong {
   flex: 1 1 8rem;
   letter-spacing: 0.04em;
+}
+.plate-btn {
+  flex: 1 1 8rem;
+  text-align: left;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  min-width: 0;
 }
 .driver-card {
   display: grid;
@@ -506,6 +571,8 @@ input {
   background: rgba(127, 29, 29, 0.25);
 }
 .primary {
+  width: auto;
+  justify-self: start;
   border: none;
   border-radius: 10px;
   background: var(--success-strong);

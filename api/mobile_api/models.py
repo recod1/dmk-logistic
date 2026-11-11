@@ -35,6 +35,7 @@ class User(Base):
     last_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     last_location_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    docs_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
@@ -605,6 +606,7 @@ class FleetVehicle(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     plate: Mapped[str] = mapped_column(String(16), nullable=False, unique=True, index=True)
+    docs_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
@@ -629,6 +631,7 @@ class FleetTrailer(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     plate: Mapped[str] = mapped_column(String(16), nullable=False, unique=True, index=True)
+    docs_json: Mapped[str] = mapped_column(Text, nullable=False, default="{}", server_default="{}")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()

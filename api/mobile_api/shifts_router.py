@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from mobile_api.auth import get_current_driver, get_current_user
 from mobile_api.db import get_db
+from mobile_api.entity_docs import apply_profile_to_shift_docs, collect_writeback, merge_writeback, parse_docs
 from mobile_api.models import DriverShift, DriverShiftImage, FleetTrailer, FleetVehicle, Point, Route, User
 from mobile_api.point_documents_router import (
     MAX_FILE_BYTES,
@@ -140,6 +141,54 @@ def _fleet_plates(db: Session, model: type[FleetVehicle] | type[FleetTrailer]) -
     return {str(plate) for plate in db.scalars(select(model.plate)).all() if plate}
 
 
+def _vehicle_by_plate(db: Session, plate: str) -> FleetVehicle | None:
+    cleaned = (plate or "").strip().upper()
+    if not cleaned:
+        return None
+    return db.scalar(select(FleetVehicle).where(FleetVehicle.plate == cleaned))
+
+
+def _trailer_by_plate(db: Session, plate: str) -> FleetTrailer | None:
+    cleaned = (plate or "").strip().upper()
+    if not cleaned:
+        return None
+    return db.scalar(select(FleetTrailer).where(FleetTrailer.plate == cleaned))
+
+
+def _entity_docs_payload(db: Session, shift: DriverShift) -> dict:
+    driver = db.get(User, shift.driver_user_id)
+    truck = _vehicle_by_plate(db, getattr(shift, "truck", "") or "")
+    trailer = _trailer_by_plate(db, getattr(shift, "trailer", "") or "")
+    return {
+        "driver_docs": parse_docs(getattr(driver, "docs_json", None) if driver else None, "driver"),
+        "vehicle_docs": parse_docs(getattr(truck, "docs_json", None) if truck else None, "vehicle"),
+        "trailer_docs": parse_docs(getattr(trailer, "docs_json", None) if trailer else None, "trailer"),
+    }
+
+
+def _prefill_intake_from_profiles(db: Session, shift: DriverShift, intake: dict) -> dict:
+    docs = list(intake.get("docs") or [])
+    profiles = _entity_docs_payload(db, shift)
+    apply_profile_to_shift_docs(docs, profiles["driver_docs"], "driver")
+    apply_profile_to_shift_docs(docs, profiles["vehicle_docs"], "vehicle")
+    apply_profile_to_shift_docs(docs, profiles["trailer_docs"], "trailer")
+    intake["docs"] = docs
+    return intake
+
+
+def _writeback_entity_docs(db: Session, shift: DriverShift, docs: list | None) -> None:
+    grouped = collect_writeback(list(docs or []))
+    driver = db.get(User, shift.driver_user_id)
+    if driver is not None and grouped["driver"]:
+        driver.docs_json = merge_writeback(getattr(driver, "docs_json", None), "driver", grouped["driver"])
+    truck = _vehicle_by_plate(db, getattr(shift, "truck", "") or "")
+    if truck is not None and grouped["vehicle"]:
+        truck.docs_json = merge_writeback(getattr(truck, "docs_json", None), "vehicle", grouped["vehicle"])
+    trailer = _trailer_by_plate(db, getattr(shift, "trailer", "") or "")
+    if trailer is not None and grouped["trailer"]:
+        trailer.docs_json = merge_writeback(getattr(trailer, "docs_json", None), "trailer", grouped["trailer"])
+
+
 def _parse_day_bound(raw: str | None, *, end: bool) -> datetime | None:
     text = (raw or "").strip()
     if not text:
@@ -216,6 +265,7 @@ def _shift_out(db: Session, shift: DriverShift, *, include_details: bool = False
         payload["refuels"] = as_list(parse_json(getattr(shift, "refuels_json", None), []))
         payload["has_signature_start"] = "sign" in photo_slots(images, phase="start")
         payload["has_signature_end"] = "sign" in photo_slots(images, phase="end")
+        payload.update(_entity_docs_payload(db, shift))
     return payload
 
 
@@ -485,10 +535,10 @@ def create_shift_draft(
         started_at=datetime.now(timezone.utc),
         workflow_status=WORKFLOW_DRAFT,
         driver_name=name,
-        intake_json=dump_json(empty_phase()),
         handover_json="",
         refuels_json="[]",
     )
+    shift.intake_json = dump_json(_prefill_intake_from_profiles(db, shift, empty_phase()))
     db.add(shift)
     db.commit()
     db.refresh(shift)
@@ -531,7 +581,10 @@ def patch_shift(
     if payload.intake is not None:
         if workflow != WORKFLOW_DRAFT:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Приёмка уже завершена")
-        shift.intake_json = dump_json(payload.intake)
+        intake = as_dict(payload.intake) or empty_phase()
+        intake = _prefill_intake_from_profiles(db, shift, intake)
+        shift.intake_json = dump_json(intake)
+        _writeback_entity_docs(db, shift, intake.get("docs"))
     if payload.handover is not None:
         if workflow != WORKFLOW_CLOSING:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Сдача сейчас недоступна")

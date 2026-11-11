@@ -32,6 +32,7 @@ import {
   type ShiftRefuel,
   type ShiftWorkflow
 } from "../shiftInspection";
+import { applyProfileToShiftDocs } from "../entityDocs";
 import type { DriverShiftDetails } from "../types";
 
 const props = defineProps<{
@@ -41,8 +42,8 @@ const props = defineProps<{
   error?: string;
   busy?: boolean;
   readOnly?: boolean;
-  vehicles?: Array<{ id: number; plate: string }>;
-  trailers?: Array<{ id: number; plate: string }>;
+  vehicles?: Array<{ id: number; plate: string; docs?: import("../entityDocs").EntityDocsMap }>;
+  trailers?: Array<{ id: number; plate: string; docs?: import("../entityDocs").EntityDocsMap }>;
 }>();
 
 const emit = defineEmits<{
@@ -169,7 +170,17 @@ function hydrate(resetPosition = true): void {
   if (resetPosition) {
     step.value = [0, 1, 2].find((i) => !isStepDone(i)) ?? 3;
   }
+  applyLinkedProfiles();
   hydrating = false;
+}
+
+function applyLinkedProfiles(): void {
+  if (isRO.value || workflow.value !== "draft") return;
+  applyProfileToShiftDocs(intake.value.docs, props.shift?.driver_docs, "driver");
+  const vehicle = (props.vehicles || []).find((item) => item.plate === truck.value);
+  applyProfileToShiftDocs(intake.value.docs, vehicle?.docs || props.shift?.vehicle_docs, "vehicle");
+  const linkedTrailer = (props.trailers || []).find((item) => item.plate === trailer.value);
+  applyProfileToShiftDocs(intake.value.docs, linkedTrailer?.docs || props.shift?.trailer_docs, "trailer");
 }
 
 function isStepDone(index: number): boolean {
@@ -216,6 +227,11 @@ watch(
   () => hydrate(true),
   { immediate: true }
 );
+
+watch([truck, trailer, () => props.vehicles, () => props.trailers], () => {
+  if (hydrating) return;
+  applyLinkedProfiles();
+});
 
 watch(
   () => `${props.shift?.id ?? ""}:${props.authToken}:${(props.shift?.images || []).map((img) => img.id).join(",")}`,

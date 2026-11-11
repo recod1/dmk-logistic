@@ -91,6 +91,7 @@ import {
   createFleetTrailer,
   updateFleetTrailer,
   deleteFleetTrailer,
+  updateDriverDocs,
   markRouteChatDelivered,
   markRoomChatDelivered,
   markSalaryChatDelivered,
@@ -5842,12 +5843,12 @@ async function doCreateFleetVehicle(plate: string): Promise<void> {
   }
 }
 
-async function doUpdateFleetVehicle(payload: { id: number; plate: string }): Promise<void> {
+async function doUpdateFleetVehicle(payload: { id: number; plate?: string; docs?: import("./entityDocs").EntityDocsMap }): Promise<void> {
   if (!authToken.value) return;
   fleetSaving.value = true;
   fleetError.value = "";
   try {
-    await updateFleetVehicle(authToken.value, payload.id, payload.plate);
+    await updateFleetVehicle(authToken.value, payload.id, { plate: payload.plate, docs: payload.docs });
     await refreshFleetLists();
   } catch (error) {
     fleetError.value = (error as Error).message;
@@ -5884,13 +5885,27 @@ async function doCreateFleetTrailer(plate: string): Promise<void> {
   }
 }
 
-async function doUpdateFleetTrailer(payload: { id: number; plate: string }): Promise<void> {
+async function doUpdateFleetTrailer(payload: { id: number; plate?: string; docs?: import("./entityDocs").EntityDocsMap }): Promise<void> {
   if (!authToken.value) return;
   fleetSaving.value = true;
   fleetError.value = "";
   try {
-    await updateFleetTrailer(authToken.value, payload.id, payload.plate);
+    await updateFleetTrailer(authToken.value, payload.id, { plate: payload.plate, docs: payload.docs });
     await refreshFleetLists();
+  } catch (error) {
+    fleetError.value = (error as Error).message;
+  } finally {
+    fleetSaving.value = false;
+  }
+}
+
+async function doUpdateDriverDocs(payload: { id: number; docs: import("./entityDocs").EntityDocsMap }): Promise<void> {
+  if (!authToken.value) return;
+  fleetSaving.value = true;
+  fleetError.value = "";
+  try {
+    await updateDriverDocs(authToken.value, payload.id, payload.docs);
+    await refreshFleetDrivers();
   } catch (error) {
     fleetError.value = (error as Error).message;
   } finally {
@@ -6927,6 +6942,7 @@ onUnmounted(() => {
         @create-trailer="(plate) => void doCreateFleetTrailer(plate)"
         @update-trailer="(payload) => void doUpdateFleetTrailer(payload)"
         @delete-trailer="(id) => void doDeleteFleetTrailer(id)"
+        @update-driver-docs="(payload) => void doUpdateDriverDocs(payload)"
       />
     </section>
 
@@ -6972,7 +6988,7 @@ onUnmounted(() => {
         :loading="shiftDetailsLoading"
         :error="shiftsError"
         :auth-token="authToken"
-        :can-inspect="Boolean(selectedShift)"
+        :can-inspect="Boolean(isDriver && selectedShift && selectedShift.driver_user_id === authUser?.id)"
         @back="goBack"
         @open-route="openRouteDetailsForRole"
         @open-inspect="selectedShift && openShiftInspect(selectedShift.id)"
