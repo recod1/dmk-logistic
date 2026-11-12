@@ -31,3 +31,12 @@ class PresenceStatusTests(TestCase):
 
     def test_presence_history_interval_is_five_minutes(self) -> None:
         self.assertEqual(SAMPLE_INTERVAL_SEC, 300)
+
+    def test_presence_history_list_is_paged(self) -> None:
+        import inspect
+
+        from mobile_api.presence import list_presence_history
+
+        params = inspect.signature(list_presence_history).parameters
+        self.assertEqual(params["limit"].default, 15)
+        self.assertIn("before_id", params)

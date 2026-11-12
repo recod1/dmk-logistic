@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -267,6 +267,8 @@ def list_live_drivers(
 @router.get("/v1/fleet/drivers/{user_id}")
 def get_live_driver(
     user_id: int,
+    history_limit: int = Query(default=15, ge=1, le=50),
+    before_id: int | None = Query(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_fleet_editor),
 ) -> dict:
@@ -275,7 +277,9 @@ def get_live_driver(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Водитель не найден")
     by_driver = _active_routes_by_driver(db, [int(driver.id)])
     payload = _driver_live_out(driver, by_driver.get(int(driver.id), []))
-    payload["history"] = list_presence_history(db, int(driver.id))
+    history, has_more = list_presence_history(db, int(driver.id), limit=history_limit, before_id=before_id)
+    payload["history"] = history
+    payload["history_has_more"] = has_more
     return payload
 
 

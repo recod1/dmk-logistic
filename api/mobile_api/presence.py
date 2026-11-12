@@ -6,7 +6,7 @@ import asyncio
 import logging
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import delete, select
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.orm import Session
 
 from mobile_api.db import SessionLocal
@@ -136,14 +136,37 @@ def _sample_out(row: DriverPresenceSample) -> dict:
     }
 
 
-def list_presence_history(db: Session, user_id: int, *, limit: int = 500) -> list[dict]:
-    rows = db.scalars(
-        select(DriverPresenceSample)
-        .where(DriverPresenceSample.user_id == int(user_id))
-        .order_by(DriverPresenceSample.recorded_at.desc(), DriverPresenceSample.id.desc())
-        .limit(limit)
-    ).all()
-    return [_sample_out(row) for row in rows]
+def list_presence_history(
+    db: Session,
+    user_id: int,
+    *,
+    limit: int = 15,
+    before_id: int | None = None,
+) -> tuple[list[dict], bool]:
+    uid = int(user_id)
+    stmt = select(DriverPresenceSample).where(DriverPresenceSample.user_id == uid)
+    if before_id is not None:
+        cursor = db.get(DriverPresenceSample, int(before_id))
+        if cursor is not None and int(cursor.user_id) == uid:
+            stmt = stmt.where(
+                or_(
+                    DriverPresenceSample.recorded_at < cursor.recorded_at,
+                    and_(
+                        DriverPresenceSample.recorded_at == cursor.recorded_at,
+                        DriverPresenceSample.id < int(cursor.id),
+                    ),
+                )
+            )
+        else:
+            stmt = stmt.where(DriverPresenceSample.id < int(before_id))
+    page_size = max(1, min(int(limit), 50))
+    rows = list(
+        db.scalars(
+            stmt.order_by(DriverPresenceSample.recorded_at.desc(), DriverPresenceSample.id.desc()).limit(page_size + 1)
+        ).all()
+    )
+    has_more = len(rows) > page_size
+    return [_sample_out(row) for row in rows[:page_size]], has_more
 
 
 def snapshot_all_drivers(db: Session) -> int:

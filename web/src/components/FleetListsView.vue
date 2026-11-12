@@ -53,8 +53,11 @@ const selectedDriverId = ref<number | null>(null);
 const selectedItemId = ref<number | null>(null);
 const itemDocs = ref<EntityDocsMap>(emptyEntityDocs("vehicle"));
 const driverDocs = ref<EntityDocsMap>(emptyEntityDocs("driver"));
+const HISTORY_PAGE = 15;
 const driverHistory = ref<DriverPresenceSample[]>([]);
 const driverHistoryLoading = ref(false);
+const driverHistoryMoreBusy = ref(false);
+const driverHistoryHasMore = ref(false);
 const driverHistoryError = ref("");
 const draft = ref("");
 const editId = ref<number | null>(null);
@@ -108,16 +111,17 @@ const selectedDriver = computed(
   () => (props.drivers || []).find((item) => item.id === selectedDriverId.value) || null
 );
 
-watch(
-  () => [selectedDriverId.value, props.drivers] as const,
-  () => {
-    if (selectedDriverId.value) {
-      void loadDriverHistory(selectedDriverId.value);
-      const driver = (props.drivers || []).find((item) => item.id === selectedDriverId.value);
-      if (driver) driverDocs.value = normalizeEntityDocs(driver.docs, "driver");
-    }
+watch(selectedDriverId, (userId) => {
+  driverHistory.value = [];
+  driverHistoryHasMore.value = false;
+  driverHistoryError.value = "";
+  if (!userId) {
+    return;
   }
-);
+  const driver = (props.drivers || []).find((item) => item.id === userId);
+  if (driver) driverDocs.value = normalizeEntityDocs(driver.docs, "driver");
+  void loadDriverHistory(userId, false);
+});
 
 watch(
   () => [selectedItemId.value, tab.value, props.vehicles, props.trailers] as const,
@@ -128,20 +132,43 @@ watch(
   }
 );
 
-async function loadDriverHistory(userId: number): Promise<void> {
+async function loadDriverHistory(userId: number, append: boolean): Promise<void> {
   if (!props.authToken) {
     return;
   }
-  driverHistoryLoading.value = true;
+  const lastId = append ? driverHistory.value[driverHistory.value.length - 1]?.id : undefined;
+  if (append) {
+    driverHistoryMoreBusy.value = true;
+  } else {
+    driverHistoryLoading.value = true;
+  }
   driverHistoryError.value = "";
   try {
-    const details = await getLiveDriver(props.authToken, userId);
-    driverHistory.value = details.history || [];
+    const details = await getLiveDriver(props.authToken, userId, {
+      limit: HISTORY_PAGE,
+      beforeId: lastId
+    });
+    if (selectedDriverId.value !== userId) {
+      return;
+    }
+    const page = details.history || [];
+    driverHistory.value = append ? [...driverHistory.value, ...page] : page;
+    driverHistoryHasMore.value = Boolean(details.history_has_more);
   } catch (error) {
+    if (selectedDriverId.value !== userId) {
+      return;
+    }
     driverHistoryError.value = (error as Error).message;
-    driverHistory.value = [];
+    if (!append) {
+      driverHistory.value = [];
+      driverHistoryHasMore.value = false;
+    }
   } finally {
-    driverHistoryLoading.value = false;
+    if (append) {
+      driverHistoryMoreBusy.value = false;
+    } else {
+      driverHistoryLoading.value = false;
+    }
   }
 }
 
@@ -174,6 +201,7 @@ function saveDriverDocs(): void {
 function closeDriver(): void {
   selectedDriverId.value = null;
   driverHistory.value = [];
+  driverHistoryHasMore.value = false;
   driverHistoryError.value = "";
 }
 
@@ -246,7 +274,6 @@ function remove(item: FleetItem): void {
       <template v-if="selectedDriver">
         <button class="ghost back" type="button" @click="closeDriver">← К списку</button>
         <h2>{{ selectedDriver.full_name || selectedDriver.login }}</h2>
-        <p class="hint">Опрос всех водителей — раз в 5 минут. Здесь история доступности и координат.</p>
         <div class="driver-head">
           <span class="conn" :class="connectionClass(selectedDriver.connection_status)">{{ selectedDriver.connection_label }}</span>
         </div>
@@ -258,7 +285,12 @@ function remove(item: FleetItem): void {
           <MapsCoordsLink :lat="selectedDriver.lat" :lng="selectedDriver.lng" />
           <span v-if="selectedDriver.location_at"> · {{ selectedDriver.location_at }}</span>
         </p>
-        <h3 class="history-title">История</h3>
+        <h3 class="history-title">Документы водителя</h3>
+        <p class="hint">Права, карта тахографа, медсправка, медкнижка и ДОПОГ. Подставляются в приёмку вахты.</p>
+        <EntityDocsForm v-model="driverDocs" kind="driver" :disabled="saving" />
+        <button type="button" class="primary" :disabled="saving" @click="saveDriverDocs">Сохранить документы</button>
+        <h3 class="history-title">История доступности</h3>
+        <p class="hint">Сначала самые свежие записи. Опрос всех водителей — раз в 5 минут.</p>
         <p v-if="driverHistoryLoading" class="meta">Загрузка…</p>
         <p v-if="driverHistoryError" class="error">{{ driverHistoryError }}</p>
         <ul v-if="driverHistory.length" class="history">
@@ -276,14 +308,19 @@ function remove(item: FleetItem): void {
           </li>
         </ul>
         <p v-else-if="!driverHistoryLoading" class="empty">История пока пустая — первая запись появится после опроса.</p>
-        <h3 class="history-title">Документы водителя</h3>
-        <p class="hint">Права, карта тахографа, медсправка, медкнижка и ДОПОГ. Подставляются в приёмку вахты.</p>
-        <EntityDocsForm v-model="driverDocs" kind="driver" :disabled="saving" />
-        <button type="button" class="primary" :disabled="saving" @click="saveDriverDocs">Сохранить документы</button>
+        <button
+          v-if="driverHistoryHasMore"
+          type="button"
+          class="secondary more-btn"
+          :disabled="driverHistoryMoreBusy || driverHistoryLoading"
+          @click="selectedDriver && loadDriverHistory(selectedDriver.id, true)"
+        >
+          {{ driverHistoryMoreBusy ? "Загрузка…" : "Ещё" }}
+        </button>
       </template>
       <template v-else>
         <h2>Водители</h2>
-        <p class="hint">«Доступен» — устройство на связи, даже если приложение свёрнуто. «Недоступен» — телефон не отвечает серверу. Нажмите на водителя, чтобы открыть историю.</p>
+        <p class="hint">«Доступен» — устройство на связи, даже если приложение свёрнуто. «Недоступен» — телефон не отвечает серверу. Нажмите на водителя, чтобы открыть документы и историю.</p>
         <p v-if="!(drivers || []).length && !loading" class="empty">Нет активных водителей</p>
         <ul class="list">
           <li v-for="driver in drivers || []" :key="driver.id">
@@ -395,6 +432,8 @@ function remove(item: FleetItem): void {
   border-color: #60a5fa;
 }
 .card {
+  display: grid;
+  gap: 0.4rem;
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 0.95rem;
@@ -585,6 +624,14 @@ input {
   background: var(--primary);
   color: #fff;
   padding: 0.4rem 0.7rem;
+}
+.more-btn {
+  width: auto;
+  justify-self: start;
+  margin-top: 0.45rem;
+}
+.more-btn:disabled {
+  opacity: 0.55;
 }
 .ghost {
   border: 1px solid var(--border-strong);

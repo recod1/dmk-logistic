@@ -1600,12 +1600,20 @@ export async function listLiveDrivers(token: string): Promise<LiveDriverCard[]> 
 
 export async function getLiveDriver(
   token: string,
-  userId: number
-): Promise<LiveDriverCard & { history: DriverPresenceSample[] }> {
-  return requestJson<LiveDriverCard & { history: DriverPresenceSample[] }>(`${API_BASE}/v1/fleet/drivers/${userId}`, {
-    cache: "no-store",
-    headers: { Authorization: `Bearer ${token}` }
-  });
+  userId: number,
+  opts?: { limit?: number; beforeId?: number }
+): Promise<LiveDriverCard & { history: DriverPresenceSample[]; history_has_more?: boolean }> {
+  const params = new URLSearchParams();
+  if (opts?.limit != null) params.set("history_limit", String(opts.limit));
+  if (opts?.beforeId != null) params.set("before_id", String(opts.beforeId));
+  const qs = params.toString();
+  return requestJson<LiveDriverCard & { history: DriverPresenceSample[]; history_has_more?: boolean }>(
+    `${API_BASE}/v1/fleet/drivers/${userId}${qs ? `?${qs}` : ""}`,
+    {
+      cache: "no-store",
+      headers: { Authorization: `Bearer ${token}` }
+    }
+  );
 }
 
 export async function reportPresence(
